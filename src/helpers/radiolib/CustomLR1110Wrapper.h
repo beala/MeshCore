@@ -1,16 +1,14 @@
 #pragma once
 
 #include "CustomLR1110.h"
-#include "RadioLibWrappers.h"
 #include "LR11x0Reset.h"
+#include "RadioLibWrappers.h"
 
 class CustomLR1110Wrapper : public RadioLibWrapper {
 public:
-  CustomLR1110Wrapper(CustomLR1110& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
+  CustomLR1110Wrapper(CustomLR1110 &radio, mesh::MainBoard &board) : RadioLibWrapper(radio, board) {}
   void doResetAGC() override { lr11x0ResetAGC((LR11x0 *)_radio, ((CustomLR1110 *)_radio)->getFreqMHz()); }
-  bool isReceivingPacket() override {
-    return ((CustomLR1110 *)_radio)->isReceiving();
-  }
+  bool isReceivingPacket() override { return ((CustomLR1110 *)_radio)->isReceiving(); }
   float getCurrentRSSI() override {
     float rssi = -110;
     ((CustomLR1110 *)_radio)->getRssiInst(&rssi);
@@ -19,16 +17,15 @@ public:
 
   void onSendFinished() override {
     RadioLibWrapper::onSendFinished();
-    _radio->setPreambleLength(LORA_SF <= 8 ? 32 : 16); // overcomes weird issues with small and big pkts
+    _radio->setPreambleLength(
+        getSpreadingFactor() <= 8 ? 32 : 16); // overcomes weird issues with small and big pkts
   }
 
   float getLastRSSI() const override { return ((CustomLR1110 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomLR1110 *)_radio)->getSNR(); }
 
-  void setRxBoostedGainMode(bool en) override {
-    ((CustomLR1110 *)_radio)->setRxBoostedGainMode(en);
-  }
-  bool getRxBoostedGainMode() const override {
-    return ((CustomLR1110 *)_radio)->getRxBoostedGainMode();
-  }
+  void setRxBoostedGainMode(bool en) override { ((CustomLR1110 *)_radio)->setRxBoostedGainMode(en); }
+  bool getRxBoostedGainMode() const override { return ((CustomLR1110 *)_radio)->getRxBoostedGainMode(); }
+
+  uint8_t getSpreadingFactor() const override { return ((CustomLR1110 *)_radio)->getSpreadingFactor(); };
 };
