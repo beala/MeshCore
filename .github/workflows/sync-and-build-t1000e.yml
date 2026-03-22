@@ -1,0 +1,106 @@
+name: Sync and Build T1000e
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Check every hour
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Upstream release tag to sync to (e.g., v1.2.3). Leave empty to auto-detect latest.'
+        required: false
+
+jobs:
+
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      upstream_tag: ${{ steps.check.outputs.upstream_tag }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+
+      - name: Check for new upstream release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ github.event.inputs.upstream_tag }}" ]; then
+            UPSTREAM_TAG="${{ github.event.inputs.upstream_tag }}"
+            echo "Using manually specified tag: $UPSTREAM_TAG"
+            echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            UPSTREAM_TAG=$(gh release view --repo meshcore-dev/MeshCore --json tagName -q .tagName)
+            echo "Latest upstream release: $UPSTREAM_TAG"
+            # Check if we already have a t1000e release for this upstream tag
+            if gh release view "t1000e-${UPSTREAM_TAG}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
+              echo "Already processed upstream tag $UPSTREAM_TAG — skipping."
+              echo "should_build=false" >> $GITHUB_OUTPUT
+            else
+              echo "New upstream release found: $UPSTREAM_TAG"
+              echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+              echo "should_build=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+    steps:
+
+      - name: Clone Repo
+        uses: actions/checkout@v4
+        with:
+          ref: beala/t1000e
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase onto upstream release
+        run: |
+          git remote add upstream https://github.com/meshcore-dev/MeshCore.git
+          git fetch upstream tag "$UPSTREAM_TAG" --no-tags
+          # t1000e-base marks the upstream commit your custom patches sit on top of.
+          # Rebase replays everything after t1000e-base onto the new release tag.
+          git rebase --onto "$UPSTREAM_TAG" t1000e-base
+
+      - name: Push release branch and tag
+        run: |
+          git push origin HEAD:refs/heads/t1000e-${UPSTREAM_TAG}
+          git tag t1000e-${UPSTREAM_TAG}
+          git push origin t1000e-${UPSTREAM_TAG}
+          git push origin refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}
+
+      - name: Setup Build Environment
+        uses: ./.github/actions/setup-build-environment
+
+      - name: Build T1000e Firmwares
+        env:
+          FIRMWARE_VERSION: ${{ env.UPSTREAM_TAG }}-beala
+        run: /usr/bin/env bash build.sh build-matching-firmwares t1000e_companion
+
+      - name: Upload Workflow Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: t1000e-firmwares-${{ env.UPSTREAM_TAG }}
+          path: out
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: t1000e-${{ env.UPSTREAM_TAG }}
+          name: T1000e ${{ env.UPSTREAM_TAG }}
+          body: |
+            This is firmware for the SenseCAP T1000-E based on the MeshCore upstream release [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
+
+            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_TAG }}
+          files: out/*
