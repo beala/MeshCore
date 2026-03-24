@@ -1,4 +1,4 @@
-name: Sync and Build T1000e
+name: Custom Builds
 
 permissions:
   contents: write
@@ -11,6 +11,10 @@ on:
       upstream_tag:
         description: 'Upstream release tag to sync to (e.g., v1.2.3). Leave empty to auto-detect latest.'
         required: false
+      force:
+        description: 'Force build even if a release already exists for this upstream tag.'
+        type: boolean
+        default: false
 
 jobs:
 
@@ -34,8 +38,8 @@ jobs:
           else
             UPSTREAM_TAG=$(gh release view --repo meshcore-dev/MeshCore --json tagName -q .tagName)
             echo "Latest upstream release: $UPSTREAM_TAG"
-            # Check if we already have a t1000e release for this upstream tag
-            if gh release view "t1000e-${UPSTREAM_TAG}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
+            # Check if we already have a release for this upstream tag
+            if [ "${{ github.event.inputs.force }}" != "true" ] && gh release view "t1000e-${UPSTREAM_TAG}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
               echo "Already processed upstream tag $UPSTREAM_TAG — skipping."
               echo "should_build=false" >> $GITHUB_OUTPUT
             else
@@ -45,7 +49,7 @@ jobs:
             fi
           fi
 
-  build:
+  build-t1000e:
     needs: check
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
