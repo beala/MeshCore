@@ -8,11 +8,11 @@ on:
     - cron: '0 */8 * * *'  # Check every 8 hours
   workflow_dispatch:
     inputs:
-      upstream_tag:
-        description: 'Upstream release tag to sync to (e.g., v1.2.3). Leave empty to auto-detect latest.'
+      upstream_version:
+        description: 'Upstream version to sync to (e.g., v1.2.3). Leave empty to auto-detect latest.'
         required: false
       force:
-        description: 'Force build even if a release already exists for this upstream tag.'
+        description: 'Force build even if a release already exists for this upstream version.'
         type: boolean
         default: false
 
@@ -21,7 +21,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     outputs:
-      upstream_tag: ${{ steps.check.outputs.upstream_tag }}
+      upstream_version: ${{ steps.check.outputs.upstream_version }}
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
 
@@ -30,21 +30,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ github.event.inputs.upstream_tag }}" ]; then
-            UPSTREAM_TAG="${{ github.event.inputs.upstream_tag }}"
-            echo "Using manually specified tag: $UPSTREAM_TAG"
-            echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          if [ -n "${{ github.event.inputs.upstream_version }}" ]; then
+            UPSTREAM_VERSION="${{ github.event.inputs.upstream_version }}"
+            echo "Using manually specified version: $UPSTREAM_VERSION"
+            echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
             echo "should_build=true" >> $GITHUB_OUTPUT
           else
-            UPSTREAM_TAG=$(gh release view --repo meshcore-dev/MeshCore --json tagName -q .tagName)
-            echo "Latest upstream release: $UPSTREAM_TAG"
-            # Check if we already have a release for this upstream tag
-            if [ "${{ github.event.inputs.force }}" != "true" ] && gh release view "t1000e-${UPSTREAM_TAG}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
-              echo "Already processed upstream tag $UPSTREAM_TAG — skipping."
+            # Get the latest version from repeater releases (strip the "repeater-" prefix)
+            LATEST_TAG=$(gh release list --repo meshcore-dev/MeshCore --json tagName -q '[.[] | select(.tagName | startswith("repeater-"))] | first | .tagName')
+            UPSTREAM_VERSION="${LATEST_TAG#repeater-}"
+            echo "Latest upstream version: $UPSTREAM_VERSION"
+            # Check if we already have releases for this version (all builds must exist to skip)
+            if [ "${{ github.event.inputs.force }}" != "true" ] \
+              && gh release view "t1000e-${UPSTREAM_VERSION}" --repo ${{ github.repository }} &>/dev/null 2>&1 \
+              && gh release view "rak3401-${UPSTREAM_VERSION}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
+              echo "Already processed upstream version $UPSTREAM_VERSION — skipping."
               echo "should_build=false" >> $GITHUB_OUTPUT
             else
-              echo "New upstream release found: $UPSTREAM_TAG"
-              echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+              echo "New upstream version found: $UPSTREAM_VERSION"
+              echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
               echo "should_build=true" >> $GITHUB_OUTPUT
             fi
           fi
@@ -54,7 +58,8 @@ jobs:
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     env:
-      UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+      UPSTREAM_VERSION: ${{ needs.check.outputs.upstream_version }}
+      UPSTREAM_TAG: companion-${{ needs.check.outputs.upstream_version }}
     steps:
 
       - name: Clone Repo
@@ -79,9 +84,9 @@ jobs:
 
       - name: Push release branch and tag
         run: |
-          git push origin HEAD:refs/heads/t1000e-${UPSTREAM_TAG}
-          git tag t1000e-${UPSTREAM_TAG}
-          git push origin t1000e-${UPSTREAM_TAG}
+          git push origin HEAD:refs/heads/t1000e-${UPSTREAM_VERSION}
+          git tag t1000e-${UPSTREAM_VERSION}
+          git push origin t1000e-${UPSTREAM_VERSION}
           git push origin refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}
 
       - name: Setup Build Environment
@@ -89,24 +94,24 @@ jobs:
 
       - name: Build T1000e Firmwares
         env:
-          FIRMWARE_VERSION: ${{ env.UPSTREAM_TAG }}-beala
+          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}-beala
         run: /usr/bin/env bash build.sh build-matching-firmwares t1000e_companion
 
       - name: Upload Workflow Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: t1000e-firmwares-${{ env.UPSTREAM_TAG }}
+          name: t1000e-firmwares-${{ env.UPSTREAM_VERSION }}
           path: out
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: t1000e-${{ env.UPSTREAM_TAG }}
-          name: T1000e ${{ env.UPSTREAM_TAG }}
+          tag_name: t1000e-${{ env.UPSTREAM_VERSION }}
+          name: T1000e ${{ env.UPSTREAM_VERSION }}
           body: |
             This is firmware for the SenseCAP T1000-E based on the MeshCore upstream release [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
 
-            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_TAG }}
+            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_VERSION }}
           files: out/*
 
   build-rak3401:
@@ -114,7 +119,8 @@ jobs:
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     env:
-      UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+      UPSTREAM_VERSION: ${{ needs.check.outputs.upstream_version }}
+      UPSTREAM_TAG: repeater-${{ needs.check.outputs.upstream_version }}
     steps:
 
       - name: Clone Repo
@@ -134,21 +140,21 @@ jobs:
 
       - name: Build RAK 3401 Repeater Firmware
         env:
-          FIRMWARE_VERSION: ${{ env.UPSTREAM_TAG }}-rak3401-rptr-obs
+          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}-rak3401-rptr-obs
           PLATFORMIO_BUILD_FLAGS: -DMESH_PACKET_LOGGING=1
         run: /usr/bin/env bash build.sh build-firmware RAK_3401_repeater
 
       - name: Upload Workflow Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rak3401-firmwares-${{ env.UPSTREAM_TAG }}
+          name: rak3401-firmwares-${{ env.UPSTREAM_VERSION }}
           path: out
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: rak3401-${{ env.UPSTREAM_TAG }}
-          name: RAK 3401 Repeater ${{ env.UPSTREAM_TAG }}
+          tag_name: rak3401-${{ env.UPSTREAM_VERSION }}
+          name: RAK 3401 Repeater ${{ env.UPSTREAM_VERSION }}
           body: |
             RAK 3401 repeater firmware with packet logging, based on MeshCore [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
           files: out/*
