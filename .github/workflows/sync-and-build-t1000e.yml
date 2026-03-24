@@ -5,7 +5,7 @@ permissions:
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Check every hour
+    - cron: '0 */8 * * *'  # Check every 8 hours
   workflow_dispatch:
     inputs:
       upstream_tag:
