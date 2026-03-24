@@ -126,14 +126,29 @@ jobs:
       - name: Clone Repo
         uses: actions/checkout@v4
         with:
+          ref: beala/rak3401
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout upstream tag
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase onto upstream release
         run: |
           git remote add upstream https://github.com/meshcore-dev/MeshCore.git
           git fetch upstream tag "$UPSTREAM_TAG" --no-tags
-          git checkout "$UPSTREAM_TAG"
+          # rak3401-base marks the upstream commit your custom patches sit on top of.
+          # Rebase replays everything after rak3401-base onto the new release tag.
+          git rebase --onto "$UPSTREAM_TAG" rak3401-base
+
+      - name: Push release branch and tag
+        run: |
+          git push origin HEAD:refs/heads/rak3401-${UPSTREAM_VERSION}
+          git tag rak3401-${UPSTREAM_VERSION}
+          git push origin rak3401-${UPSTREAM_VERSION}
+          git push origin refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}
 
       - name: Setup Build Environment
         uses: ./.github/actions/setup-build-environment
@@ -157,4 +172,6 @@ jobs:
           name: RAK 3401 Repeater ${{ env.UPSTREAM_VERSION }}
           body: |
             RAK 3401 repeater firmware with packet logging, based on MeshCore [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
+
+            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...rak3401-${{ env.UPSTREAM_VERSION }}
           files: out/*
