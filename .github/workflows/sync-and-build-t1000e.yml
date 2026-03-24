@@ -104,3 +104,47 @@ jobs:
 
             This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_TAG }}
           files: out/*
+
+  build-rak3401:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+    steps:
+
+      - name: Clone Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout upstream tag
+        run: |
+          git remote add upstream https://github.com/meshcore-dev/MeshCore.git
+          git fetch upstream tag "$UPSTREAM_TAG" --no-tags
+          git checkout "$UPSTREAM_TAG"
+
+      - name: Setup Build Environment
+        uses: ./.github/actions/setup-build-environment
+
+      - name: Build RAK 3401 Repeater Firmware
+        env:
+          FIRMWARE_VERSION: ${{ env.UPSTREAM_TAG }}-rak3401-rptr-obs
+          PLATFORMIO_BUILD_FLAGS: -DMESH_PACKET_LOGGING=1
+        run: /usr/bin/env bash build.sh build-firmware RAK_3401_repeater
+
+      - name: Upload Workflow Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rak3401-firmwares-${{ env.UPSTREAM_TAG }}
+          path: out
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rak3401-${{ env.UPSTREAM_TAG }}
+          name: RAK 3401 Repeater ${{ env.UPSTREAM_TAG }}
+          body: |
+            RAK 3401 repeater firmware with packet logging, based on MeshCore [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
+          files: out/*
