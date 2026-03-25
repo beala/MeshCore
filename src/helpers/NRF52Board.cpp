@@ -3,6 +3,7 @@
 
 #include <bluefruit.h>
 #include <nrf_soc.h>
+#include "nrf.h"
 
 static BLEDfu bledfu;
 
@@ -22,9 +23,18 @@ void NRF52Board::begin() {
   startup_reason = BD_STARTUP_NORMAL;
 }
 
-#ifdef NRF52_POWER_MANAGEMENT
-#include "nrf.h"
+void NRF52Board::rebootToDFU() {
+  uint8_t sd_enabled = 0;
+  sd_softdevice_is_enabled(&sd_enabled);
+  if (sd_enabled) {
+    sd_power_gpregret_set(0, 0x57);   // UF2 DFU magic for Adafruit bootloader
+  } else {
+    NRF_POWER->GPREGRET = 0x57;
+  }
+  NVIC_SystemReset();
+}
 
+#ifdef NRF52_POWER_MANAGEMENT
 // Power Management global variables
 uint32_t g_nrf52_reset_reason = 0;     // Reset/Startup reason
 uint8_t g_nrf52_shutdown_reason = 0;   // Shutdown reason
