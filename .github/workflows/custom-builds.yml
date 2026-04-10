@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       upstream_version: ${{ steps.check.outputs.upstream_version }}
+      build_suffix: ${{ steps.check.outputs.build_suffix }}
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
 
@@ -30,10 +31,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
+          BUILD_SUFFIX=""
+          if [ "${{ github.event.inputs.force }}" == "true" ]; then
+            BUILD_SUFFIX="-${TIMESTAMP}"
+          fi
+
           if [ -n "${{ github.event.inputs.upstream_version }}" ]; then
             UPSTREAM_VERSION="${{ github.event.inputs.upstream_version }}"
             echo "Using manually specified version: $UPSTREAM_VERSION"
             echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+            echo "build_suffix=$BUILD_SUFFIX" >> $GITHUB_OUTPUT
             echo "should_build=true" >> $GITHUB_OUTPUT
           else
             # Get the latest version from repeater releases (strip the "repeater-" prefix)
@@ -49,6 +57,7 @@ jobs:
             else
               echo "New upstream version found: $UPSTREAM_VERSION"
               echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+              echo "build_suffix=$BUILD_SUFFIX" >> $GITHUB_OUTPUT
               echo "should_build=true" >> $GITHUB_OUTPUT
             fi
           fi
@@ -59,6 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UPSTREAM_VERSION: ${{ needs.check.outputs.upstream_version }}
+      BUILD_SUFFIX: ${{ needs.check.outputs.build_suffix }}
       UPSTREAM_TAG: companion-${{ needs.check.outputs.upstream_version }}
     steps:
 
@@ -84,9 +94,10 @@ jobs:
 
       - name: Push release branch and tag
         run: |
-          git push origin HEAD:refs/heads/t1000e-${UPSTREAM_VERSION}
-          git tag t1000e-${UPSTREAM_VERSION}
-          git push origin t1000e-${UPSTREAM_VERSION}
+          BUILD_VERSION="${UPSTREAM_VERSION}${BUILD_SUFFIX}"
+          git push origin HEAD:refs/heads/t1000e-${BUILD_VERSION}
+          git tag t1000e-${BUILD_VERSION}
+          git push origin t1000e-${BUILD_VERSION}
           git push origin refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}
 
       - name: Setup Build Environment
@@ -94,24 +105,24 @@ jobs:
 
       - name: Build T1000e Firmwares
         env:
-          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}-beala
+          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}-beala
         run: /usr/bin/env bash build.sh build-matching-firmwares t1000e_companion
 
       - name: Upload Workflow Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: t1000e-firmwares-${{ env.UPSTREAM_VERSION }}
+          name: t1000e-firmwares-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           path: out
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: t1000e-${{ env.UPSTREAM_VERSION }}
-          name: T1000e ${{ env.UPSTREAM_VERSION }}
+          tag_name: t1000e-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
+          name: T1000e ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           body: |
             This is firmware for the SenseCAP T1000-E based on the MeshCore upstream release [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
 
-            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_VERSION }}
+            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           files: out/*
 
   build-rak3401:
@@ -120,6 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UPSTREAM_VERSION: ${{ needs.check.outputs.upstream_version }}
+      BUILD_SUFFIX: ${{ needs.check.outputs.build_suffix }}
       UPSTREAM_TAG: repeater-${{ needs.check.outputs.upstream_version }}
     steps:
 
@@ -145,9 +157,10 @@ jobs:
 
       - name: Push release branch and tag
         run: |
-          git push origin HEAD:refs/heads/rak3401-${UPSTREAM_VERSION}
-          git tag rak3401-${UPSTREAM_VERSION}
-          git push origin rak3401-${UPSTREAM_VERSION}
+          BUILD_VERSION="${UPSTREAM_VERSION}${BUILD_SUFFIX}"
+          git push origin HEAD:refs/heads/rak3401-${BUILD_VERSION}
+          git tag rak3401-${BUILD_VERSION}
+          git push origin rak3401-${BUILD_VERSION}
           git push origin refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}
 
       - name: Setup Build Environment
@@ -155,23 +168,23 @@ jobs:
 
       - name: Build RAK 3401 Repeater Firmware
         env:
-          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}-rak3401-rptr-obs
+          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}-rak3401-rptr-obs
           PLATFORMIO_BUILD_FLAGS: -DMESH_PACKET_LOGGING=1
         run: /usr/bin/env bash build.sh build-firmware RAK_3401_repeater
 
       - name: Upload Workflow Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rak3401-firmwares-${{ env.UPSTREAM_VERSION }}
+          name: rak3401-firmwares-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           path: out
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: rak3401-${{ env.UPSTREAM_VERSION }}
-          name: RAK 3401 Repeater ${{ env.UPSTREAM_VERSION }}
+          tag_name: rak3401-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
+          name: RAK 3401 Repeater ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           body: |
             RAK 3401 repeater firmware with packet logging, based on MeshCore [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
 
-            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...rak3401-${{ env.UPSTREAM_VERSION }}
+            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...rak3401-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           files: out/*
