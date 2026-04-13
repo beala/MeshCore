@@ -49,6 +49,9 @@ public:
   uint8_t path[MAX_PATH_SIZE];
   uint8_t payload[MAX_PACKET_PAYLOAD];
   int8_t _snr;
+  uint8_t _flags;   // metadata flags (not part of wire format)
+
+#define PACKET_FLAGS_FROM_BRIDGE  (1 << 0)
 
   /**
    * \brief calculate the hash of payload + type

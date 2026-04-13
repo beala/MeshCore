@@ -41,6 +41,7 @@ void BridgeBase::handleReceivedPacket(mesh::Packet *packet) {
 
   if (!_seen_packets.hasSeen(packet)) {
     // bridge_delay provides a buffer to prevent immediate processing conflicts in the mesh network.
+    packet->_flags |= PACKET_FLAGS_FROM_BRIDGE;
     _mgr->queueInbound(packet, millis() + _prefs->bridge_delay);
   } else {
     _mgr->free(packet);
