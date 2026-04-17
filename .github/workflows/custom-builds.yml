@@ -75,7 +75,7 @@ jobs:
       - name: Clone Repo
         uses: actions/checkout@v4
         with:
-          ref: beala/t1000e
+          ref: beala/custom
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,7 +90,7 @@ jobs:
           git fetch upstream tag "$UPSTREAM_TAG" --no-tags
           # t1000e-base marks the upstream commit your custom patches sit on top of.
           # Rebase replays everything after t1000e-base onto the new release tag.
-          git rebase --onto "$UPSTREAM_TAG" t1000e-base
+          git rebase --onto "$UPSTREAM_TAG" custom-base
 
       - name: Push release branch and tag
         run: |
@@ -138,7 +138,7 @@ jobs:
       - name: Clone Repo
         uses: actions/checkout@v4
         with:
-          ref: beala/rak3401
+          ref: beala/custom
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -153,7 +153,7 @@ jobs:
           git fetch upstream tag "$UPSTREAM_TAG" --no-tags
           # rak3401-base marks the upstream commit your custom patches sit on top of.
           # Rebase replays everything after rak3401-base onto the new release tag.
-          git rebase --onto "$UPSTREAM_TAG" rak3401-base
+          git rebase --onto "$UPSTREAM_TAG" custom-base
 
       - name: Push release branch and tag
         run: |
