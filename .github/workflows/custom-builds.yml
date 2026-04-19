@@ -166,11 +166,13 @@ jobs:
       - name: Setup Build Environment
         uses: ./.github/actions/setup-build-environment
 
-      - name: Build RAK 3401 Repeater Firmware
+      - name: Build Repeater Firmwares
         env:
-          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}-rak3401-rptr-obs
           PLATFORMIO_BUILD_FLAGS: -DMESH_PACKET_LOGGING=1
-        run: /usr/bin/env bash build.sh build-firmware RAK_3401_repeater
+        run: |
+          # build-firmware accepts multiple targets and only clears out/ once
+          FIRMWARE_VERSION=${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}-rptr-obs \
+            /usr/bin/env bash build.sh build-firmware RAK_3401_repeater Heltec_v3_repeater heltec_v4_repeater
 
       - name: Upload Workflow Artifacts
         uses: actions/upload-artifact@v4
@@ -182,9 +184,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: rak3401-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
-          name: RAK 3401 Repeater ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
+          name: Repeater ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           body: |
-            RAK 3401 repeater firmware with packet logging, based on MeshCore [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
+            Repeater firmware with packet logging, based on MeshCore [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
+
+            Includes builds for: RAK 3401, Heltec v3, Heltec v4.
 
             This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...rak3401-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           files: out/*
