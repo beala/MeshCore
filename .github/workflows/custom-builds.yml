@@ -48,10 +48,9 @@ jobs:
             LATEST_TAG=$(gh release list --repo meshcore-dev/MeshCore --json tagName -q '[.[] | select(.tagName | startswith("repeater-"))] | first | .tagName')
             UPSTREAM_VERSION="${LATEST_TAG#repeater-}"
             echo "Latest upstream version: $UPSTREAM_VERSION"
-            # Check if we already have releases for this version (all builds must exist to skip)
+            # Check if we already have a release for this version
             if [ "${{ github.event.inputs.force }}" != "true" ] \
-              && gh release view "t1000e-${UPSTREAM_VERSION}" --repo ${{ github.repository }} &>/dev/null 2>&1 \
-              && gh release view "rak3401-${UPSTREAM_VERSION}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
+              && gh release view "t1000e-${UPSTREAM_VERSION}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
               echo "Already processed upstream version $UPSTREAM_VERSION — skipping."
               echo "should_build=false" >> $GITHUB_OUTPUT
             else
@@ -127,72 +126,4 @@ jobs:
             This is firmware for the SenseCAP T1000-E and Heltec Mesh Node T1 based on the MeshCore upstream release [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
 
             This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
-          files: out/*
-
-  build-rak3401:
-    needs: check
-    if: needs.check.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    env:
-      UPSTREAM_VERSION: ${{ needs.check.outputs.upstream_version }}
-      BUILD_SUFFIX: ${{ needs.check.outputs.build_suffix }}
-      UPSTREAM_TAG: repeater-${{ needs.check.outputs.upstream_version }}
-    steps:
-
-      - name: Clone Repo
-        uses: actions/checkout@v4
-        with:
-          ref: beala/custom
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Rebase onto upstream release
-        run: |
-          git remote add upstream https://github.com/meshcore-dev/MeshCore.git
-          git fetch upstream tag "$UPSTREAM_TAG" --no-tags
-          # rak3401-base marks the upstream commit your custom patches sit on top of.
-          # Rebase replays everything after rak3401-base onto the new release tag.
-          git rebase --onto "$UPSTREAM_TAG" custom-base
-
-      - name: Push release branch and tag
-        run: |
-          BUILD_VERSION="${UPSTREAM_VERSION}${BUILD_SUFFIX}"
-          git push origin HEAD:refs/heads/rak3401-${BUILD_VERSION}
-          git tag rak3401-${BUILD_VERSION}
-          git push origin rak3401-${BUILD_VERSION}
-          git push origin refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}
-
-      - name: Setup Build Environment
-        uses: ./.github/actions/setup-build-environment
-
-      - name: Build Repeater Firmwares
-        env:
-          PLATFORMIO_BUILD_FLAGS: -DMESH_PACKET_LOGGING=1
-        run: |
-          # build-firmware accepts multiple targets and only clears out/ once
-          FIRMWARE_VERSION=${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}-rptr-obs \
-            /usr/bin/env bash build.sh build-firmware RAK_3401_repeater Heltec_v3_repeater heltec_v4_repeater
-
-      - name: Upload Workflow Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: rak3401-firmwares-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
-          path: out
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: rak3401-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
-          name: Repeater ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
-          body: |
-            Repeater firmware with packet logging, based on MeshCore [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
-
-            Includes builds for: RAK 3401, Heltec v3, Heltec v4.
-
-            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...rak3401-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           files: out/*
