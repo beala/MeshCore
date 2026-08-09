@@ -47,8 +47,8 @@ void T1Board::begin() {
   pinMode(PIN_SENSOR_EN, OUTPUT);
   digitalWrite(PIN_SENSOR_EN, PIN_SENSOR_EN_ACTIVE);
 
-  pinMode(PIN_BUZZER, OUTPUT);
-  digitalWrite(PIN_BUZZER, LOW);
+  // pinMode(PIN_BUZZER, OUTPUT);
+  // digitalWrite(PIN_BUZZER, LOW);
   pinMode(PIN_BUZZER_VOLTAGE_MULTIPLIER_1, OUTPUT);
   pinMode(PIN_BUZZER_VOLTAGE_MULTIPLIER_2, OUTPUT);
   digitalWrite(PIN_BUZZER_VOLTAGE_MULTIPLIER_1, HIGH);
@@ -112,8 +112,8 @@ void T1Board::variant_shutdown() {
   nrf_gpio_cfg_default(PIN_BUZZER_VOLTAGE_MULTIPLIER_1);
   nrf_gpio_cfg_default(PIN_BUZZER_VOLTAGE_MULTIPLIER_2);
 
-  pinMode(PIN_BUZZER, OUTPUT);
-  digitalWrite(PIN_BUZZER, LOW);
+  // pinMode(PIN_BUZZER, OUTPUT);
+  // digitalWrite(PIN_BUZZER, LOW);
 
   pinMode(PIN_SENSOR_EN, OUTPUT);
   digitalWrite(PIN_SENSOR_EN, !PIN_SENSOR_EN_ACTIVE);
