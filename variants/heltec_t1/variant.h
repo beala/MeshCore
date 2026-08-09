@@ -142,7 +142,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Buzzer
 
-#define PIN_BUZZER              (0 + 9)
+// #define PIN_BUZZER              (0 + 9)
 #define PIN_BUZZER_VOLTAGE_MULTIPLIER_1 (32 + 2)
 #define PIN_BUZZER_VOLTAGE_MULTIPLIER_2 (32 + 5)
 
