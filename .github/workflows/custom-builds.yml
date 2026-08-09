@@ -103,10 +103,14 @@ jobs:
       - name: Setup Build Environment
         uses: ./.github/actions/setup-build-environment
 
-      - name: Build T1000e Firmwares
+      - name: Build T1000e and Heltec T1 Firmwares
         env:
           FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}-beala
-        run: /usr/bin/env bash build.sh build-matching-firmwares t1000e_companion
+        run: |
+          # build-firmware accepts multiple targets and only clears out/ once
+          /usr/bin/env bash build.sh build-firmware \
+            t1000e_companion_radio_usb t1000e_companion_radio_ble \
+            Heltec_t1_companion_radio_usb Heltec_t1_companion_radio_ble
 
       - name: Upload Workflow Artifacts
         uses: actions/upload-artifact@v4
@@ -120,7 +124,7 @@ jobs:
           tag_name: t1000e-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           name: T1000e ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           body: |
-            This is firmware for the SenseCAP T1000-E based on the MeshCore upstream release [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
+            This is firmware for the SenseCAP T1000-E and Heltec Mesh Node T1 based on the MeshCore upstream release [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
 
             This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
           files: out/*
