@@ -70,17 +70,17 @@ bool ThinkNodeM1SensorManager::querySensors(uint8_t requester_permissions, Cayen
 }
 
 void ThinkNodeM1SensorManager::loop() {
-  static long next_gps_update = 0;
-  static long last_switch_check = 0;
+  static uint32_t last_gps_update = 0;
+  static uint32_t last_switch_check = 0;
 
   // Check GPS switch state every second
-  if (millis() - last_switch_check > 1000) {
+  if ((uint32_t)(millis() - last_switch_check) >= 1000) {
     bool current_switch_state = digitalRead(PIN_GPS_SWITCH);
-    
+
     // Detect switch state change
     if (current_switch_state != last_gps_switch_state) {
       last_gps_switch_state = current_switch_state;
-      
+
       if (current_switch_state == HIGH) {  // Switch is ON
         MESH_DEBUG_PRINTLN("GPS switch ON");
         start_gps();
@@ -89,7 +89,7 @@ void ThinkNodeM1SensorManager::loop() {
         stop_gps();
       }
     }
-    
+
     last_switch_check = millis();
   }
 
@@ -99,14 +99,14 @@ void ThinkNodeM1SensorManager::loop() {
 
   _location->loop();
 
-  if (millis() > next_gps_update) {
+  if ((uint32_t)(millis() - last_gps_update) >= 1000) {
     if (_location->isValid()) {
       node_lat = ((double)_location->getLatitude())/1000000.;
       node_lon = ((double)_location->getLongitude())/1000000.;
       node_altitude = ((double)_location->getAltitude()) / 1000.0;
       MESH_DEBUG_PRINTLN("lat %f lon %f", node_lat, node_lon);
     }
-    next_gps_update = millis() + 1000;
+    last_gps_update = millis();
   }
 }
 
