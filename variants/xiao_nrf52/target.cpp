@@ -19,7 +19,11 @@ AutoDiscoverRTCClock rtc_clock(fallback_clock);
 EnvironmentSensorManager sensors;
 
 bool radio_init() {
+#if !defined(KISS_UART_RX) && !defined(KISS_UART_TX)
+  // Wire is left uninitialized when native UART is used for the KISS modem
+  // (its pins are shared with I2C on this board) -- see XiaoNrf52Board.cpp.
   rtc_clock.begin(Wire);
+#endif
 
   return radio.std_init(&SPI);
 }
