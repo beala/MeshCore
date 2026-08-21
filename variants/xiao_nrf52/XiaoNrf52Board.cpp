@@ -44,11 +44,13 @@ void XiaoNrf52Board::begin() {
   pinMode(PIN_USER_BTN, INPUT_PULLUP);
 #endif
 
-#if defined(PIN_WIRE_SDA) && defined(PIN_WIRE_SCL)
+#if defined(PIN_WIRE_SDA) && defined(PIN_WIRE_SCL) && !defined(KISS_UART_RX) && !defined(KISS_UART_TX)
+  // On this board, I2C (Wire) shares its pins with native UART0 (see variant.h).
+  // When KISS_UART_RX/TX are set, those pins are used for the KISS modem's hardware
+  // UART instead, so I2C must stay uninitialized to avoid claiming the same pins.
   Wire.setPins(PIN_WIRE_SDA, PIN_WIRE_SCL);
-#endif
-
   Wire.begin();
+#endif
 
 #ifdef P_LORA_TX_LED
   pinMode(P_LORA_TX_LED, OUTPUT);

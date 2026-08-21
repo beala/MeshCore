@@ -87,7 +87,11 @@ void setup() {
   rng.begin(radio_driver.getRngSeed());
   loadOrCreateIdentity();
 
+#if !defined(KISS_UART_RX) || !defined(KISS_UART_TX)
+  // Skipped when using hardware UART: on boards where the UART and I2C pins are
+  // shared, Wire is left uninitialized, and probing it here would hang at boot.
   sensors.begin();
+#endif
 
 #if defined(KISS_UART_RX) && defined(KISS_UART_TX)
 #if defined(ESP32)
