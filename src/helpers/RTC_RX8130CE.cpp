@@ -34,17 +34,23 @@ bool RTC_RX8130CE::begin(TwoWire *wire) {
      */
     write_register(0x1C, 0x00);
 
-    /* 
+    /*
      * Flag Register register:
      *   [7]     VBLF: 0 ->  0
-     *   [6]     0: 0 -> 
-     *   [5]     UF: 0 -> 
+     *   [6]     0: 0 ->
+     *   [5]     UF: 0 ->
      *   [4]     TF: 0 ->
      *   [3]     AF: 0 -> 0
      *   [2]     RSF: 0 -> 0
      *   [1]     VLF: 0 -> 0
      *   [0]     VBFF: 0 -> 0
+     *
+     * VLF is set BY THE CHIP whenever backup power dropped low enough that
+     * the stored date/time can no longer be trusted. Read it before
+     * clearing so callers can detect and discard a bogus stored time
+     * instead of silently trusting it.
      */
+    _time_valid = (read_register(0x1D) & 0x02) == 0;
     write_register(0x1D, 0x00);
 
     /* 
@@ -103,6 +109,9 @@ bool RTC_RX8130CE::setTime(struct tm *t) {
     this->stop(true);
     i2c_dev->write(buf, sizeof(buf));
     this->stop(false);
+
+    write_register(0x1D, 0x00);  // clear VLF -- we just wrote a trustworthy time
+    _time_valid = true;
 
     return true;
 }

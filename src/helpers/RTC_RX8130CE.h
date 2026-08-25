@@ -9,6 +9,7 @@
 class RTC_RX8130CE : RTC_I2C {
     private:
         const uint8_t _addr = 0x32;
+        bool _time_valid = false;
 
         bool stop(bool stop);
 
@@ -16,6 +17,7 @@ class RTC_RX8130CE : RTC_I2C {
 
     public:
         bool begin(TwoWire *wire);
+        bool isTimeValid() const { return _time_valid; }  // false if VLF was set at begin() (backup power dropped, stored time untrustworthy)
         bool setTime(struct tm *t);
         bool getTime(struct tm *t);
         void adjust(DateTime t);

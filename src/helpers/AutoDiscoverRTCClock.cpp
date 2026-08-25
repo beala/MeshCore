@@ -48,9 +48,13 @@ void AutoDiscoverRTCClock::begin(TwoWire& wire) {
 
   if (i2c_probe(wire, RX8130CE_ADDRESS)) {
     MESH_DEBUG_PRINTLN("RX8130CE: Found");
-    rtc_8130.begin(&wire);
-    rtc_8130_success = true;
-    MESH_DEBUG_PRINTLN("RX8130CE: Initialized");
+    if (rtc_8130.begin(&wire)) {
+      rtc_8130_success = true;
+      MESH_DEBUG_PRINTLN("RX8130CE: Initialized");
+      if (!rtc_8130.isTimeValid()) {
+        MESH_DEBUG_PRINTLN("RX8130CE: stored time invalid (VLF set), using fallback clock until corrected");
+      }
+    }
   }
 }
 
@@ -74,7 +78,7 @@ uint32_t AutoDiscoverRTCClock::getCurrentTime() {
     return rtc_8563.now().unixtime();
   }
 
-  if (rtc_8130_success) {
+  if (rtc_8130_success && rtc_8130.isTimeValid()) {
     MESH_DEBUG_PRINTLN("RX8130CE: Reading time");
     return rtc_8130.now().unixtime();
   }
