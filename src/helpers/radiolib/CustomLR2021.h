@@ -9,9 +9,33 @@ class CustomLR2021 : public LR2021 {
   uint32_t _activityAt = 0;
   bool _headerSeen = false;
   bool _rx_boosted = false;
+  int8_t _txPower = 0;
+  bool _txPowerSet = false;
 
   public:
     CustomLR2021(Module *mod) : LR2021(mod) { irqDioNum = LR2021_IRQ_DIO; }
+
+    using LR2021::setOutputPower;
+    using LR2021::setFrequency;
+
+    int16_t setOutputPower(int8_t power) override {
+      // clip to the active PA's range (HF PA tops out at 12 dBm) rather than fail and keep the other band's PA
+      int8_t clipped = power;
+      checkOutputPower(power, &clipped);
+      int16_t state = LR2021::setOutputPower(clipped);
+      if (state == RADIOLIB_ERR_NONE) {
+        _txPower = power;
+        _txPowerSet = true;
+      }
+      return state;
+    }
+
+    int16_t setFrequency(float freq) override {
+      int16_t state = LR2021::setFrequency(freq);
+      // PA selection depends on the band, and set radio / tempradio don't call setTxPower
+      if (state == RADIOLIB_ERR_NONE && _txPowerSet) state = setOutputPower(_txPower);
+      return state;
+    }
 
     bool std_init(SPIClass* spi = NULL)
     {
