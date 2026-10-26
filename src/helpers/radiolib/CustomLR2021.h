@@ -143,6 +143,14 @@ class CustomLR2021 : public LR2021 {
       }
     #endif
 
+    #ifdef LR2021_OCP_LF
+      static_assert(LR2021_OCP_LF >= 0 && LR2021_OCP_LF <= 63, "LR2021_OCP_LF must be 0..63");
+      int16_t ocpState = setOcpLf(LR2021_OCP_LF);
+      if (ocpState != RADIOLIB_ERR_NONE) {
+        MESH_DEBUG_PRINTLN("LR2021: setting OCP LF threshold failed (%d)", ocpState);
+      }
+    #endif
+
       setCRC(2);
       explicitHeader();
 
@@ -226,6 +234,24 @@ class CustomLR2021 : public LR2021 {
     }
     int16_t clearChipErrors() {
       return SPIcommand(RADIOLIB_LR2021_CMD_CLEAR_ERRORS, true, NULL, 0);
+    }
+
+    int16_t writeRegMask32(uint32_t addr, uint32_t mask, uint32_t data) {
+      uint8_t buff[11] = {
+        (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr,
+        (uint8_t)(mask >> 24), (uint8_t)(mask >> 16), (uint8_t)(mask >> 8), (uint8_t)mask,
+        (uint8_t)(data >> 24), (uint8_t)(data >> 16), (uint8_t)(data >> 8), (uint8_t)data,
+      };
+      return SPIcommand(RADIOLIB_LR2021_CMD_WRITE_REG_MEM_MASK_32, true, buff, sizeof(buff));
+    }
+
+    // Set the sub-GHz PA over-current protection threshold (datasheet 23.7):
+    // unlock with 0xC0DE at 0xF40338, then write bits [24:19] of 0xF40300.
+    // level is 0..63; the power-on default is 41 (OCPLF typ. 164 mA, Table 3-22).
+    int16_t setOcpLf(uint8_t level) {
+      int16_t state = writeRegMask32(0x00F40338, 0x0000FFFF, 0xC0DE);
+      if (state != RADIOLIB_ERR_NONE) return state;
+      return writeRegMask32(0x00F40300, 0x3FUL << 19, ((uint32_t)(level & 0x3F)) << 19);
     }
 
     // Switch VDCC/VPAX from the LDOs (chip default) to the SIMO DC-DC converter.
