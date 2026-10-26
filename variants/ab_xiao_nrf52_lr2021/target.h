@@ -10,7 +10,7 @@
 #include <helpers/sensors/EnvironmentSensorManager.h>
 
 #ifdef DISPLAY_CLASS
-  #include <helpers/ui/NullDisplayDriver.h>
+  #include <helpers/ui/SSD1306Display.h>
   #include <helpers/ui/MomentaryButton.h>
   extern DISPLAY_CLASS display;
   #ifdef PIN_USER_BTN
