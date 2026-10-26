@@ -10,8 +10,89 @@ class CustomLR2021 : public LR2021 {
   bool _headerSeen = false;
   bool _rx_boosted = false;
 
+  // Sub-GHz PA table, one entry per dBm from -9 to +22 (RADIOLIB_LR2021_PA_TABLE_LEN entries).
+  // paVal is TX_POWER in 0.5 dB units.
+  // +10..+22 dBm come from the Semtech LR2021/22/12 datasheet Rev 2.2 (2026-08-08), Table 7-19
+  // (915 MHz reference design). Earlier revisions (1.1, 2.1: Table 7-16) list different values.
+  // RadioLib's default table tops out at TX_POWER = 17.5 dBm, so output stops rising above ~14 dBm
+  // (see https://github.com/jgromes/RadioLib/pull/1909).
+  // -9..+9 dBm are RadioLib's defaults, because the datasheet table doesn't cover them.
+  static LR2021PaTableEntry_t* semtechPaTableLf() {
+    static LR2021PaTableEntry_t table[RADIOLIB_LR2021_PA_TABLE_LEN] = {
+      { .paDutyCycle = 1, .paSlices = 1, .paVal = 8 },   // -9
+      { .paDutyCycle = 2, .paSlices = 2, .paVal = 1 },   // -8
+      { .paDutyCycle = 2, .paSlices = 2, .paVal = 3 },   // -7
+      { .paDutyCycle = 2, .paSlices = 2, .paVal = 5 },   // -6
+      { .paDutyCycle = 1, .paSlices = 2, .paVal = 13 },  // -5
+      { .paDutyCycle = 2, .paSlices = 1, .paVal = 13 },  // -4
+      { .paDutyCycle = 2, .paSlices = 2, .paVal = 11 },  // -3
+      { .paDutyCycle = 2, .paSlices = 2, .paVal = 13 },  // -2
+      { .paDutyCycle = 3, .paSlices = 1, .paVal = 12 },  // -1
+      { .paDutyCycle = 1, .paSlices = 1, .paVal = 18 },  //  0
+      { .paDutyCycle = 1, .paSlices = 1, .paVal = 20 },  //  1
+      { .paDutyCycle = 1, .paSlices = 1, .paVal = 23 },  //  2
+      { .paDutyCycle = 1, .paSlices = 1, .paVal = 27 },  //  3
+      { .paDutyCycle = 1, .paSlices = 1, .paVal = 33 },  //  4
+      { .paDutyCycle = 1, .paSlices = 2, .paVal = 26 },  //  5
+      { .paDutyCycle = 1, .paSlices = 2, .paVal = 31 },  //  6
+      { .paDutyCycle = 1, .paSlices = 3, .paVal = 27 },  //  7
+      { .paDutyCycle = 1, .paSlices = 1, .paVal = 37 },  //  8
+      { .paDutyCycle = 1, .paSlices = 2, .paVal = 40 },  //  9
+      { .paDutyCycle = 1, .paSlices = 2, .paVal = 32 },  // 10  (TX_POWER 16)
+      { .paDutyCycle = 2, .paSlices = 4, .paVal = 30 },  // 11  (TX_POWER 15)
+      { .paDutyCycle = 4, .paSlices = 2, .paVal = 30 },  // 12  (TX_POWER 15)
+      { .paDutyCycle = 4, .paSlices = 2, .paVal = 32 },  // 13  (TX_POWER 16)
+      { .paDutyCycle = 4, .paSlices = 2, .paVal = 34 },  // 14  (TX_POWER 17)
+      { .paDutyCycle = 4, .paSlices = 5, .paVal = 34 },  // 15  (TX_POWER 17)
+      { .paDutyCycle = 7, .paSlices = 3, .paVal = 34 },  // 16  (TX_POWER 17)
+      { .paDutyCycle = 7, .paSlices = 3, .paVal = 36 },  // 17  (TX_POWER 18)
+      { .paDutyCycle = 5, .paSlices = 7, .paVal = 38 },  // 18  (TX_POWER 19)
+      { .paDutyCycle = 5, .paSlices = 7, .paVal = 40 },  // 19  (TX_POWER 20)
+      { .paDutyCycle = 5, .paSlices = 6, .paVal = 42 },  // 20  (TX_POWER 21)
+      { .paDutyCycle = 5, .paSlices = 6, .paVal = 44 },  // 21  (TX_POWER 22)
+      { .paDutyCycle = 7, .paSlices = 7, .paVal = 44 },  // 22  (TX_POWER 22)
+    };
+    return table;
+  }
+
+  // 2.4 GHz PA table, one entry per dBm from -19 to +12 (RADIOLIB_LR2021_PA_TABLE_LEN entries).
+  // paDutyCycle is PA_HF_DUTY_CYCLE - 16 (RadioLib adds 16 back; only 16..31 are allowed).
+  // paVal is TX_POWER in 0.5 dB units.
+  // 0..+12 dBm come from datasheet Rev 2.2 Table 7-21 (2445 MHz reference design).
+  // -19..-1 dBm are RadioLib's defaults, because the datasheet table doesn't cover them.
+  static LR2021PaTableEntry_t* semtechPaTableHf() {
+    #define HF_ENTRY(duty, half_dbm) { .paDutyCycle = (duty) - 16, .paSlices = RADIOLIB_LR2021_PA_LF_SLICES_UNUSED, .paVal = (half_dbm) }
+    static LR2021PaTableEntry_t table[RADIOLIB_LR2021_PA_TABLE_LEN] = {
+      HF_ENTRY(16, -38), HF_ENTRY(16, -36), HF_ENTRY(16, -34), HF_ENTRY(16, -32),  // -19..-16
+      HF_ENTRY(16, -30), HF_ENTRY(16, -28), HF_ENTRY(16, -26), HF_ENTRY(16, -24),  // -15..-12
+      HF_ENTRY(16, -22), HF_ENTRY(16, -20), HF_ENTRY(16, -18), HF_ENTRY(16, -16),  // -11..-8
+      HF_ENTRY(16, -14), HF_ENTRY(16, -12), HF_ENTRY(16, -10), HF_ENTRY(16, -8),   //  -7..-4
+      HF_ENTRY(16, -6),  HF_ENTRY(16, -4),  HF_ENTRY(16, -2),                      //  -3..-1
+      HF_ENTRY(28, 2),   //  0  (TX_POWER 1)
+      HF_ENTRY(28, 4),   //  1  (TX_POWER 2)
+      HF_ENTRY(27, 6),   //  2  (TX_POWER 3)
+      HF_ENTRY(27, 8),   //  3  (TX_POWER 4)
+      HF_ENTRY(27, 10),  //  4  (TX_POWER 5)
+      HF_ENTRY(27, 12),  //  5  (TX_POWER 6)
+      HF_ENTRY(27, 14),  //  6  (TX_POWER 7)
+      HF_ENTRY(27, 16),  //  7  (TX_POWER 8)
+      HF_ENTRY(30, 20),  //  8  (TX_POWER 10)
+      HF_ENTRY(30, 22),  //  9  (TX_POWER 11)
+      HF_ENTRY(30, 24),  // 10  (TX_POWER 12)
+      HF_ENTRY(27, 24),  // 11  (TX_POWER 12)
+      HF_ENTRY(16, 24),  // 12  (TX_POWER 12)
+    };
+    #undef HF_ENTRY
+    return table;
+  }
+
   public:
-    CustomLR2021(Module *mod) : LR2021(mod) { irqDioNum = LR2021_IRQ_DIO; }
+    CustomLR2021(Module *mod) : LR2021(mod) {
+      irqDioNum = LR2021_IRQ_DIO;
+      // set before begin(), which applies the initial TX power
+      setPaTable(semtechPaTableLf(), false);
+      setPaTable(semtechPaTableHf(), true);
+    }
 
     bool std_init(SPIClass* spi = NULL)
     {
@@ -55,6 +136,13 @@ class CustomLR2021 : public LR2021 {
         return false;  // fail
       }
     
+    #ifdef LR2021_USE_SIMO
+      int16_t simoState = setRegModeSimo();
+      if (simoState != RADIOLIB_ERR_NONE) {
+        MESH_DEBUG_PRINTLN("LR2021: SetRegMode(SIMO_NORMAL) failed (%d), staying on LDO", simoState);
+      }
+    #endif
+
       setCRC(2);
       explicitHeader();
 
@@ -128,4 +216,25 @@ class CustomLR2021 : public LR2021 {
 
 
     uint8_t getSpreadingFactor() const { return spreadingFactor; }
+
+    // RadioLib's getErrors()/clearErrors() are private, so issue the commands directly.
+    int16_t getChipErrors(uint16_t* err) {
+      uint8_t buff[2] = { 0 };
+      int16_t state = SPIcommand(RADIOLIB_LR2021_CMD_GET_ERRORS, false, buff, sizeof(buff));
+      if (err) *err = ((uint16_t)buff[0] << 8) | buff[1];
+      return state;
+    }
+    int16_t clearChipErrors() {
+      return SPIcommand(RADIOLIB_LR2021_CMD_CLEAR_ERRORS, true, NULL, 0);
+    }
+
+    // Switch VDCC/VPAX from the LDOs (chip default) to the SIMO DC-DC converter.
+    // Datasheet 6.3.18: one byte, 0x02 = SIMO_NORMAL; only valid in Standby RC.
+    // Requires the SIMO inductor on LXA/LXB.
+    int16_t setRegModeSimo() {
+      int16_t state = standby(RADIOLIB_LR2021_STANDBY_RC);
+      if (state != RADIOLIB_ERR_NONE) return state;
+      uint8_t simo = RADIOLIB_LR2021_REG_MODE_SIMO_NORMAL;
+      return SPIcommand(RADIOLIB_LR2021_CMD_SET_REG_MODE, true, &simo, 1);
+    }
 };
