@@ -3,7 +3,9 @@
 #include <helpers/TxtDataHelpers.h>
 #include "../MyMesh.h"
 
-#define AUTO_OFF_MILLIS     15000   // 15 seconds
+#ifndef AUTO_OFF_MILLIS
+  #define AUTO_OFF_MILLIS     15000   // 15 seconds
+#endif
 #define BOOT_SCREEN_MILLIS   3000   // 3 seconds
 
 #if defined(PIN_STATUS_LED) || defined(PIN_STATUS_LED_R)
@@ -501,6 +503,7 @@ void UITask::loop() {
 
       _next_refresh = millis() + 1000;   // refresh every second
     }
+#if AUTO_OFF_MILLIS > 0
 #ifdef KEEP_DISPLAY_ON_USB
     // Opt-in: refresh the auto-off deadline while externally powered, so the
     // timer counts from the moment external power is removed. Off by default
@@ -513,6 +516,7 @@ void UITask::loop() {
     if (millis() > _auto_off) {
       _display->turnOff();
     }
+#endif
   }
 }
 
