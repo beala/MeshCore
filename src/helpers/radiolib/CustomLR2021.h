@@ -254,6 +254,34 @@ class CustomLR2021 : public LR2021 {
       return writeRegMask32(0x00F40300, 0x3FUL << 19, ((uint32_t)(level & 0x3F)) << 19);
     }
 
+    // Full receiver reset: warm sleep to power down the analog front end, wake, recalibrate,
+    // then restore what sleep loses. Warm sleep keeps RAM (command settings) but not
+    // registers (datasheet 23.6), so register-based settings must be written again.
+    int16_t resetAGC() {
+      sleep(true, 0);
+      int16_t state = standby(RADIOLIB_LR2021_STANDBY_RC, true);  // NOP pulls NSS low to wake
+      if (state != RADIOLIB_ERR_NONE) return state;
+
+      uint8_t blocks = RADIOLIB_LR2021_CALIBRATE_ALL;
+      state = SPIcommand(RADIOLIB_LR2021_CMD_CALIBRATE, true, &blocks, 1);
+      if (state != RADIOLIB_ERR_NONE) return state;
+
+      // Calibrate resets image calibration to its default band, so redo the front end
+      // for the operating frequency (same encoding as RadioLib's setFrequency()).
+      uint16_t fe = (uint16_t)((freqMHz / 4.0f) + 0.5f);
+      fe |= (freqMHz > RADIOLIB_LR2021_LF_CUTOFF_FREQ) ? RADIOLIB_LR2021_CALIBRATE_FE_HF_PATH : RADIOLIB_LR2021_CALIBRATE_FE_LF_PATH;
+      uint8_t feBuff[6] = { (uint8_t)(fe >> 8), (uint8_t)fe, 0, 0, 0, 0 };
+      state = SPIcommand(RADIOLIB_LR2021_CMD_CALIB_FRONT_END, true, feBuff, sizeof(feBuff));
+      if (state != RADIOLIB_ERR_NONE) return state;
+
+      // register-based settings
+      state = setSpreadingFactor(spreadingFactor);  // also rewrites the SF6 legacy-mode register bit
+    #ifdef LR2021_OCP_LF
+      if (state == RADIOLIB_ERR_NONE) state = setOcpLf(LR2021_OCP_LF);
+    #endif
+      return state;
+    }
+
     // Switch VDCC/VPAX from the LDOs (chip default) to the SIMO DC-DC converter.
     // Datasheet 6.3.18: one byte, 0x02 = SIMO_NORMAL; only valid in Standby RC.
     // Requires the SIMO inductor on LXA/LXB.
