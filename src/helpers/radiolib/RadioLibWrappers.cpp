@@ -190,6 +190,7 @@ uint32_t RadioLibWrapper::getEstAirtimeFor(int len_bytes) {
 }
 
 bool RadioLibWrapper::startSendRaw(const uint8_t* bytes, int len) {
+  _board->notifyTxStart();
 #ifdef P_LORA_TX_LED
   int tx_led_idle = digitalRead(P_LORA_TX_LED);   // the LED is off between transmits
 #endif
@@ -206,6 +207,7 @@ bool RadioLibWrapper::startSendRaw(const uint8_t* bytes, int len) {
   MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startTransmit(%d)", err);
   idle();   // trigger another startRecv()
   _board->onAfterTransmit();
+  _board->notifyTxComplete(millis());
   return false;
 }
 
@@ -221,6 +223,7 @@ bool RadioLibWrapper::isSendComplete() {
 void RadioLibWrapper::onSendFinished() {
   _radio->finishTransmit();
   _board->onAfterTransmit();
+  _board->notifyTxComplete(millis());
   state = STATE_IDLE;
 }
 

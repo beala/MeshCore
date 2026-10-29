@@ -431,7 +431,8 @@ void UITask::userLedHandler() {
     next_change = cur_time;
   }
 
-  if (cur_time > next_batt_check) {   // battery reads are not free, keep them rare
+  // battery reads are not free, keep them rare; skip during/just after TX (voltage sag)
+  if (cur_time > next_batt_check && _board->isBattReadSafe(cur_time)) {
     low_batt = _board->getBattMilliVolts() < LOW_BATT_MILLIVOLTS;
     next_batt_check = cur_time + 60000;
   }
