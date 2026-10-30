@@ -55,6 +55,16 @@ class CustomLR2021 : public LR2021 {
         return false;  // fail
       }
     
+    #ifdef LR2021_USE_SIMO
+      // Power VDCC/VPAX from the SIMO DC-DC converter instead of the LDOs (chip default).
+      // Needs the SIMO inductor on LXA/LXB. SetRegMode is only accepted in Standby RC.
+      int16_t simoState = standby(RADIOLIB_LR2021_STANDBY_RC);
+      if (simoState == RADIOLIB_ERR_NONE) simoState = setRegulatorDCDC();
+      if (simoState != RADIOLIB_ERR_NONE) {
+        MESH_DEBUG_PRINTLN("LR2021: switching to SIMO DC-DC failed (%d), staying on LDO", simoState);
+      }
+    #endif
+
       setCRC(2);
       explicitHeader();
 
