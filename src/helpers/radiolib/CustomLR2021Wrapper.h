@@ -96,6 +96,22 @@ public:
     _radio->setPreambleLength(preambleLengthForSF(getSpreadingFactor())); // overcomes weird issues with small and big pkts
   }
 
+  int recvRaw(uint8_t* bytes, int sz) override {
+    int len = RadioLibWrapper::recvRaw(bytes, sz);
+    if (len > 0) {
+      uint8_t step = 0;
+      if (((CustomLR2021 *)_radio)->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
+        _last_gain_step = step;
+        MESH_DEBUG_PRINTLN("LR2021: RX gain step G%u", step);
+      } else {
+        _last_gain_step = -1;
+      }
+    }
+    return len;
+  }
+
+  int getLastGainStep() const override { return _last_gain_step; }
+
   float getLastRSSI() const override { return ((CustomLR2021 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomLR2021 *)_radio)->getSNR(); }
 
@@ -113,6 +129,7 @@ public:
   }
 
   protected:
+    int _last_gain_step = -1;
     LR2021LoRaSideDetector_t _sideDet[3];
     size_t _numSideDet = 0;
 

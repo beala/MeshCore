@@ -78,6 +78,11 @@ public:
 
   virtual float getLastRSSI() const { return 0; }
   virtual float getLastSNR() const { return 0; }
+
+  /**
+   * \returns  the receiver gain step used for the last received packet, or -1 if the radio can't report it.
+   */
+  virtual int getLastGainStep() const { return -1; }
 };
 
 /**

@@ -128,4 +128,15 @@ class CustomLR2021 : public LR2021 {
 
 
     uint8_t getSpreadingFactor() const { return spreadingFactor; }
+
+    // Reads the AGC gain step (1..13, 13 = most gain) the chip used for the last received LoRa packet.
+    // GetLoraPacketStatus returns 10 bytes but the datasheet documents only the first 9; RadioLib
+    // reads 6. Byte 9 holds the gain step, which the ROM latches from the AGC when the packet arrives.
+    // Undocumented; found by disassembling the LR2021 ROM and confirmed with SetAgcGainManual (0x021A).
+    int16_t readLastGainStep(uint8_t* step) {
+      uint8_t buff[10] = { 0 };
+      int16_t state = SPIcommand(RADIOLIB_LR2021_CMD_GET_LORA_PACKET_STATUS, false, buff, sizeof(buff));
+      if (state == RADIOLIB_ERR_NONE && step) *step = buff[9];
+      return state;
+    }
 };
