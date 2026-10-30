@@ -12,6 +12,54 @@
 #endif
 
 class CustomLR2021Wrapper : public RadioLibWrapper {
+#ifdef MESH_DEBUG
+  // Logs fault IRQs, decoded chip errors, and a missing TX_DONE after a transmit.
+  void logTxFaults() {
+    CustomLR2021* radio = (CustomLR2021 *)_radio;
+    uint32_t irq = radio->getIrqStatus();
+
+    static const struct { uint32_t bit; const char* name; } irqFaults[] = {
+      { RADIOLIB_LR2021_IRQ_EOL,        "EOL" },
+      { RADIOLIB_LR2021_IRQ_PA_OCP_OVP, "PA_OCP_OVP" },
+      { RADIOLIB_LR2021_IRQ_ERROR,      "ERROR" },
+      { RADIOLIB_LR2021_IRQ_CMD_ERROR,  "CMD_ERROR" },
+      { RADIOLIB_LR2021_IRQ_TIMEOUT,    "TIMEOUT" },
+    };
+    bool fault = !(irq & RADIOLIB_LR2021_IRQ_TX_DONE);
+    for (auto& f : irqFaults) {
+      if (irq & f.bit) fault = true;
+    }
+    if (!fault) return;
+
+    MESH_DEBUG_PRINTLN("LR2021: TX fault, irq=0x%08lX", (unsigned long)irq);
+    if (!(irq & RADIOLIB_LR2021_IRQ_TX_DONE)) MESH_DEBUG_PRINTLN("LR2021:   TX_DONE not set");
+    for (auto& f : irqFaults) {
+      if (irq & f.bit) MESH_DEBUG_PRINTLN("LR2021:   %s", f.name);
+    }
+
+    // ERROR is a summary bit; the cause is in the chip's error register
+    if (irq & RADIOLIB_LR2021_IRQ_ERROR) {
+      static const char* const errNames[16] = {
+        "HF_XOSC_START", "LF_XOSC_START", "PLL_LOCK", "LF_RC_CALIB",
+        "HF_RC_CALIB", "PLL_CALIB", "AAF_CALIB", "IMG_CALIB",
+        "CHIP_BUSY", "RXFREQ_NO_FE_CAL", "MEAS_UNIT_ADC_CALIB", "PA_OFFSET_CALIB",
+        "PPF_CALIB", "SRC_CALIB", "SRC_SATURATION_CALIB", "SRC_TOLERANCE_CALIB",
+      };
+      uint16_t err = 0;
+      int16_t state = radio->getErrors(&err);
+      if (state != RADIOLIB_ERR_NONE) {
+        MESH_DEBUG_PRINTLN("LR2021:   getErrors failed (%d)", state);
+        return;
+      }
+      MESH_DEBUG_PRINTLN("LR2021:   chip errors=0x%04X", err);
+      for (int i = 0; i < 16; i++) {
+        if (err & (1u << i)) MESH_DEBUG_PRINTLN("LR2021:     %s", errNames[i]);
+      }
+      radio->clearErrors();
+    }
+  }
+#endif
+
 public:
   CustomLR2021Wrapper(CustomLR2021& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
 
@@ -92,6 +140,9 @@ public:
   }
 
   void onSendFinished() override {
+  #ifdef MESH_DEBUG
+    logTxFaults();  // must run before finishTransmit() clears all IRQ flags
+  #endif
     RadioLibWrapper::onSendFinished();
     _radio->setPreambleLength(preambleLengthForSF(getSpreadingFactor())); // overcomes weird issues with small and big pkts
   }
