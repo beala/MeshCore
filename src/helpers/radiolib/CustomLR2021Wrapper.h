@@ -108,6 +108,15 @@ public:
     return status == RADIOLIB_ERR_NONE;
   }
 
+  // The generic doResetAGC() only calls sleep(), and nothing wakes the LR2021 again,
+  // so every later command times out (-705) until reboot.
+  void doResetAGC() override {
+    int16_t state = ((CustomLR2021 *)_radio)->resetAGC();
+    if (state != RADIOLIB_ERR_NONE) {
+      MESH_DEBUG_PRINTLN("LR2021: AGC reset failed (%d)", state);
+    }
+  }
+
   bool getRxBoostedGainMode() const override {
     return ((CustomLR2021 *)_radio)->getRxBoostedGainMode();
   }
