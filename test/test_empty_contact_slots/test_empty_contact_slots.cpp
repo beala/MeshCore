@@ -2,7 +2,6 @@
 #include <cstring>
 #include <ed_25519.h>
 
-#include "Dispatcher.cpp"
 #include "Mesh.cpp"
 #include "helpers/AdvertDataHelpers.cpp"
 #include "helpers/BaseChatMesh.cpp"
