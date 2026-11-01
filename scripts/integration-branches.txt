@@ -6,7 +6,11 @@
 beala/custom
 
 # Upstream PR branches
-beala/parser-fixes
+# Parser security fixes: frozen copy of meshcore-dev/MeshCore#3521 (commit cc15f68)
+# plus a commit restoring the packet version check. Replaces beala/parser-fixes,
+# which does a subset of the same changes and stays as its own upstream PR branch.
+# To pick up a new revision of the PR, rebuild this branch from the PR head and reapply the fix.
+beala/pr-3521
 beala/lr2021-pram-patch
 beala/fix-lr2021-pa-table
 beala/fix-lr2021-agc-reset
