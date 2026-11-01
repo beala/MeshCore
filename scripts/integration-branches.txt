@@ -1,0 +1,16 @@
+# Branches merged into beala/integration, in this order, on top of upstream dev.
+# Edit this list and rerun scripts/rebuild-integration.sh.
+# Drop a branch once upstream has merged it (the script reports those as "already in base").
+
+# Personal device tweaks (buzzer / status LED)
+beala/custom
+
+# Upstream PR branches
+beala/parser-fixes
+beala/lr2021-pram-patch
+beala/fix-lr2021-pa-table
+beala/fix-lr2021-agc-reset
+beala/fix-lr2021-rx-boost-status
+beala/lr2021-simo-flag
+beala/lr2021-tx-fault-log
+beala/lr2021-rx-gain-step

@@ -1,5 +1,8 @@
 name: Custom Builds
 
+# Rebuilds beala/integration (upstream dev + the branches in scripts/integration-branches.txt),
+# then builds firmware for the boards below and publishes a release whenever it changed.
+
 permissions:
   contents: write
 
@@ -8,122 +11,105 @@ on:
     - cron: '0 */8 * * *'  # Check every 8 hours
   workflow_dispatch:
     inputs:
-      upstream_version:
-        description: 'Upstream version to sync to (e.g., v1.2.3). Leave empty to auto-detect latest.'
-        required: false
       force:
-        description: 'Force build even if a release already exists for this upstream version.'
+        description: 'Build and release even if nothing changed since the last release.'
         type: boolean
         default: false
 
+env:
+  TARGETS: >-
+    Heltec_t1_companion_radio_usb Heltec_t1_companion_radio_ble
+    MeshTracker_X1_companion_radio_usb MeshTracker_X1_companion_radio_ble
+    RAK_WisMesh_Tag_companion_radio_usb RAK_WisMesh_Tag_companion_radio_ble
+    t1000e_companion_radio_usb t1000e_companion_radio_ble
+    Heltec_v3_companion_radio_usb Heltec_v3_companion_radio_ble
+    heltec_v4_companion_radio_usb heltec_v4_companion_radio_ble
+    RAK_3401_repeater
+
 jobs:
 
-  check:
+  build:
     runs-on: ubuntu-latest
-    outputs:
-      upstream_version: ${{ steps.check.outputs.upstream_version }}
-      build_suffix: ${{ steps.check.outputs.build_suffix }}
-      should_build: ${{ steps.check.outputs.should_build }}
-    steps:
-
-      - name: Check for new upstream release
-        id: check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
-          BUILD_SUFFIX=""
-          if [ "${{ github.event.inputs.force }}" == "true" ]; then
-            BUILD_SUFFIX="-${TIMESTAMP}"
-          fi
-
-          if [ -n "${{ github.event.inputs.upstream_version }}" ]; then
-            UPSTREAM_VERSION="${{ github.event.inputs.upstream_version }}"
-            echo "Using manually specified version: $UPSTREAM_VERSION"
-            echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
-            echo "build_suffix=$BUILD_SUFFIX" >> $GITHUB_OUTPUT
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          else
-            # Get the latest version from repeater releases (strip the "repeater-" prefix)
-            LATEST_TAG=$(gh release list --repo meshcore-dev/MeshCore --json tagName -q '[.[] | select(.tagName | startswith("repeater-"))] | first | .tagName')
-            UPSTREAM_VERSION="${LATEST_TAG#repeater-}"
-            echo "Latest upstream version: $UPSTREAM_VERSION"
-            # Check if we already have a release for this version
-            if [ "${{ github.event.inputs.force }}" != "true" ] \
-              && gh release view "t1000e-${UPSTREAM_VERSION}" --repo ${{ github.repository }} &>/dev/null 2>&1; then
-              echo "Already processed upstream version $UPSTREAM_VERSION — skipping."
-              echo "should_build=false" >> $GITHUB_OUTPUT
-            else
-              echo "New upstream version found: $UPSTREAM_VERSION"
-              echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
-              echo "build_suffix=$BUILD_SUFFIX" >> $GITHUB_OUTPUT
-              echo "should_build=true" >> $GITHUB_OUTPUT
-            fi
-          fi
-
-  build-t1000e:
-    needs: check
-    if: needs.check.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    env:
-      UPSTREAM_VERSION: ${{ needs.check.outputs.upstream_version }}
-      BUILD_SUFFIX: ${{ needs.check.outputs.build_suffix }}
-      UPSTREAM_TAG: companion-${{ needs.check.outputs.upstream_version }}
     steps:
 
       - name: Clone Repo
         uses: actions/checkout@v4
         with:
-          ref: beala/custom
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN cannot push commits that change workflow files. If upstream changes one
+          # and the push is refused, add a personal access token as the INTEGRATION_PUSH_TOKEN secret.
+          token: ${{ secrets.INTEGRATION_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Rebase onto upstream release
-        run: |
-          git remote add upstream https://github.com/meshcore-dev/MeshCore.git
-          git fetch upstream tag "$UPSTREAM_TAG" --no-tags
-          # t1000e-base marks the upstream commit your custom patches sit on top of.
-          # Rebase replays everything after t1000e-base onto the new release tag.
-          git rebase --onto "$UPSTREAM_TAG" custom-base
+      - name: Rebuild integration branch
+        id: rebuild
+        run: scripts/rebuild-integration.sh --push
 
-      - name: Push release branch and tag
+      - name: Check for existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.rebuild.outputs.sha }}
         run: |
-          BUILD_VERSION="${UPSTREAM_VERSION}${BUILD_SUFFIX}"
-          git push origin HEAD:refs/heads/t1000e-${BUILD_VERSION}
-          git tag t1000e-${BUILD_VERSION}
-          git push origin t1000e-${BUILD_VERSION}
-          git push origin refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}
+          SHORT=${SHA:0:7}
+          TAG="beala-${SHORT}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "short=$SHORT" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.inputs.force }}" != "true" ] \
+            && gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
+            echo "Release $TAG already exists; nothing to do."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Describe build
+        if: steps.check.outputs.should_build == 'true'
+        id: describe
+        run: |
+          # Name builds after the latest upstream release they are newer than, e.g. v1.18.0-dev-beala
+          LATEST=$(git ls-remote --tags --refs upstream 'companion-v*' | sed 's#.*/companion-##' | sort -V | tail -1)
+          echo "firmware_version=${LATEST}-dev-beala" >> $GITHUB_OUTPUT
+          echo "date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          {
+            echo 'notes<<EOF'
+            echo "Firmware built from upstream \`dev\` ($(git rev-parse --short upstream/dev)) plus these branches:"
+            echo
+            git log --first-parent --merges --reverse --format='%s' upstream/dev..HEAD \
+              | sed -n "s/^Merge branch '\(.*\)' into .*/\1/p" \
+              | while read -r b; do echo "- [$b](https://github.com/${GITHUB_REPOSITORY}/tree/$b)"; done
+            echo
+            echo "Full diff against upstream: https://github.com/${GITHUB_REPOSITORY}/compare/$(git rev-parse upstream/dev)...${{ steps.rebuild.outputs.sha }}"
+            echo EOF
+          } >> $GITHUB_OUTPUT
 
       - name: Setup Build Environment
+        if: steps.check.outputs.should_build == 'true'
         uses: ./.github/actions/setup-build-environment
 
-      - name: Build T1000e and Heltec T1 Firmwares
+      - name: Build Firmwares
+        if: steps.check.outputs.should_build == 'true'
         env:
-          FIRMWARE_VERSION: ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}-beala
-        run: |
-          # build-firmware accepts multiple targets and only clears out/ once
-          /usr/bin/env bash build.sh build-firmware \
-            t1000e_companion_radio_usb t1000e_companion_radio_ble \
-            Heltec_t1_companion_radio_usb Heltec_t1_companion_radio_ble
+          FIRMWARE_VERSION: ${{ steps.describe.outputs.firmware_version }}
+        run: /usr/bin/env bash build.sh build-firmware $TARGETS
 
       - name: Upload Workflow Artifacts
+        if: steps.check.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: t1000e-firmwares-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
+          name: firmwares-${{ steps.check.outputs.tag }}
           path: out
 
       - name: Create Release
+        if: steps.check.outputs.should_build == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: t1000e-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
-          name: T1000e ${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
-          body: |
-            This is firmware for the SenseCAP T1000-E and Heltec Mesh Node T1 based on the MeshCore upstream release [${{ env.UPSTREAM_TAG }}](https://github.com/meshcore-dev/MeshCore/releases/tag/${{ env.UPSTREAM_TAG }}).
-
-            This includes the following custom changes: https://github.com/${{ github.repository }}/compare/${{ env.UPSTREAM_TAG }}...t1000e-${{ env.UPSTREAM_VERSION }}${{ env.BUILD_SUFFIX }}
+          tag_name: ${{ steps.check.outputs.tag }}
+          target_commitish: ${{ steps.rebuild.outputs.sha }}
+          name: ${{ steps.describe.outputs.date }} (${{ steps.check.outputs.short }})
+          body: ${{ steps.describe.outputs.notes }}
           files: out/*
