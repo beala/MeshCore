@@ -107,6 +107,7 @@ public:
    * \brief  restore this packet from a blob (as created using writeTo())
    * \param  src  (IN) buffer containing blob
    * \param  len  the packet length (as returned by writeTo())
+   * \returns true for a complete packet with a nonempty payload; on failure this packet is unchanged
    */
   bool readFrom(const uint8_t src[], uint8_t len);
 };

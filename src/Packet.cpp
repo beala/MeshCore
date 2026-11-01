@@ -63,25 +63,31 @@ uint8_t Packet::writeTo(uint8_t dest[]) const {
 }
 
 bool Packet::readFrom(const uint8_t src[], uint8_t len) {
-  uint8_t i = 0;
-  header = src[i++];
-  if (hasTransportCodes()) {
-    memcpy(&transport_codes[0], &src[i], 2); i += 2;
-    memcpy(&transport_codes[1], &src[i], 2); i += 2;
+  if (src == nullptr || len < 2) return false;
+
+  // Validate the complete frame before reading optional fields or modifying this packet.
+  const uint8_t route = src[0] & PH_ROUTE_MASK;
+  const bool has_transport = route == ROUTE_TYPE_TRANSPORT_FLOOD || route == ROUTE_TYPE_TRANSPORT_DIRECT;
+  const size_t path_offset = has_transport ? 5 : 1;
+  if (len <= path_offset) return false;
+
+  const uint8_t encoded_path_len = src[path_offset];
+  if (!isValidPathLen(encoded_path_len)) return false;
+  const size_t path_bytes = (encoded_path_len & 63) * ((encoded_path_len >> 6) + 1);
+  const size_t payload_offset = path_offset + 1 + path_bytes;
+  if (payload_offset >= len || len - payload_offset > sizeof(payload)) return false;
+
+  header = src[0];
+  if (has_transport) {
+    memcpy(transport_codes, &src[1], sizeof(transport_codes));
   } else {
     transport_codes[0] = transport_codes[1] = 0;
   }
-  path_len = src[i++];
-  if (!isValidPathLen(path_len)) return false;   // bad encoding
-
-  uint8_t bl = getPathByteLen();
-  memcpy(path, &src[i], bl); i += bl;
-
-  if (i >= len) return false;   // bad encoding
-  payload_len = len - i;
-  if (payload_len > sizeof(payload)) return false;  // bad encoding
-  memcpy(payload, &src[i], payload_len); //i += payload_len;
-  return true;   // success
+  path_len = encoded_path_len;
+  memcpy(path, &src[path_offset + 1], path_bytes);
+  payload_len = len - payload_offset;
+  memcpy(payload, &src[payload_offset], payload_len);
+  return true;
 }
 
 }
