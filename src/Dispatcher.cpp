@@ -151,6 +151,11 @@ bool Dispatcher::tryParsePacket(Packet* pkt, const uint8_t* raw, int len) {
     MESH_DEBUG_PRINTLN("%s Dispatcher::checkRecv(): partial, corrupt, or unsupported packet received, len=%d", getLogDateTime(), len);
     return false;
   }
+  // Packet treats the header as plain bytes, so the protocol version is checked here.
+  if (pkt->getPayloadVer() > PAYLOAD_VER_1) {
+    MESH_DEBUG_PRINTLN("%s Dispatcher::checkRecv(): unsupported packet version", getLogDateTime());
+    return false;
+  }
   return true;
 }
 
