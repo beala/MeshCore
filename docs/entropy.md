@@ -21,7 +21,7 @@ The first time a radio starts, it makes its own private key, a secret number tha
 
 The random Bluetooth pairing PIN shown on companion boards with a screen comes from the same generator. Every PIN is equally likely.
 
-On a companion radio, `get entropy` shows which sources worked at this boot and whether there was enough for keys.
+On a companion radio, `get entropy` shows whether the hardware generator works, whether there's enough trusted randomness for new keys, and whether the current key was loaded from flash or made this boot (and saved). A radio that already has a key doesn't collect anything at boot, so the command tests the hardware generator when you run it.
 
 ## Technical details
 

@@ -955,7 +955,9 @@ void MyMesh::begin() {
     }
     if (EntropyPool::readyForKeys()) {
       _store->saveMainIdentity(self_id);
+      _identity_state = 1;
     } else {
+      _identity_state = 2;
       // not enough trusted entropy: use this key for now but don't keep it, try again next boot
       MESH_DEBUG_PRINTLN("WARNING: not enough entropy for a permanent key (%d bits), identity not saved",
                          EntropyPool::creditedBits());
@@ -2131,11 +2133,17 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     return true;
   }
   if (strcmp(command, "get entropy") == 0) {
-    static const char* st[] = { "failed", "not used", "ok" };
-    sprintf(reply, "> hardware RNG: %s, radio noise: %s (%u samples), credited %d bits: %s",
-            st[EntropyPool::hardwareStatus() + 1], st[EntropyPool::radioStatus() + 1],
-            (unsigned)EntropyPool::radioSamples(), EntropyPool::creditedBits(),
-            EntropyPool::readyForKeys() ? "enough for keys" : "NOT enough for keys");
+    // Nothing is collected at boot when the key is just loaded, so test the hardware RNG now if it
+    // hasn't been (cheap). The radio isn't sampled here: that would stop it receiving.
+    if (EntropyPool::hardwareStatus() == 0) EntropyPool::addHardware();
+    static const char* hw[] = { "failed/untrusted", "not tried", "ok" };
+    static const char* key[] = { "loaded from flash", "made this boot, saved", "made this boot, NOT saved" };
+    const char* radio = EntropyPool::radioSamples() == 0 ? "not sampled this boot"
+                      : EntropyPool::radioStatus() == 1 ? "ok" : "failed health tests";
+    sprintf(reply, "> hardware RNG: %s; radio noise: %s; %d bits, %s; key: %s",
+            hw[EntropyPool::hardwareStatus() + 1], radio, EntropyPool::creditedBits(),
+            EntropyPool::readyForKeys() ? "enough for new keys" : "NOT enough for new keys",
+            key[_identity_state]);
     return true;
   }
 

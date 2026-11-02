@@ -54,7 +54,14 @@ Since version 1.18 meshcore companion radio firmware has a CLI interface, which 
 **Usage:**
 - `get entropy`
 
-**Note:** Shows which random sources worked at this boot and whether there was enough trusted randomness to keep keys, for example `> hardware RNG: ok, radio noise: not used (64 samples), credited 512 bits: enough for keys`. If it says `NOT enough for keys`, a newly created identity wasn't saved and a new one will be made at the next boot. See [entropy.md](entropy.md).
+**Note:** Shows the random sources, whether there's enough trusted randomness to make new keys, and where the current key came from. For example:
+
+`> hardware RNG: ok; radio noise: not sampled this boot; 256 bits, enough for new keys; key: loaded from flash`
+
+- If the hardware RNG hasn't been used yet this boot, it's tested when you run the command. The radio is only sampled when a new key is made, because sampling stops it receiving.
+- `key: made this boot, NOT saved` means there wasn't enough trusted randomness. The key is only used until the next boot, when the radio tries again.
+
+See [entropy.md](entropy.md).
 
 ---
 

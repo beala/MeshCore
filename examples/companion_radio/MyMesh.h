@@ -241,6 +241,7 @@ private:
 
   DataStore* _store;
   NodePrefs _prefs;
+  uint8_t _identity_state = 0;   // 0 loaded from flash, 1 made this boot and saved, 2 made but not saved
   uint32_t pending_login;
   uint32_t pending_status;
   uint32_t pending_telemetry, pending_discovery;   // pending _TELEMETRY_REQ
