@@ -290,6 +290,14 @@ uint8_t MyMesh::getExtraAckTransmitCount() const {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  // Apps only understand v1: show them v2 packets we can decrypt in their v1 form, so they still
+  // recognise echoes of their own messages ("heard N repeats").
+  uint8_t legacy[MAX_TRANS_UNIT];
+  int legacy_len;
+  if (_serial->isConnected() && toLegacyForm(raw, len, legacy, legacy_len)) {
+    raw = legacy;
+    len = legacy_len;
+  }
   if (_serial->isConnected() && len + 3 <= MAX_FRAME_SIZE) {
     int i = 0;
     out_frame[i++] = PUSH_CODE_LOG_RX_DATA;

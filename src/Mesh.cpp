@@ -39,6 +39,62 @@ int Mesh::decryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* en
   return len;
 }
 
+bool Mesh::toLegacyForm(const uint8_t* raw, int len, uint8_t* out, int& out_len) {
+  if (len <= 0 || len > MAX_TRANS_UNIT) return false;
+  Packet pkt;
+  if (!pkt.readFrom(raw, (uint8_t)len)) return false;
+
+  uint8_t type = pkt.getPayloadType();
+  uint8_t data[MAX_PACKET_PAYLOAD];
+  int hdr;                      // bytes before the encrypted envelope
+  uint8_t ctx[3];
+  int ctx_len;
+  if (type == PAYLOAD_TYPE_GRP_TXT || type == PAYLOAD_TYPE_GRP_DATA) {
+    hdr = PATH_HASH_SIZE;
+    ctx[0] = type; ctx[1] = pkt.payload[0]; ctx_len = 2;
+  } else if (type == PAYLOAD_TYPE_TXT_MSG || type == PAYLOAD_TYPE_REQ || type == PAYLOAD_TYPE_RESPONSE || type == PAYLOAD_TYPE_PATH) {
+    hdr = 2 * PATH_HASH_SIZE;
+    ctx[0] = type; ctx[1] = pkt.payload[0]; ctx[2] = pkt.payload[1]; ctx_len = 3;
+  } else {
+    return false;
+  }
+  int env_len = pkt.payload_len - hdr;
+  if (env_len <= 0 || CryptoV2::isLegacyEnvelope(env_len)) return false;   // not v2
+  const uint8_t* env = &pkt.payload[hdr];
+
+  uint8_t secret[PUB_KEY_SIZE];
+  int plen = 0;
+  if (hdr == PATH_HASH_SIZE) {
+    GroupChannel channels[4];
+    int num = searchChannelsByHash(&pkt.payload[0], channels, 4);
+    for (int j = 0; j < num && plen <= 0; j++) {
+      plen = CryptoV2::open(channels[j].secret, data, env, env_len, ctx, ctx_len);
+      if (plen > 0) memcpy(secret, channels[j].secret, PUB_KEY_SIZE);
+    }
+  } else {
+    // to us: the sender is a contact; from us (our own packet, heard again): the recipient is
+    const uint8_t* peer_hash = self_id.isHashMatch(&pkt.payload[0]) ? &pkt.payload[1]
+                             : self_id.isHashMatch(&pkt.payload[1]) ? &pkt.payload[0] : NULL;
+    if (peer_hash == NULL) return false;
+    int num = searchPeersByHash(peer_hash);
+    for (int j = 0; j < num && plen <= 0; j++) {
+      getPeerSharedSecret(secret, j);
+      plen = CryptoV2::open(secret, data, env, env_len, ctx, ctx_len);
+    }
+  }
+  if (plen <= 0) return false;
+
+  if (hdr + CIPHER_MAC_SIZE + ((plen + CIPHER_BLOCK_SIZE - 1) / CIPHER_BLOCK_SIZE) * CIPHER_BLOCK_SIZE > MAX_PACKET_PAYLOAD) {
+    memset(data, 0, sizeof(data));
+    return false;
+  }
+  pkt.payload_len = hdr + Utils::encryptThenMAC(secret, &pkt.payload[hdr], data, plen);
+  memset(data, 0, sizeof(data));
+  memset(secret, 0, sizeof(secret));
+  out_len = pkt.writeTo(out);
+  return true;
+}
+
 bool Mesh::fitsPayload(const uint8_t* secret, int header_len, int data_len) {
   if (getCryptoPolicy(secret) == CRYPTO_POLICY_LEGACY) return true;   // v1 callers keep their existing checks
   return header_len + data_len + CryptoV2::OVERHEAD_MAX <= MAX_PACKET_PAYLOAD;

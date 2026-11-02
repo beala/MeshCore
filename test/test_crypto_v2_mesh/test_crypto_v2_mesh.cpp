@@ -313,6 +313,67 @@ TEST_F(Pair, ChannelV2AndV2Only) {
   EXPECT_EQ(2u, bob.node.group_messages.size());
 }
 
+// ---- v2 packets translated to v1 for apps (toLegacyForm) ----
+
+static std::vector<uint8_t> raw(const mesh::Packet* p) {
+  uint8_t buf[MAX_TRANS_UNIT];
+  int n = p->writeTo(buf);
+  return std::vector<uint8_t>(buf, buf + n);
+}
+
+TEST_F(Pair, LegacyFormOfDmIsWhatAV1SenderSends) {
+  mesh::Packet* v1 = dm("same words");
+  alice.node.policies.set(a2b, CRYPTO_POLICY_V2);
+  mesh::Packet* v2 = dm("same words");
+  ASSERT_NE(raw(v1), raw(v2));
+
+  uint8_t out[MAX_TRANS_UNIT];
+  int n = 0;
+  auto r2 = raw(v2);
+  ASSERT_TRUE(bob.node.toLegacyForm(r2.data(), r2.size(), out, n));     // a DM to us
+  EXPECT_EQ(raw(v1), std::vector<uint8_t>(out, out + n));
+  n = 0;
+  ASSERT_TRUE(alice.node.toLegacyForm(r2.data(), r2.size(), out, n));   // our own DM, heard again
+  EXPECT_EQ(raw(v1), std::vector<uint8_t>(out, out + n));
+
+  auto r1 = raw(v1);
+  EXPECT_FALSE(bob.node.toLegacyForm(r1.data(), r1.size(), out, n));    // already v1: left alone
+  delete v1;
+  delete v2;
+}
+
+TEST_F(Pair, LegacyFormOfChannelMessageIsWhatAV1SenderSends) {
+  mesh::GroupChannel ch;
+  memset(&ch, 0, sizeof(ch));
+  for (int i = 0; i < 16; i++) ch.secret[i] = (uint8_t)(0x60 + i);
+  mesh::Utils::sha256(ch.hash, sizeof(ch.hash), ch.secret, 16);
+  alice.node.channel = ch;
+  alice.node.has_channel = true;
+
+  uint8_t data[64];
+  memset(data, 0, 5);
+  memcpy(&data[5], "Alice: hello pod", 16);
+  mesh::Packet* v1 = alice.node.createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, ch, data, 21);
+  alice.node.policies.set(ch.secret, CRYPTO_POLICY_V2);
+  mesh::Packet* v2 = alice.node.createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, ch, data, 21);
+  v1->header |= ROUTE_TYPE_FLOOD;
+  v2->header |= ROUTE_TYPE_FLOOD;
+  v2->path_len = v1->path_len = 2;   // as heard after two repeaters
+  v1->path[0] = v2->path[0] = 0xA1;
+  v1->path[1] = v2->path[1] = 0xB2;
+
+  uint8_t out[MAX_TRANS_UNIT];
+  int n = 0;
+  auto r2 = raw(v2);
+  ASSERT_TRUE(alice.node.toLegacyForm(r2.data(), r2.size(), out, n));
+  EXPECT_EQ(raw(v1), std::vector<uint8_t>(out, out + n));
+
+  // a node without the channel can't translate it
+  EXPECT_FALSE(bob.node.toLegacyForm(r2.data(), r2.size(), out, n));
+  delete v1;
+  delete v2;
+}
+
 // ---- malformed / edge-case plaintexts (an authenticated sender can still send garbage) ----
 
 struct Malformed : Pair {

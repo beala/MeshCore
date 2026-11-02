@@ -35,6 +35,7 @@ v2 replaces this with **AES-SIV**, a published, standardized encryption method (
 - **You choose who gets v2.** Each contact and channel starts on the old format (`legacy`). You switch one to `v2` once the other side has v2 firmware (for a channel, every member).
 - **It upgrades by itself, but never downgrades.** If a contact sends you a v2 message, your radio starts replying in v2. Nothing ever switches a contact back to the old format automatically, so an attacker can't trick your radio into falling back by jamming replies.
 - **`v2only` locks out the old format.** Set a contact or channel to `v2only` and your radio refuses old-format messages from it entirely, closing off the weak 2-byte seal for good.
+- **Your phone app keeps working.** Phone apps only understand the old format. Your radio translates v2 messages it can read into the old format before passing them to the app's packet log, so features like "heard N repeats" still recognise your messages.
 
 ### What it costs
 
@@ -186,6 +187,15 @@ A valid tag proves the sender knows the key, not that the payload is well formed
   - Signed text messages shorter than 9 bytes are dropped.
   - The ACK's extra attempt byte is read only when the message carries one. Otherwise it is 0.
 - **Testing.** `test_crypto_v2_mesh` runs under AddressSanitizer and UBSan. It sends random plaintexts of every encrypted type and length through the receive path.
+
+## Apps that only understand v1
+
+Companion apps get every packet the radio hears (`PUSH_CODE_LOG_RX_DATA`). They use these packets to spot echoes of the user's own messages ("heard N repeats"), and they can only decode v1. So before logging a packet to the app, the companion calls `Mesh::toLegacyForm()`. If the packet is v2, and the radio holds its key, it is rewritten as v1. The key can come from a channel the radio has, or from a contact for a direct packet to us or one of our own heard again.
+- The header, transport codes and path are kept.
+- The envelope is replaced by the v1 encryption of the same plaintext. v1 encryption is deterministic, so the result is byte-identical to what a v1 sender transmits, including its packet hash.
+- Packets the radio can't decrypt, and v1 packets, are passed through unchanged.
+
+This only happens on the local link to the app, which already has the keys and the plaintext. Nothing v1 is transmitted over the air.
 
 ## Timing and side channels
 

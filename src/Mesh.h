@@ -199,6 +199,16 @@ public:
   RNG* getRNG() const { return _rng; }
   RTCClock* getRTCClock() const { return _rtc; }
 
+  /**
+   * \brief  If raw is a v2 packet this node can decrypt (a channel it has, or a direct packet to or from
+   *         one of its contacts), rewrite it as the v1 packet the same message would have been: same
+   *         header, path and plaintext, v1 encryption. v1 is deterministic, so this is byte-identical to
+   *         what a v1 sender transmits. For apps that only understand v1, e.g. to spot echoes.
+   * \param  out  receives the rewritten packet (MAX_TRANS_UNIT bytes)
+   * \returns  true if out was written
+   */
+  bool toLegacyForm(const uint8_t* raw, int len, uint8_t* out, int& out_len);
+
   Packet* createAdvert(const LocalIdentity& id, const uint8_t* app_data=NULL, size_t app_data_len=0);
   Packet* createDatagram(uint8_t type, const Identity& dest, const uint8_t* secret, const uint8_t* data, size_t len);
   Packet* createAnonDatagram(uint8_t type, const LocalIdentity& sender, const Identity& dest, const uint8_t* secret, const uint8_t* data, size_t data_len);
