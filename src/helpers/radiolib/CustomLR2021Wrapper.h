@@ -12,12 +12,35 @@
 #endif
 
 class CustomLR2021Wrapper : public RadioLibWrapper {
-#ifdef MESH_DEBUG
-  // Logs fault IRQs, decoded chip errors, and a missing TX_DONE after a transmit.
-  void logTxFaults() {
+  // IRQ bits that mean a transmit went wrong (a missing TX_DONE is also a fault)
+  static constexpr uint32_t TX_FAULT_IRQS = RADIOLIB_LR2021_IRQ_EOL | RADIOLIB_LR2021_IRQ_PA_OCP_OVP |
+      RADIOLIB_LR2021_IRQ_ERROR | RADIOLIB_LR2021_IRQ_CMD_ERROR | RADIOLIB_LR2021_IRQ_TIMEOUT;
+
+  // Checks how the last transmit ended. Returns true on a fault, with the IRQ status and, when the
+  // ERROR bit is set, the chip error register (which is then cleared). Must run before
+  // finishTransmit(), which clears all IRQ flags.
+  bool checkTxFault(uint32_t* irq_out, uint16_t* err_out) {
     CustomLR2021* radio = (CustomLR2021 *)_radio;
     uint32_t irq = radio->getIrqStatus();
+    uint16_t err = 0;
+    bool fault = !(irq & RADIOLIB_LR2021_IRQ_TX_DONE) || (irq & TX_FAULT_IRQS);
+    if (fault && (irq & RADIOLIB_LR2021_IRQ_ERROR)) {
+      // ERROR is a summary bit; the cause is in the chip's error register
+      int16_t state = radio->getErrors(&err);
+      if (state == RADIOLIB_ERR_NONE) {
+        radio->clearErrors();
+      } else {
+        MESH_DEBUG_PRINTLN("LR2021:   getErrors failed (%d)", state);
+      }
+    }
+    *irq_out = irq;
+    *err_out = err;
+    return fault;
+  }
 
+#ifdef MESH_DEBUG
+  // Logs a TX fault: the fault IRQs, a missing TX_DONE, and the decoded chip errors.
+  static void logTxFault(uint32_t irq, uint16_t err) {
     static const struct { uint32_t bit; const char* name; } irqFaults[] = {
       { RADIOLIB_LR2021_IRQ_EOL,        "EOL" },
       { RADIOLIB_LR2021_IRQ_PA_OCP_OVP, "PA_OCP_OVP" },
@@ -25,37 +48,22 @@ class CustomLR2021Wrapper : public RadioLibWrapper {
       { RADIOLIB_LR2021_IRQ_CMD_ERROR,  "CMD_ERROR" },
       { RADIOLIB_LR2021_IRQ_TIMEOUT,    "TIMEOUT" },
     };
-    bool fault = !(irq & RADIOLIB_LR2021_IRQ_TX_DONE);
-    for (auto& f : irqFaults) {
-      if (irq & f.bit) fault = true;
-    }
-    if (!fault) return;
-
+    static const char* const errNames[16] = {
+      "HF_XOSC_START", "LF_XOSC_START", "PLL_LOCK", "LF_RC_CALIB",
+      "HF_RC_CALIB", "PLL_CALIB", "AAF_CALIB", "IMG_CALIB",
+      "CHIP_BUSY", "RXFREQ_NO_FE_CAL", "MEAS_UNIT_ADC_CALIB", "PA_OFFSET_CALIB",
+      "PPF_CALIB", "SRC_CALIB", "SRC_SATURATION_CALIB", "SRC_TOLERANCE_CALIB",
+    };
     MESH_DEBUG_PRINTLN("LR2021: TX fault, irq=0x%08lX", (unsigned long)irq);
     if (!(irq & RADIOLIB_LR2021_IRQ_TX_DONE)) MESH_DEBUG_PRINTLN("LR2021:   TX_DONE not set");
     for (auto& f : irqFaults) {
       if (irq & f.bit) MESH_DEBUG_PRINTLN("LR2021:   %s", f.name);
     }
-
-    // ERROR is a summary bit; the cause is in the chip's error register
-    if (irq & RADIOLIB_LR2021_IRQ_ERROR) {
-      static const char* const errNames[16] = {
-        "HF_XOSC_START", "LF_XOSC_START", "PLL_LOCK", "LF_RC_CALIB",
-        "HF_RC_CALIB", "PLL_CALIB", "AAF_CALIB", "IMG_CALIB",
-        "CHIP_BUSY", "RXFREQ_NO_FE_CAL", "MEAS_UNIT_ADC_CALIB", "PA_OFFSET_CALIB",
-        "PPF_CALIB", "SRC_CALIB", "SRC_SATURATION_CALIB", "SRC_TOLERANCE_CALIB",
-      };
-      uint16_t err = 0;
-      int16_t state = radio->getErrors(&err);
-      if (state != RADIOLIB_ERR_NONE) {
-        MESH_DEBUG_PRINTLN("LR2021:   getErrors failed (%d)", state);
-        return;
-      }
+    if (err) {
       MESH_DEBUG_PRINTLN("LR2021:   chip errors=0x%04X", err);
       for (int i = 0; i < 16; i++) {
         if (err & (1u << i)) MESH_DEBUG_PRINTLN("LR2021:     %s", errNames[i]);
       }
-      radio->clearErrors();
     }
   }
 #endif
@@ -140,9 +148,13 @@ public:
   }
 
   void onSendFinished() override {
-  #ifdef MESH_DEBUG
-    logTxFaults();  // must run before finishTransmit() clears all IRQ flags
-  #endif
+    uint32_t irq;
+    uint16_t err;
+    if (checkTxFault(&irq, &err)) {  // must run before finishTransmit() clears all IRQ flags
+    #ifdef MESH_DEBUG
+      logTxFault(irq, err);
+    #endif
+    }
     RadioLibWrapper::onSendFinished();
     _radio->setPreambleLength(preambleLengthForSF(getSpreadingFactor())); // overcomes weird issues with small and big pkts
   }
