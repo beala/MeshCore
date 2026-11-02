@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include <helpers/EntropyPool.h>
 
 #include <Arduino.h> // needed for PlatformIO
 #ifdef ENABLE_WIFI_INTERFACE
@@ -952,7 +953,13 @@ void MyMesh::begin() {
       self_id = radio_new_identity();
       count++;
     }
-    _store->saveMainIdentity(self_id);
+    if (EntropyPool::readyForKeys()) {
+      _store->saveMainIdentity(self_id);
+    } else {
+      // not enough trusted entropy: use this key for now but don't keep it, try again next boot
+      MESH_DEBUG_PRINTLN("WARNING: not enough entropy for a permanent key (%d bits), identity not saved",
+                         EntropyPool::creditedBits());
+    }
   }
 
 // if name is provided as a build flag, use that as default node name instead
@@ -2121,6 +2128,14 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
   if (strcmp(command, "get name") == 0) {
     sprintf(reply, "> %s", _prefs.node_name);
+    return true;
+  }
+  if (strcmp(command, "get entropy") == 0) {
+    static const char* st[] = { "failed", "not used", "ok" };
+    sprintf(reply, "> hardware RNG: %s, radio noise: %s (%u samples), credited %d bits: %s",
+            st[EntropyPool::hardwareStatus() + 1], st[EntropyPool::radioStatus() + 1],
+            (unsigned)EntropyPool::radioSamples(), EntropyPool::creditedBits(),
+            EntropyPool::readyForKeys() ? "enough for keys" : "NOT enough for keys");
     return true;
   }
 

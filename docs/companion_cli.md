@@ -50,6 +50,14 @@ Since version 1.18 meshcore companion radio firmware has a CLI interface, which 
 
 ---
 
+#### View where this node's randomness came from
+**Usage:**
+- `get entropy`
+
+**Note:** Shows which random sources worked at this boot and whether there was enough trusted randomness to keep keys, for example `> hardware RNG: ok, radio noise: not used (64 samples), credited 512 bits: enough for keys`. If it says `NOT enough for keys`, a newly created identity wasn't saved and a new one will be made at the next boot. See [entropy.md](entropy.md).
+
+---
+
 #### View this node's firmware version
 **Usage:** `ver`
 

@@ -262,31 +262,31 @@ PacketMillis RadioLibWrapper::calcMaxPacketMillis(uint8_t sf, float bw, uint8_t 
   return PacketMillis {(preamble_us + 999) / 1000, (payload_us + 999) / 1000};
 }
 
-// Samples radio noise into the entropy pool, then draws from it. The pool hashes everything, so
-// biased or repetitive radio samples can't weaken the output; extra rounds are taken if the radio
-// looks stuck (some radio drivers return 0 when the read fails).
-#define RADIO_NOISE_SAMPLES   64
-#define RADIO_NOISE_MAX_ROUNDS 4
+// Feeds radio noise into the entropy pool, then draws from it. If the pool doesn't yet have enough
+// credited entropy for a key (e.g. no trusted hardware RNG on this platform), it collects full
+// health-tested batches (credited 1 bit per sample); otherwise a small batch as extra input.
+// Callers that keep a key must check EntropyPool::readyForKeys() afterwards.
+#define RADIO_NOISE_EXTRA_SAMPLES  64
+#define RADIO_NOISE_MAX_BATCHES    3
 
 void RadioNoiseListener::random(uint8_t* dest, size_t sz) {
-  for (int round = 0; round < RADIO_NOISE_MAX_ROUNDS; round++) {
-    uint8_t samples[RADIO_NOISE_SAMPLES];
-    uint32_t times[RADIO_NOISE_SAMPLES];
-    bool seen[256];
-    memset(seen, 0, sizeof(seen));
-    int distinct = 0;
-    for (int i = 0; i < RADIO_NOISE_SAMPLES; i++) {
-      samples[i] = _radio->randomByte();
-      times[i] = micros();
-      if (!seen[samples[i]]) { seen[samples[i]] = true; distinct++; }
-    }
-    EntropyPool::add(samples, sizeof(samples));
-    EntropyPool::add(times, sizeof(times));
-    memset(samples, 0, sizeof(samples));
+  static uint8_t samples[EntropyPool::RADIO_BATCH];
+  static uint8_t timings[EntropyPool::RADIO_BATCH];
 
-    // 64 truly random bytes almost always have 50+ distinct values
-    if (distinct >= 32) break;
-    MESH_DEBUG_PRINTLN("RadioNoiseListener: radio noise looks poor (%d distinct of %d), sampling more", distinct, RADIO_NOISE_SAMPLES);
-  }
+  EntropyPool::addHardware();
+  int batches = 0;
+  do {
+    size_t n = EntropyPool::readyForKeys() ? RADIO_NOISE_EXTRA_SAMPLES : EntropyPool::RADIO_BATCH;
+    for (size_t i = 0; i < n; i++) {
+      samples[i] = _radio->randomByte();
+      timings[i] = (uint8_t)micros();   // not credited
+    }
+    if (!EntropyPool::addRadioSamples(samples, n)) {
+      MESH_DEBUG_PRINTLN("RadioNoiseListener: radio noise failed the health tests");
+    }
+    EntropyPool::addUntrusted(timings, n);
+  } while (!EntropyPool::readyForKeys() && ++batches < RADIO_NOISE_MAX_BATCHES);
+
+  EntropyPool::secureZero(samples, sizeof(samples));
   EntropyPool::generate(dest, sz);
 }

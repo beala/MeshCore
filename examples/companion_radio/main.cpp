@@ -134,6 +134,7 @@ void halt() {
 #endif
 
 void setup() {
+  EntropyPool::collectEarly();   // first: ESP32 needs this before the ADC and RF are used
   Serial.begin(115200);
   board.begin();
 
@@ -158,7 +159,7 @@ void setup() {
 
   {
     uint32_t seed = radio_driver.getRngSeed();
-    EntropyPool::add(&seed, sizeof(seed));   // also seeds the pool used for the BLE PIN
+    EntropyPool::addUntrusted(&seed, sizeof(seed));   // mixed in, not credited
     fast_rng.begin(seed);
   }
 
@@ -194,8 +195,10 @@ void setup() {
   if (the_mesh.getNodePrefs()->ble_pin == 0) {
 #ifdef DISPLAY_CLASS
     if (disp != NULL && BLE_PIN_CODE == 123456) {
+      // hardware RNG + pool, not the seeded Arduino PRNG; rejection sampling so all PINs are equally likely
+      const uint32_t limit = 0xFFFFFFFFu - (0xFFFFFFFFu % 900000u);
       uint32_t r;
-      EntropyPool::generate((uint8_t *)&r, sizeof(r));   // hardware RNG + pool, not the seeded Arduino PRNG
+      do { EntropyPool::generate((uint8_t *)&r, sizeof(r)); } while (r >= limit);
       the_mesh.setBLEPin(100000 + (r % 900000)); // random pin each session
     } else {
       the_mesh.setBLEPin(BLE_PIN_CODE); // otherwise static pin

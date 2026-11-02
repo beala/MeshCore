@@ -87,10 +87,10 @@ public:
 };
 
 /**
- * \brief  an RNG for keys: radio noise, hardware random generator (nRF52 CC310, ESP32 RNG) and timing
- *         jitter, all hashed together in EntropyPool.
- *         NOTE: this is SLOW (it samples the radio many times) and leaves the radio in standby.
- *         Use only for things like creating a new LocalIdentity, before the radio starts receiving.
+ * \brief  an RNG for keys: hardware RNG and radio noise, through EntropyPool (see EntropyPool.h).
+ *         NOTE: this is SLOW (it samples the radio up to 1536 times) and leaves the radio in standby.
+ *         Use only for things like creating a new LocalIdentity, before the radio starts receiving,
+ *         and only keep the key if EntropyPool::readyForKeys() afterwards.
 */
 class RadioNoiseListener : public mesh::RNG {
   PhysicalLayer* _radio;
