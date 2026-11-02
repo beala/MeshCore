@@ -8,13 +8,20 @@ permissions:
 
 on:
   schedule:
-    - cron: '0 */8 * * *'  # Check every 8 hours
+    - cron: '17,47 * * * *'  # check every 30 minutes; runs with no changes stop after the rebuild
+  push:
+    branches: [beala/builds]
+    paths: ['scripts/**', '.github/workflows/custom-builds.yml']
   workflow_dispatch:
     inputs:
       force:
         description: 'Build and release even if nothing changed since the last release.'
         type: boolean
         default: false
+
+concurrency:
+  group: custom-builds
+  cancel-in-progress: false
 
 env:
   TARGETS: >-
@@ -25,11 +32,21 @@ env:
     Heltec_v3_companion_radio_usb Heltec_v3_companion_radio_ble
     heltec_v4_companion_radio_usb heltec_v4_companion_radio_ble
     RAK_3401_repeater
+  KEEP_RELEASES: 10  # older beala-* releases (and their tags) are deleted
 
 jobs:
 
-  build:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      sha: ${{ steps.rebuild.outputs.sha }}
+      tag: ${{ steps.check.outputs.tag }}
+      short: ${{ steps.check.outputs.short }}
+      targets: ${{ steps.describe.outputs.targets }}
+      firmware_version: ${{ steps.describe.outputs.firmware_version }}
+      date: ${{ steps.describe.outputs.date }}
+      notes: ${{ steps.describe.outputs.notes }}
     steps:
 
       - name: Clone Repo
@@ -71,6 +88,7 @@ jobs:
         if: steps.check.outputs.should_build == 'true'
         id: describe
         run: |
+          echo "targets=$(echo $TARGETS | jq -Rc 'split(" ")')" >> $GITHUB_OUTPUT
           # Name builds after the latest upstream release they are newer than, e.g. v1.18.0-dev-beala
           LATEST=$(git ls-remote --tags --refs upstream 'companion-v*' | sed 's#.*/companion-##' | sort -V | tail -1)
           echo "firmware_version=${LATEST}-dev-beala" >> $GITHUB_OUTPUT
@@ -87,29 +105,65 @@ jobs:
             echo EOF
           } >> $GITHUB_OUTPUT
 
+  # One job per firmware, all in parallel
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: ${{ fromJson(needs.prepare.outputs.targets) }}
+    steps:
+
+      - name: Clone Repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
       - name: Setup Build Environment
-        if: steps.check.outputs.should_build == 'true'
         uses: ./.github/actions/setup-build-environment
 
-      - name: Build Firmwares
-        if: steps.check.outputs.should_build == 'true'
+      - name: Build ${{ matrix.target }}
         env:
-          FIRMWARE_VERSION: ${{ steps.describe.outputs.firmware_version }}
-        run: /usr/bin/env bash build.sh build-firmware $TARGETS
+          FIRMWARE_VERSION: ${{ needs.prepare.outputs.firmware_version }}
+        run: /usr/bin/env bash build.sh build-firmware ${{ matrix.target }}
 
-      - name: Upload Workflow Artifacts
-        if: steps.check.outputs.should_build == 'true'
+      - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
-          name: firmwares-${{ steps.check.outputs.tag }}
+          name: fw-${{ matrix.target }}
+          path: out
+
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Download Firmwares
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          merge-multiple: true
           path: out
 
       - name: Create Release
-        if: steps.check.outputs.should_build == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.check.outputs.tag }}
-          target_commitish: ${{ steps.rebuild.outputs.sha }}
-          name: ${{ steps.describe.outputs.date }} (${{ steps.check.outputs.short }})
-          body: ${{ steps.describe.outputs.notes }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ needs.prepare.outputs.sha }}
+          name: ${{ needs.prepare.outputs.date }} (${{ needs.prepare.outputs.short }})
+          body: ${{ needs.prepare.outputs.notes }}
           files: out/*
+
+      - name: Delete old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --repo ${{ github.repository }} --limit 200 --json tagName,createdAt \
+            -q '[.[] | select(.tagName | startswith("beala-"))] | sort_by(.createdAt) | reverse | .[]
+                | .tagName' \
+            | tail -n +$((KEEP_RELEASES + 1)) \
+            | while read -r tag; do
+                echo "Deleting $tag"
+                gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag
+              done
