@@ -4,6 +4,7 @@
 
 # Personal device tweaks: T1 / T1000-E buzzer and T1000-E LED start off (needs beala/alert-toggles)
 beala/custom
+beala/custom-defaults       # same kind of tweaks for boards newer than beala/custom's base (X1, WisMesh Tag)
 
 # Upstream PR branches
 # Parser security fixes: frozen copy of meshcore-dev/MeshCore#3521 (commit cc15f68)
@@ -21,3 +22,4 @@ beala/lr2021-tx-fault-log
 beala/lr2021-rx-gain-step
 beala/lr2021-diagnostics    # get radio.faults / get radio.agc (builds on tx-fault-log and rx-gain-step)
 beala/alert-toggles         # get/set buzzer, vibe, led commands for companion boards
+beala/charger-stay-off      # set charger.wake on|off: stay off when plugged in (nRF52)
