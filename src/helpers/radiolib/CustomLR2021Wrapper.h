@@ -21,6 +21,14 @@ public:
   };
   static const int TX_FAULT_HISTORY = 8;
 
+  struct RxGain {
+    uint32_t at_millis;
+    uint8_t gain_step;  // AGC gain step G1..G13 (13 = most gain)
+    int16_t rssi;       // dBm
+    int8_t snr_x4;      // dB * 4
+  };
+  static const int RX_GAIN_HISTORY = 8;
+
 private:
   // IRQ bits that mean a transmit went wrong (a missing TX_DONE is also a fault)
   static constexpr uint32_t TX_FAULT_IRQS = RADIOLIB_LR2021_IRQ_EOL | RADIOLIB_LR2021_IRQ_PA_OCP_OVP |
@@ -176,6 +184,7 @@ public:
       uint8_t step = 0;
       if (((CustomLR2021 *)_radio)->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
         _last_gain_step = step;
+        _rx_gains.add({ (uint32_t)millis(), step, (int16_t)getLastRSSI(), (int8_t)(getLastSNR() * 4) });
         MESH_DEBUG_PRINTLN("LR2021: RX gain step G%u", step);
       } else {
         _last_gain_step = -1;
@@ -188,6 +197,9 @@ public:
 
   // the most recent TX faults since boot (newest first via get(0))
   const RecentHistory<TxFault, TX_FAULT_HISTORY>& getTxFaults() const { return _tx_faults; }
+
+  // gain step, RSSI and SNR of the most recent received packets (newest first via get(0))
+  const RecentHistory<RxGain, RX_GAIN_HISTORY>& getRxGains() const { return _rx_gains; }
 
   float getLastRSSI() const override { return ((CustomLR2021 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomLR2021 *)_radio)->getSNR(); }
@@ -208,6 +220,7 @@ public:
   protected:
     int _last_gain_step = -1;
     RecentHistory<TxFault, TX_FAULT_HISTORY> _tx_faults;
+    RecentHistory<RxGain, RX_GAIN_HISTORY> _rx_gains;
     LR2021LoRaSideDetector_t _sideDet[3];
     size_t _numSideDet = 0;
 
