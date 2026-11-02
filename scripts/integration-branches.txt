@@ -16,5 +16,7 @@ beala/fix-lr2021-pa-table
 beala/fix-lr2021-agc-reset
 beala/fix-lr2021-rx-boost-status
 beala/lr2021-simo-flag
+beala/x1-simo              # MeshTracker X1: enable SIMO (not hardware-verified yet)
 beala/lr2021-tx-fault-log
 beala/lr2021-rx-gain-step
+beala/lr2021-diagnostics    # get radio.faults / get radio.agc (builds on tx-fault-log and rx-gain-step)
