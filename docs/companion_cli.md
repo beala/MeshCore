@@ -322,6 +322,21 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ### Alerts and lights
 
+#### Find a lost radio
+**Usage:**
+- `find me`
+- `find me <seconds>`
+- `find me stop`
+
+**Parameters:**
+- `seconds`: how long to beep, `1` to `600`
+
+**Default:** 120 seconds (2 minutes)
+
+**Note:** Beeps three times every 1.4 s so you can find the radio by ear. Radios with a vibration motor also vibrate every few seconds. It works even if the buzzer or vibration motor is turned off. Pressing the radio's button or running `find me stop` stops it. Only on boards with a buzzer or vibration motor.
+
+---
+
 #### Turn the buzzer on or off
 **Usage:**
 - `get buzzer`

@@ -2192,6 +2192,24 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 #endif
 
+  // find me: beep (and vibrate) so a lost radio can be found, even if the buzzer is turned off
+  if (strcmp(command, "find me") == 0 || memcmp(command, "find me ", 8) == 0) {
+    const char* arg = command[7] ? &command[8] : "";
+    if (strcmp(arg, "stop") == 0) {
+      strcpy(reply, (_listener && _listener->stopFindMe()) ? "OK, stopped" : "> not running");
+      return true;
+    }
+    int secs = *arg ? atoi(arg) : 120;
+    if (secs < 1 || secs > 600) {
+      strcpy(reply, "Error: seconds must be 1 to 600");
+    } else if (_listener && _listener->startFindMe(secs)) {
+      sprintf(reply, "OK, beeping for %d s. Stop: press the button, or: find me stop", secs);
+    } else {
+      strcpy(reply, "Error: this radio has no buzzer or vibration motor");
+    }
+    return true;
+  }
+
   if (memcmp(command, "set pin ", 8) == 0) {
     _prefs.ble_pin = atoi(&command[8]);
     savePrefs();

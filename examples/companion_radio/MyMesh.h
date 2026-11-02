@@ -105,6 +105,8 @@ public:
       virtual void onTraceRecv(mesh::Packet *pkt, uint32_t tag, uint32_t auth_code, uint8_t flags,
                                const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) { }
       virtual void onRawDataRecv(mesh::Packet *pkt) { }
+      virtual bool startFindMe(uint32_t secs) { return false; /* no buzzer or vibration motor */ }
+      virtual bool stopFindMe() { return false; /* wasn't running */ }
       virtual ~Listener() { }
   };
 
