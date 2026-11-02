@@ -144,7 +144,7 @@ void UITask::onMessageRecv(mesh::Packet *pkt, const ContactInfo &from, uint8_t t
   if (!(txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN)) return;
 
 #ifdef HAS_DRV2605
-  vibration.trigger();   // vibrate even while the app is connected (honors quiet + cooldown)
+  if (!hasConnection()) vibration.trigger();   // like the buzzer: only when the app isn't connected
 #endif
 
   uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
@@ -171,7 +171,7 @@ void UITask::onMessageRecv(mesh::Packet *pkt, const ContactInfo &from, uint8_t t
 
 void UITask::onChannelMessageRecv(mesh::Packet *pkt, ChannelDetails& channel_details, const char* text) {
 #ifdef HAS_DRV2605
-  vibration.trigger();   // vibrate even while the app is connected (honors quiet + cooldown)
+  if (!hasConnection()) vibration.trigger();   // like the buzzer: only when the app isn't connected
 #endif
 
   uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;

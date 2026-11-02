@@ -346,7 +346,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 **Default:** `on` (or `off` with the `VIBE_DEFAULT_OFF` build flag)
 
-**Note:** Only on boards with a DRV2605 haptic driver (eg. MeshTracker X1). Independent of the buzzer. Takes effect immediately.
+**Note:** Only on boards with a DRV2605 haptic driver (eg. MeshTracker X1). Independent of the buzzer. Takes effect immediately. Like the buzzer, it only goes off for new messages while the app isn't connected.
 
 ---
 
