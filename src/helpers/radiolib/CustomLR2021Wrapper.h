@@ -86,6 +86,53 @@ private:
   }
 #endif
 
+  static const int REPLY_MAX = 140;  // CLI replies go into a 166 byte buffer, after an optional prefix
+
+  // eg. "> 3 since boot: 12s OCP; 95s ERR=0004; 300s NODONE,TIMEOUT"
+  void formatTxFaults(char* reply) const {
+    if (_tx_faults.total() == 0) {
+      strcpy(reply, "> no TX faults since boot");
+      return;
+    }
+    int n = sprintf(reply, "> %lu since boot:", (unsigned long)_tx_faults.total());
+    uint32_t now = millis();
+    for (int i = 0; i < _tx_faults.count(); i++) {
+      const TxFault& f = _tx_faults.get(i);
+      char entry[64];
+      int e = sprintf(entry, "%s %lus ", i == 0 ? "" : ";", (unsigned long)((now - f.at_millis) / 1000));
+      const char* sep = "";
+      if (!(f.irq & RADIOLIB_LR2021_IRQ_TX_DONE)) { e += sprintf(&entry[e], "%sNODONE", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_PA_OCP_OVP) { e += sprintf(&entry[e], "%sOCP", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_ERROR)      { e += sprintf(&entry[e], "%sERR=%04X", sep, f.chip_errors); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_CMD_ERROR)  { e += sprintf(&entry[e], "%sCMD", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_TIMEOUT)    { e += sprintf(&entry[e], "%sTIMEOUT", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_EOL)        { e += sprintf(&entry[e], "%sEOL", sep); sep = ","; }
+      if (n + e > REPLY_MAX) break;
+      strcpy(&reply[n], entry);
+      n += e;
+    }
+  }
+
+  // eg. "> G13 -112dBm -6.5dB 4s; G9 -71dBm 9.2dB 31s"
+  void formatRxGains(char* reply) const {
+    if (_rx_gains.count() == 0) {
+      strcpy(reply, "> no packets received yet");
+      return;
+    }
+    strcpy(reply, ">");
+    int n = 1;
+    uint32_t now = millis();
+    for (int i = 0; i < _rx_gains.count(); i++) {
+      const RxGain& g = _rx_gains.get(i);
+      char entry[64];
+      int e = sprintf(entry, "%s G%u %ddBm %.1fdB %lus", i == 0 ? "" : ";", g.gain_step, g.rssi,
+                      g.snr_x4 / 4.0f, (unsigned long)((now - g.at_millis) / 1000));
+      if (n + e > REPLY_MAX) break;
+      strcpy(&reply[n], entry);
+      n += e;
+    }
+  }
+
 public:
   CustomLR2021Wrapper(CustomLR2021& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
 
@@ -194,6 +241,20 @@ public:
   }
 
   int getLastGainStep() const override { return _last_gain_step; }
+
+  // Companion/remote CLI: recent TX faults and AGC gain steps. Replies list the newest entries
+  // first, as many as fit in REPLY_MAX characters.
+  bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) override {
+    if (strcmp(command, "get radio.faults") == 0) {
+      formatTxFaults(reply);
+      return true;
+    }
+    if (strcmp(command, "get radio.agc") == 0) {
+      formatRxGains(reply);
+      return true;
+    }
+    return false;
+  }
 
   // the most recent TX faults since boot (newest first via get(0))
   const RecentHistory<TxFault, TX_FAULT_HISTORY>& getTxFaults() const { return _tx_faults; }
