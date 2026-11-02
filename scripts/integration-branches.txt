@@ -23,3 +23,4 @@ beala/lr2021-rx-gain-step
 beala/lr2021-diagnostics    # get radio.faults / get radio.agc (builds on tx-fault-log and rx-gain-step)
 beala/alert-toggles         # get/set buzzer, vibe, led commands for companion boards
 beala/charger-stay-off      # set charger.wake on|off: stay off when plugged in (nRF52)
+beala/crypto-v2             # opt-in AES-SIV packet encryption: set crypto / set crypto.ch (experimental)
