@@ -2,6 +2,7 @@
 
 #include "CustomLR2021.h"
 #include "RadioLibWrappers.h"
+#include "../RecentHistory.h"
 
 #ifndef USE_LR2021
 #define USE_LR2021
@@ -12,6 +13,15 @@
 #endif
 
 class CustomLR2021Wrapper : public RadioLibWrapper {
+public:
+  struct TxFault {
+    uint32_t at_millis;
+    uint32_t irq;          // IRQ status after the transmit
+    uint16_t chip_errors;  // error register, when the ERROR IRQ was set
+  };
+  static const int TX_FAULT_HISTORY = 8;
+
+private:
   // IRQ bits that mean a transmit went wrong (a missing TX_DONE is also a fault)
   static constexpr uint32_t TX_FAULT_IRQS = RADIOLIB_LR2021_IRQ_EOL | RADIOLIB_LR2021_IRQ_PA_OCP_OVP |
       RADIOLIB_LR2021_IRQ_ERROR | RADIOLIB_LR2021_IRQ_CMD_ERROR | RADIOLIB_LR2021_IRQ_TIMEOUT;
@@ -151,6 +161,7 @@ public:
     uint32_t irq;
     uint16_t err;
     if (checkTxFault(&irq, &err)) {  // must run before finishTransmit() clears all IRQ flags
+      _tx_faults.add({ (uint32_t)millis(), irq, err });
     #ifdef MESH_DEBUG
       logTxFault(irq, err);
     #endif
@@ -175,6 +186,9 @@ public:
 
   int getLastGainStep() const override { return _last_gain_step; }
 
+  // the most recent TX faults since boot (newest first via get(0))
+  const RecentHistory<TxFault, TX_FAULT_HISTORY>& getTxFaults() const { return _tx_faults; }
+
   float getLastRSSI() const override { return ((CustomLR2021 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomLR2021 *)_radio)->getSNR(); }
 
@@ -193,6 +207,7 @@ public:
 
   protected:
     int _last_gain_step = -1;
+    RecentHistory<TxFault, TX_FAULT_HISTORY> _tx_faults;
     LR2021LoRaSideDetector_t _sideDet[3];
     size_t _numSideDet = 0;
 
