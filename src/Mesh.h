@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Dispatcher.h>
+#include <CryptoV2.h>
 
 namespace mesh {
 
@@ -83,6 +84,18 @@ protected:
    * \param  peer_idx  index of peer, [0..n) where n is what searchPeersByHash() returned
    */
   virtual void getPeerSharedSecret(uint8_t* dest_secret, int peer_idx) { }
+
+  /**
+   * \brief  Encryption policy for a contact or channel, looked up by its secret.
+   * \returns  one of CRYPTO_POLICY_* (see CryptoV2.h). Default is legacy: send v1, accept v1 and v2.
+   */
+  virtual uint8_t getCryptoPolicy(const uint8_t* secret) { return CRYPTO_POLICY_LEGACY; }
+
+  /**
+   * \brief  A v2 packet from a known peer (contact) verified. Sub-classes can use this to start
+   *         sending v2 to that peer. It is never called for channel or anonymous packets.
+   */
+  virtual void onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) { }
 
   /**
    * \brief  A (now decrypted) data packet has been received (by a known peer).
@@ -172,6 +185,10 @@ protected:
   }
 
   MeshTables* getTables() const { return _tables; }
+
+  int encryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* data, int data_len, const uint8_t* ctx, int ctx_len);
+  int decryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* env, int env_len, const uint8_t* ctx, int ctx_len, bool& was_v2);
+  bool fitsPayload(const uint8_t* secret, int header_len, int data_len);
 
 public:
   void begin();

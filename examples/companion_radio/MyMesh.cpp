@@ -1001,6 +1001,7 @@ void MyMesh::begin() {
   bootstrapRTCfromContacts();
   addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure public channel
   _store->loadChannels(this);
+  _store->loadCryptoPolicies(crypto_policies);
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
@@ -2078,6 +2079,58 @@ void MyMesh::enterCLIRescue() {
   Serial.println("========= CLI Rescue =========");
 }
 
+// A contact named exactly 'arg' (case-insensitive), or else one whose public key starts with hex 'arg'
+ContactInfo* MyMesh::findContactForCLI(const char* arg) {
+  while (*arg == ' ') arg++;
+  if (*arg == 0) return NULL;
+
+  ContactsIterator iter = startContactsIterator();
+  ContactInfo c;
+  while (iter.hasNext(this, c)) {
+    if (strcasecmp(c.name, arg) == 0) {
+      return lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
+    }
+  }
+
+  int len = strlen(arg);
+  if (len >= 4 && len <= 2*PUB_KEY_SIZE && (len % 2) == 0) {
+    uint8_t prefix[PUB_KEY_SIZE];
+    if (mesh::Utils::fromHex(prefix, len / 2, arg)) {
+      return lookupContactByPubKey(prefix, len / 2);
+    }
+  }
+  return NULL;
+}
+
+// A channel named exactly 'arg' (case-insensitive), or else channel number 'arg'
+int MyMesh::findChannelForCLI(const char* arg, ChannelDetails& ch) {
+#ifdef MAX_GROUP_CHANNELS
+  while (*arg == ' ') arg++;
+  if (*arg == 0) return -1;
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (getChannel(i, ch) && ch.name[0] != 0 && strcasecmp(ch.name, arg) == 0) return i;
+  }
+  bool numeric = true;
+  for (const char* p = arg; *p; p++) if (*p < '0' || *p > '9') numeric = false;
+  if (numeric) {
+    int i = atoi(arg);
+    if (i >= 0 && i < MAX_GROUP_CHANNELS && getChannel(i, ch) && ch.name[0] != 0) return i;
+  }
+#endif
+  return -1;
+}
+
+// a known contact sent us a verified v2 packet, so it can receive v2 too: start sending it v2.
+// This only ever raises the policy, never lowers it.
+void MyMesh::onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) {
+  if (crypto_policies.get(secret) == CRYPTO_POLICY_LEGACY) {
+    if (crypto_policies.set(secret, CRYPTO_POLICY_V2)) {
+      _store->saveCryptoPolicies(crypto_policies);
+      MESH_DEBUG_PRINTLN("contact upgraded to v2 encryption");
+    }
+  }
+}
+
 bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char* reply) {
   while (*command == ' ') command++; // skip leading spaces
 
@@ -2123,6 +2176,101 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     sprintf(reply, "> %s", _prefs.node_name);
     return true;
   }
+
+  // encryption policy: legacy | v2 | v2only  (see docs/crypto_v2.md)
+  if (strcmp(command, "get crypto") == 0) {
+    int n_ch = 0, n_v2 = 0, n_only = 0;
+    char* dp = reply;
+    dp += sprintf(dp, ">");
+#ifdef MAX_GROUP_CHANNELS
+    for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+      ChannelDetails ch;
+      if (!getChannel(i, ch) || ch.name[0] == 0) continue;
+      uint8_t p = crypto_policies.get(ch.channel.secret);
+      if (p == CRYPTO_POLICY_LEGACY) continue;
+      n_ch++;
+      if (dp - reply < 100) dp += sprintf(dp, " ch%d %.16s: %s,", i, ch.name, CryptoPolicyTable::name(p));
+    }
+#endif
+    for (int i = 0; i < crypto_policies.count(); i++) {
+      if (crypto_policies.entry(i).policy == CRYPTO_POLICY_V2_ONLY) n_only++; else n_v2++;
+    }
+    // channel entries are in the table too, but only contacts are counted here
+    int contacts_on = n_v2 + n_only - n_ch;
+    if (contacts_on < 0) contacts_on = 0;
+    sprintf(dp, " %d contact(s) on v2 or v2only (others legacy)", contacts_on);
+    return true;
+  }
+  if (memcmp(command, "get crypto ", 11) == 0) {
+    ContactInfo* c = findContactForCLI(&command[11]);
+    if (c) {
+      sprintf(reply, "> %s: %s", c->name, CryptoPolicyTable::name(crypto_policies.get(c->getSharedSecret(self_id))));
+    } else {
+      strcpy(reply, "Error: contact not found");
+    }
+    return true;
+  }
+  if (memcmp(command, "set crypto ", 11) == 0) {
+    char mode[8];
+    const char* sp = strchr(&command[11], ' ');
+    int ml = sp ? (int)(sp - &command[11]) : 0;
+    if (ml <= 0 || ml >= (int)sizeof(mode)) {
+      strcpy(reply, "Error: use set crypto <legacy|v2|v2only> <contact>");
+      return true;
+    }
+    memcpy(mode, &command[11], ml);
+    mode[ml] = 0;
+    int p = CryptoPolicyTable::parse(mode);
+    ContactInfo* c = findContactForCLI(sp + 1);
+    if (p < 0) {
+      strcpy(reply, "Error: mode must be legacy, v2 or v2only");
+    } else if (c == NULL) {
+      strcpy(reply, "Error: contact not found");
+    } else if (!crypto_policies.set(c->getSharedSecret(self_id), p)) {
+      strcpy(reply, "Error: policy table full");
+    } else {
+      _store->saveCryptoPolicies(crypto_policies);
+      sprintf(reply, "OK - %s: %s", c->name, CryptoPolicyTable::name(p));
+    }
+    return true;
+  }
+#ifdef MAX_GROUP_CHANNELS
+  if (memcmp(command, "get crypto.ch ", 14) == 0) {
+    ChannelDetails ch;
+    int idx = findChannelForCLI(&command[14], ch);
+    if (idx >= 0) {
+      sprintf(reply, "> ch%d %s: %s", idx, ch.name, CryptoPolicyTable::name(crypto_policies.get(ch.channel.secret)));
+    } else {
+      strcpy(reply, "Error: channel not found");
+    }
+    return true;
+  }
+  if (memcmp(command, "set crypto.ch ", 14) == 0) {
+    char mode[8];
+    const char* sp = strchr(&command[14], ' ');
+    int ml = sp ? (int)(sp - &command[14]) : 0;
+    if (ml <= 0 || ml >= (int)sizeof(mode)) {
+      strcpy(reply, "Error: use set crypto.ch <legacy|v2|v2only> <channel>");
+      return true;
+    }
+    memcpy(mode, &command[14], ml);
+    mode[ml] = 0;
+    int p = CryptoPolicyTable::parse(mode);
+    ChannelDetails ch;
+    int idx = findChannelForCLI(sp + 1, ch);
+    if (p < 0) {
+      strcpy(reply, "Error: mode must be legacy, v2 or v2only");
+    } else if (idx < 0) {
+      strcpy(reply, "Error: channel not found");
+    } else if (!crypto_policies.set(ch.channel.secret, p)) {
+      strcpy(reply, "Error: policy table full");
+    } else {
+      _store->saveCryptoPolicies(crypto_policies);
+      sprintf(reply, "OK - ch%d %s: %s", idx, ch.name, CryptoPolicyTable::name(p));
+    }
+    return true;
+  }
+#endif
 
 #ifdef PIN_BUZZER
   if (strcmp(command, "get buzzer") == 0) {

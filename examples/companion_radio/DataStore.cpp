@@ -365,6 +365,31 @@ void DataStore::saveChannels(DataStoreHost* host) {
   }
 }
 
+// each record: policy id (8 bytes) + policy (1 byte)
+void DataStore::loadCryptoPolicies(CryptoPolicyTable& table) {
+  table.clear();
+  File file = openRead(_getContactsChannelsFS(), "/crypto_pol");
+  if (file) {
+    uint8_t rec[9];
+    while (file.read(rec, sizeof(rec)) == sizeof(rec)) {
+      if (!table.setById(rec, rec[8])) break;
+    }
+    file.close();
+  }
+}
+
+bool DataStore::saveCryptoPolicies(const CryptoPolicyTable& table) {
+  File file = openWrite(_getContactsChannelsFS(), "/crypto_pol");
+  if (!file) return false;
+  bool success = true;
+  for (int i = 0; i < table.count() && success; i++) {
+    const CryptoPolicyTable::Entry& e = table.entry(i);
+    success = file.write(e.id, 8) == 8 && file.write(&e.policy, 1) == 1;
+  }
+  file.close();
+  return success;
+}
+
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
 
 #define MAX_ADVERT_PKT_LEN   (2 + 32 + PUB_KEY_SIZE + 4 + SIGNATURE_SIZE + MAX_ADVERT_DATA_SIZE)

@@ -10,6 +10,7 @@ Since version 1.18 meshcore companion radio firmware has a CLI interface, which 
   - [BLE](#ble)
   - [Wifi](#wifi)
   - [UI](#ui)
+  - [Encryption](#encryption)
 
 ## Operational
 
@@ -470,3 +471,57 @@ When screen is blanked, the controller is also put into hibernation, which shoul
 
 **Note:**
 Forcing full refresh helps revives the screen when some tearing appears (under certain environmental conditions). If you see some tearing appearing, you can force full refresh on your screen manually by double clicking the backlight button. If tearing reappears often, use this setting to force full refresh every `value` partial refreshes.
+
+---
+
+### Encryption
+
+Experimental. See [crypto_v2.md](crypto_v2.md) for the packet format and what it does and doesn't protect.
+
+Each contact and channel has an encryption policy:
+
+| Policy | Sends | Accepts |
+|---|---|---|
+| `legacy` (default) | v1 (AES-ECB, 2-byte MAC) | v1 and v2 |
+| `v2` | v2 (AES-SIV, 16-byte tag) | v1 and v2 |
+| `v2only` | v2 | v2 only |
+
+Firmware with v2 support always understands v2 packets. Firmware without it silently drops them, so only switch a contact or channel to `v2` once the other side (for a channel, every member) runs v2 firmware.
+
+#### View the encryption policies
+**Usage:**
+- `get crypto`
+
+Lists channels that aren't `legacy`, and how many contacts are on `v2` or `v2only`.
+
+---
+
+#### View or change a contact's encryption policy
+**Usage:**
+- `get crypto <contact>`
+- `set crypto <policy> <contact>`
+
+**Parameters:**
+- `policy`: `legacy`, `v2` or `v2only`
+- `contact`: the contact's exact name (not case-sensitive), or the start of its public key in hex (at least 4 characters)
+
+**Default:** `legacy`
+
+**Note:** When a contact sends you a verified v2 packet, the contact is switched from `legacy` to `v2` automatically, since it can clearly receive v2. Nothing ever lowers a policy automatically (a missing ACK never causes a fallback to v1). `v2only` is only ever set by you: use it once you know the contact will only send v2, so forged or replayed v1 packets from that contact are dropped.
+
+Repeaters and room servers with v2 firmware accept v2 requests but still reply in v1, so use `v2`, not `v2only`, for them. Logins to a repeater or room server without v2 firmware fail if its contact is set to `v2`.
+
+---
+
+#### View or change a channel's encryption policy
+**Usage:**
+- `get crypto.ch <channel>`
+- `set crypto.ch <policy> <channel>`
+
+**Parameters:**
+- `policy`: `legacy`, `v2` or `v2only`
+- `channel`: the channel's name (not case-sensitive) or its number
+
+**Default:** `legacy`
+
+**Note:** Channels never switch automatically: one member sending v2 doesn't mean every member can read it. Anyone with the channel key can still read and send on the channel, and can claim any sender name.

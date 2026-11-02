@@ -11,6 +11,29 @@ void Mesh::loop() {
   Dispatcher::loop();
 }
 
+int Mesh::encryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* data, int data_len, const uint8_t* ctx, int ctx_len) {
+  if (getCryptoPolicy(secret) != CRYPTO_POLICY_LEGACY) {
+    return CryptoV2::seal(secret, dest, data, data_len, ctx, ctx_len);
+  }
+  return Utils::encryptThenMAC(secret, dest, data, data_len);
+}
+
+int Mesh::decryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* env, int env_len, const uint8_t* ctx, int ctx_len, bool& was_v2) {
+  // v1 and v2 are told apart by length: v1 is always a 2-byte MAC plus whole AES blocks
+  if (CryptoV2::isLegacyEnvelope(env_len)) {
+    was_v2 = false;
+    if (getCryptoPolicy(secret) == CRYPTO_POLICY_V2_ONLY) return 0;   // v1 not accepted for this contact/channel
+    return Utils::MACThenDecrypt(secret, dest, env, env_len);
+  }
+  was_v2 = true;
+  return CryptoV2::open(secret, dest, env, env_len, ctx, ctx_len);
+}
+
+bool Mesh::fitsPayload(const uint8_t* secret, int header_len, int data_len) {
+  if (getCryptoPolicy(secret) == CRYPTO_POLICY_LEGACY) return true;   // v1 callers keep their existing checks
+  return header_len + data_len + CryptoV2::OVERHEAD_MAX <= MAX_PACKET_PAYLOAD;
+}
+
 bool Mesh::allowPacketForward(const mesh::Packet* packet) { 
   return false;  // by default, Transport NOT enabled
 }
@@ -155,8 +178,11 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
 
             // decrypt, checking MAC is valid
             uint8_t data[MAX_PACKET_PAYLOAD];
-            int len = Utils::MACThenDecrypt(secret, data, macAndData, pkt->payload_len - i);
+            uint8_t ctx[3] = { pkt->getPayloadType(), dest_hash, src_hash };
+            bool was_v2;
+            int len = decryptPayload(secret, data, macAndData, pkt->payload_len - i, ctx, sizeof(ctx), was_v2);
             if (len > 0) {  // success!
+              if (was_v2) onPeerCryptoV2Recv(j, secret);
               if (pkt->getPayloadType() == PAYLOAD_TYPE_PATH) {
                 int k = 0;
                 uint8_t path_len = data[k++];
@@ -212,7 +238,12 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
 
           // decrypt, checking MAC is valid
           uint8_t data[MAX_PACKET_PAYLOAD];
-          int len = Utils::MACThenDecrypt(secret, data, macAndData, pkt->payload_len - i);
+          uint8_t ctx[2 + PUB_KEY_SIZE];
+          ctx[0] = pkt->getPayloadType();
+          ctx[1] = dest_hash;
+          memcpy(&ctx[2], sender_pub_key, PUB_KEY_SIZE);
+          bool was_v2;
+          int len = decryptPayload(secret, data, macAndData, pkt->payload_len - i, ctx, sizeof(ctx), was_v2);
           if (len > 0) {  // success!
             onAnonDataRecv(pkt, secret, sender, data, len);
             pkt->markDoNotRetransmit();
@@ -239,7 +270,9 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         for (int j = 0; j < num; j++) {
           // decrypt, checking MAC is valid
           uint8_t data[MAX_PACKET_PAYLOAD];
-          int len = Utils::MACThenDecrypt(channels[j].secret, data, macAndData, pkt->payload_len - i);
+          uint8_t ctx[2] = { pkt->getPayloadType(), channel_hash };
+          bool was_v2;
+          int len = decryptPayload(channels[j].secret, data, macAndData, pkt->payload_len - i, ctx, sizeof(ctx), was_v2);
           if (len > 0) {  // success!
             onGroupDataRecv(pkt, pkt->getPayloadType(), channels[j], data, len);
             break;
@@ -450,6 +483,7 @@ Packet* Mesh::createPathReturn(const uint8_t* dest_hash, const uint8_t* secret, 
   uint8_t path_hash_count = path_len & 63;
 
   if (path_hash_count*path_hash_size + extra_len + 5 > MAX_COMBINED_PATH) return NULL;  // too long!!
+  if (!fitsPayload(secret, 2*PATH_HASH_SIZE, 1 + path_hash_count*path_hash_size + (extra_len > 0 ? 1 + extra_len : 5))) return NULL;
 
   Packet* packet = obtainNewPacket();
   if (packet == NULL) {
@@ -477,7 +511,8 @@ Packet* Mesh::createPathReturn(const uint8_t* dest_hash, const uint8_t* secret, 
       getRNG()->random(&data[data_len], 4); data_len += 4;
     }
 
-    len += Utils::encryptThenMAC(secret, &packet->payload[len], data, data_len);
+    uint8_t ctx[3] = { PAYLOAD_TYPE_PATH, packet->payload[0], packet->payload[1] };
+    len += encryptPayload(secret, &packet->payload[len], data, data_len, ctx, sizeof(ctx));
   }
 
   packet->payload_len = len;
@@ -488,6 +523,7 @@ Packet* Mesh::createPathReturn(const uint8_t* dest_hash, const uint8_t* secret, 
 Packet* Mesh::createDatagram(uint8_t type, const Identity& dest, const uint8_t* secret, const uint8_t* data, size_t data_len) {
   if (type == PAYLOAD_TYPE_TXT_MSG || type == PAYLOAD_TYPE_REQ || type == PAYLOAD_TYPE_RESPONSE) {
     if (data_len + CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE-1 > MAX_PACKET_PAYLOAD) return NULL;
+    if (!fitsPayload(secret, 2*PATH_HASH_SIZE, data_len)) return NULL;
   } else {
     return NULL;  // invalid type
   }
@@ -502,7 +538,8 @@ Packet* Mesh::createDatagram(uint8_t type, const Identity& dest, const uint8_t* 
   int len = 0;
   len += dest.copyHashTo(&packet->payload[len]);  // dest hash
   len += self_id.copyHashTo(&packet->payload[len]);  // src hash
-  len += Utils::encryptThenMAC(secret, &packet->payload[len], data, data_len);
+  uint8_t ctx[3] = { type, packet->payload[0], packet->payload[1] };
+  len += encryptPayload(secret, &packet->payload[len], data, data_len, ctx, sizeof(ctx));
 
   packet->payload_len = len;
 
@@ -512,6 +549,7 @@ Packet* Mesh::createDatagram(uint8_t type, const Identity& dest, const uint8_t* 
 Packet* Mesh::createAnonDatagram(uint8_t type, const LocalIdentity& sender, const Identity& dest, const uint8_t* secret, const uint8_t* data, size_t data_len) {
   if (type == PAYLOAD_TYPE_ANON_REQ) {
     if (data_len + 1 + PUB_KEY_SIZE + CIPHER_BLOCK_SIZE-1 > MAX_PACKET_PAYLOAD) return NULL;
+    if (!fitsPayload(secret, PATH_HASH_SIZE + PUB_KEY_SIZE, data_len)) return NULL;
   } else {
     return NULL;  // invalid type
   }
@@ -530,7 +568,11 @@ Packet* Mesh::createAnonDatagram(uint8_t type, const LocalIdentity& sender, cons
   } else {
     // FUTURE:
   }
-  len += Utils::encryptThenMAC(secret, &packet->payload[len], data, data_len);
+  uint8_t ctx[2 + PUB_KEY_SIZE];
+  ctx[0] = type;
+  ctx[1] = packet->payload[0];
+  memcpy(&ctx[2], sender.pub_key, PUB_KEY_SIZE);
+  len += encryptPayload(secret, &packet->payload[len], data, data_len, ctx, sizeof(ctx));
 
   packet->payload_len = len;
 
@@ -540,6 +582,7 @@ Packet* Mesh::createAnonDatagram(uint8_t type, const LocalIdentity& sender, cons
 Packet* Mesh::createGroupDatagram(uint8_t type, const GroupChannel& channel, const uint8_t* data, size_t data_len) {
   if (!(type == PAYLOAD_TYPE_GRP_TXT || type == PAYLOAD_TYPE_GRP_DATA)) return NULL;   // invalid type
   if (data_len + 1 + CIPHER_BLOCK_SIZE-1 > MAX_PACKET_PAYLOAD) return NULL; // too long
+  if (!fitsPayload(channel.secret, PATH_HASH_SIZE, data_len)) return NULL;
 
   Packet* packet = obtainNewPacket();
   if (packet == NULL) {
@@ -550,7 +593,8 @@ Packet* Mesh::createGroupDatagram(uint8_t type, const GroupChannel& channel, con
 
   int len = 0;
   memcpy(&packet->payload[len], channel.hash, PATH_HASH_SIZE); len += PATH_HASH_SIZE;
-  len += Utils::encryptThenMAC(channel.secret, &packet->payload[len], data, data_len);
+  uint8_t ctx[2] = { type, channel.hash[0] };
+  len += encryptPayload(channel.secret, &packet->payload[len], data, data_len, ctx, sizeof(ctx));
 
   packet->payload_len = len;
 

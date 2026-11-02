@@ -189,6 +189,12 @@ protected:
   bool onChannelLoaded(uint8_t channel_idx, const ChannelDetails& ch) override { return setChannel(channel_idx, ch); }
   bool getChannelForSave(uint8_t channel_idx, ChannelDetails& ch) override { return getChannel(channel_idx, ch); }
 
+  // encryption policy (see CryptoV2.h)
+  uint8_t getCryptoPolicy(const uint8_t* secret) override { return crypto_policies.get(secret); }
+  void onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) override;
+  ContactInfo* findContactForCLI(const char* arg);
+  int findChannelForCLI(const char* arg, ChannelDetails& ch);
+
   void clearPendingReqs() {
     pending_login = pending_status = pending_telemetry = pending_discovery = pending_req = 0;
   }
@@ -241,6 +247,7 @@ private:
 
   DataStore* _store;
   NodePrefs _prefs;
+  CryptoPolicyTable crypto_policies;
   uint32_t pending_login;
   uint32_t pending_status;
   uint32_t pending_telemetry, pending_discovery;   // pending _TELEMETRY_REQ
