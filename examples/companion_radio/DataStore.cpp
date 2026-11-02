@@ -246,6 +246,25 @@ void DataStore::loadPrefsInt(const char *filename, NodePrefs& _prefs) {
   }
 }
 
+int DataStore::readFile(const char* filename, uint8_t* buf, int maxlen) {
+  if (!_fs->exists(filename)) return -1;
+  File f = openRead(_fs, filename);
+  if (!f) return -1;
+  int n = f.read(buf, maxlen);
+  f.close();
+  return n;
+}
+
+bool DataStore::writeFile(const char* filename, const uint8_t* buf, int len) {
+  File f = openWrite(_fs, filename);
+  if (!f) return false;
+  int n = f.write(buf, len);
+  f.close();
+  if (n == len) return true;
+  _fs->remove(filename);   // only partly written
+  return false;
+}
+
 bool DataStore::savePrefs(NodePrefs& _prefs) {
   File file = openWrite(_fs, "/prefs.json");
   if (file) {

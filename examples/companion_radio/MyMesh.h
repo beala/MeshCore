@@ -290,6 +290,37 @@ private:
 
   #define ADVERT_PATH_TABLE_SIZE   16
   AdvertPath advert_paths[ADVERT_PATH_TABLE_SIZE]; // circular table
+
+  // 'find': let other companions make this radio beep, and range to it (MyMeshFind.cpp)
+  struct FindAllow {
+    uint8_t pub_key[PUB_KEY_SIZE];
+    uint32_t last_ts;   // newest request timestamp accepted from them, so old requests can't be replayed
+  };
+  #define MAX_FIND_ALLOW  8
+  FindAllow _find_allow[MAX_FIND_ALLOW];
+  int _num_find_allow = 0;
+  uint8_t _find_peer[PUB_KEY_SIZE];   // finder: who we last asked
+  unsigned long _find_asked_at = 0;   // finder: when (0 = no request waiting for an answer)
+  bool _find_asked_range = false;
+  unsigned long _range_go_at = 0;     // finder: start ranging now (0 = no)
+  unsigned long _range_armed_at = 0;  // target: answer ranging once our reply has gone out (0 = no)
+  uint32_t _range_sent_mark = 0;
+  unsigned long _range_last = 0;      // target: last ranging session, for rate limiting
+  char _find_status[100];
+  unsigned long _find_status_at = 0;
+
+  ContactInfo* findContactByName(const char* name);
+  int findAllowIndex(const uint8_t* pub_key) const;
+  void loadFindAllow();
+  bool saveFindAllow();
+  static bool isFindRequest(const char* text);
+  void handleFindRequest(const ContactInfo& from, uint32_t sender_timestamp, const char* text, char* reply);
+  bool handleFindCommand(const char* command, char* reply);
+  void onFindReply(const ContactInfo& from, const char* text);
+  void findLoop();
+  static bool rangingAvailable(float freq);
+  void runRanging(bool manager, const uint8_t* addr_key);
+  void setFindStatus(const char* fmt, ...);
 };
 
 extern MyMesh the_mesh;

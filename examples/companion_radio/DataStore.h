@@ -44,6 +44,8 @@ public:
   bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], uint8_t len);
   bool deleteBlobByKey(const uint8_t key[], int key_len);
   File openRead(const char* filename);
+  int readFile(const char* filename, uint8_t* buf, int maxlen);         // returns bytes read, or -1
+  bool writeFile(const char* filename, const uint8_t* buf, int len);
   File openRead(FILESYSTEM* fs, const char* filename);
   bool removeFile(const char* filename);
   bool removeFile(FILESYSTEM* fs, const char* filename);

@@ -337,6 +337,33 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+#### Find a radio from another radio
+**Usage:**
+- `find beep <name>`: make it beep for 2 minutes
+- `find stop <name>`: stop it beeping
+- `find range <name>`: measure the distance to it (LR2021 radios only)
+- `get find`: the answer to your last request
+
+**Parameters:**
+- `name`: the other radio's contact name (exact, or the start of it)
+
+**Note:** The other radio must allow you first, see below. Answers take a few seconds to come back, so check them with `get find`. See [find_me.md](find_me.md).
+
+---
+
+#### Let other radios find this one
+**Usage:**
+- `set find.allow <name>`
+- `set find.deny <name>`
+- `get find.allow`
+
+**Parameters:**
+- `name`: the contact name of the radio that may find this one
+
+**Note:** Up to 8 contacts. An allowed contact can make this radio beep, stop it, and measure the distance to it. Nothing else. Contacts with remote CLI access are always allowed.
+
+---
+
 #### Turn the buzzer on or off
 **Usage:**
 - `get buzzer`

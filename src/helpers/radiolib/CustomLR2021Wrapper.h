@@ -12,6 +12,7 @@
 #endif
 
 class CustomLR2021Wrapper : public RadioLibWrapper {
+  friend class LR2021Ranging;
 public:
   CustomLR2021Wrapper(CustomLR2021& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
 

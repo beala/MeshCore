@@ -532,12 +532,17 @@ void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t 
 
 void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp, const char *text) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
+  onFindReply(from, text);    // an answer to 'find beep/stop/range'?
   queueMessage(from, TXT_TYPE_CLI_DATA, pkt, sender_timestamp, NULL, 0, text);
 }
 
 void MyMesh::onCLICommandRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
                                const char *text, char* reply) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
+  if (isFindRequest(text)) {  // another companion looking for this radio (MyMeshFind.cpp)
+    handleFindRequest(from, sender_timestamp, text, reply);
+    return;
+  }
   if (from.isRemoteCLIAllowed()) {
     if (!handleCommand(text, sender_timestamp, reply)) {
       strcat(reply, "Unknown command");   // reply may have cmd prefix from 'text'
@@ -1021,6 +1026,7 @@ void MyMesh::begin() {
   radio_driver.setTxPower(_prefs.tx_power_dbm);
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
   radio_driver.setTxLedEnabled(!_prefs.led_off);
+  loadFindAllow();
 
   board.attachDynamicPrefs(_prefs.getCustom());
 
@@ -2192,6 +2198,8 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 #endif
 
+  if (handleFindCommand(command, reply)) return true;   // find beep/stop/range, get/set find.* (MyMeshFind.cpp)
+
   // find me: beep (and vibrate) so a lost radio can be found, even if the buzzer is turned off
   if (strcmp(command, "find me") == 0 || memcmp(command, "find me ", 8) == 0) {
     const char* arg = command[7] ? &command[8] : "";
@@ -2605,6 +2613,7 @@ void MyMesh::checkSerialInterface() {
 
 void MyMesh::loop() {
   BaseChatMesh::loop();
+  findLoop();
 
   if (_cli_rescue) {
     checkCLIRescueCmd();
