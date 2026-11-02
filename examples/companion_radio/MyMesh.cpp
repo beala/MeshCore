@@ -977,7 +977,22 @@ void MyMesh::begin() {
 #endif
 
   // load persisted prefs
+  _prefs.led_off = 0xFF;   // marks "not saved yet", see below
   _store->loadPrefs(_prefs);
+  if (_prefs.led_off == 0xFF) {
+    // a new device, or the first boot of a firmware with this setting: apply this build's defaults
+#ifdef STATUS_LED_DEFAULT_OFF
+    _prefs.led_off = 1;
+#else
+    _prefs.led_off = 0;
+#endif
+#ifdef BUZZER_DEFAULT_OFF
+    _prefs.buzzer_quiet = 1;
+#endif
+#ifdef VIBE_DEFAULT_OFF
+    _prefs.vibe_quiet = 1;
+#endif
+  }
   sensors.node_lat = _prefs.node_lat;
   sensors.node_lon = _prefs.node_lon;
 
@@ -1005,6 +1020,7 @@ void MyMesh::begin() {
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+  radio_driver.setTxLedEnabled(!_prefs.led_off);
 
   board.attachDynamicPrefs(_prefs.getCustom());
 
@@ -2132,6 +2148,41 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (memcmp(command, "set buzzer ", 11) == 0) {
     if (strcmp(&command[11], "on") == 0 || strcmp(&command[11], "off") == 0) {
       _prefs.buzzer_quiet = strcmp(&command[11], "off") == 0;
+      savePrefs();
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error: state must be on or off");
+    }
+    return true;
+  }
+#endif
+
+#ifdef HAS_DRV2605
+  if (strcmp(command, "get vibe") == 0) {
+    sprintf(reply, "> %s", _prefs.vibe_quiet ? "off" : "on");
+    return true;
+  }
+  if (memcmp(command, "set vibe ", 9) == 0) {
+    if (strcmp(&command[9], "on") == 0 || strcmp(&command[9], "off") == 0) {
+      _prefs.vibe_quiet = strcmp(&command[9], "off") == 0;
+      savePrefs();
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error: state must be on or off");
+    }
+    return true;
+  }
+#endif
+
+#if defined(PIN_STATUS_LED) || defined(PIN_STATUS_LED_R) || defined(P_LORA_TX_LED)
+  if (strcmp(command, "get led") == 0) {
+    sprintf(reply, "> %s", _prefs.led_off ? "off" : "on");
+    return true;
+  }
+  if (memcmp(command, "set led ", 8) == 0) {
+    if (strcmp(&command[8], "on") == 0 || strcmp(&command[8], "off") == 0) {
+      _prefs.led_off = strcmp(&command[8], "off") == 0;
+      radio_driver.setTxLedEnabled(!_prefs.led_off);
       savePrefs();
       strcpy(reply, "OK");
     } else {
