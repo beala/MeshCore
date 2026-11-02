@@ -509,6 +509,8 @@ Lists channels that aren't `legacy`, and how many contacts are on `v2` or `v2onl
 
 **Note:** When a contact sends you a verified v2 packet, the contact is switched from `legacy` to `v2` automatically, since it can clearly receive v2. Nothing ever lowers a policy automatically (a missing ACK never causes a fallback to v1). `v2only` is only ever set by you: use it once you know the contact will only send v2, so forged or replayed v1 packets from that contact are dropped.
 
+Policies can only be changed on the device itself (the app or USB), not by a remote admin with Remote CLI access. A remote admin can still read them. If saving fails, the command reports an error and the policy stays as it was.
+
 Repeaters and room servers with v2 firmware accept v2 requests but still reply in v1, so use `v2`, not `v2only`, for them. Logins to a repeater or room server without v2 firmware fail if its contact is set to `v2`.
 
 ---
@@ -525,3 +527,11 @@ Repeaters and room servers with v2 firmware accept v2 requests but still reply i
 **Default:** `legacy`
 
 **Note:** Channels never switch automatically: one member sending v2 doesn't mean every member can read it. Anyone with the channel key can still read and send on the channel, and can claim any sender name.
+
+---
+
+#### Recover after lost encryption policies
+**Usage:**
+- `set crypto.recover`
+
+**Note:** Policies are saved to two alternating files with checksums, and prefs record which save is the newest. If the newest save can't be loaded at boot (corrupt or missing), the device doesn't fall back to accepting v1: it treats every contact and channel as `v2only`, and `get crypto` shows a warning. `set crypto.recover` accepts whatever policies did load (an older save, or none), so check your `v2only` contacts and channels afterwards. Only works on the device itself.

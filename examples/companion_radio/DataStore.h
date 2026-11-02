@@ -40,8 +40,8 @@ public:
   void saveContacts(DataStoreHost* host, bool (*filter)(const ContactInfo& c) = NULL);
   void loadChannels(DataStoreHost* host);
   void saveChannels(DataStoreHost* host);
-  void loadCryptoPolicies(CryptoPolicyTable& table);
-  bool saveCryptoPolicies(const CryptoPolicyTable& table);
+  bool loadCryptoPolicies(CryptoPolicyTable& table, uint32_t& seq);
+  bool saveCryptoPolicies(const CryptoPolicyTable& table, uint32_t seq);
   void migrateToSecondaryFS();
   uint8_t getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]);
   bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], uint8_t len);
@@ -54,5 +54,7 @@ public:
   uint32_t getStorageTotalKb() const;
 
 private:
+  bool checkCryptoPolicyFile(const char* filename, uint32_t& seq);
+  bool readCryptoPolicyFile(const char* filename, CryptoPolicyTable* table, uint32_t& seq);
   FILESYSTEM* _getContactsChannelsFS() const { if (_fsExtra) return _fsExtra; return _fs;};
 };

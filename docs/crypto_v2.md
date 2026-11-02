@@ -122,6 +122,32 @@ Each contact and each channel has a policy:
 - **No automatic downgrade.** A missing ACK, a timeout or anything else an attacker can cause never lowers a policy. Only the user lowers a policy.
 - **`v2only` is only set by the user.** Accepting v1 is a deliberate migration trade-off: v1's 2-byte MAC is still accepted from that contact or channel until the user sets `v2only`.
 - **Storage.** Policies are stored by an 8-byte ID: `SHA256("MeshCore policy id" || secret)[0..7]`. A policy therefore follows the key, not the contact's slot or the channel's slot.
+- **Saving fails closed.**
+  - Policies are written alternately to `/crypto_pa` and `/crypto_pb`. Each file holds a magic number, version, sequence number, count, the records and a truncated SHA-256 checksum.
+  - A save is reported as successful only after the file is read back and checks out. A failed or interrupted write leaves the previous file intact. If a command's save fails, the policy change is undone and an error is returned.
+  - After each save, the sequence number is also stored in prefs (`crypto_seq`). At boot, the newest valid file is loaded. If its sequence number is lower than the one in prefs, a newer save was lost. The device then treats everything as `v2only` until the user runs `set crypto.recover`, rather than silently accepting v1 again.
+- **Only changed locally.** `set crypto*` commands are refused when they come from a remote admin over the Remote CLI. Only the device's owner, through the app or USB, can lower a policy.
+
+## Decrypted payloads
+
+A valid tag proves the sender knows the key, not that the payload is well formed.
+- **Zero-filled buffers.** After decryption, everything past the plaintext in the receive buffer is zeroed, for v1 and v2 alike. Parsers that read slightly past the end, as v1's block padding used to allow, see zeroes, never stale stack data.
+- **Length checks.** Fixed alongside v2:
+  - `PATH` payloads whose declared path doesn't fit are rejected. Before this fix, `extra_len` could wrap around and over-read the stack. This also affected v1.
+  - Signed text messages shorter than 9 bytes are dropped.
+  - The ACK's extra attempt byte is read only when the message carries one. Otherwise it is 0.
+- **Testing.** `test_crypto_v2_mesh` runs under AddressSanitizer and UBSan. It sends random plaintexts of every encrypted type and length through the receive path.
+
+## Cost of invalid packets
+
+v1 checks its 2-byte MAC before decrypting. v2 has to decrypt before it can check the tag. An invalid v2 packet aimed at a node therefore costs one decryption attempt per candidate key, or two in the rare padded case. Each attempt is roughly:
+- the HKDF (4 SHA-256 blocks)
+- AES-CTR over the payload (up to 11 AES blocks)
+- S2V (about 15 AES blocks)
+
+The number of candidate keys is the number of contacts or channels whose 1-byte hash matches.
+
+That cost hasn't been measured on hardware yet. Each packet also needs tens to hundreds of milliseconds of airtime, which limits how many an attacker can deliver, so the CPU cost should stay small next to the radio's receive power. This should be benchmarked on nRF52 before relying on it.
 
 ## What v2 does not do
 

@@ -63,9 +63,11 @@ public:
 // hands out heap packets so create*() works; nothing is queued
 class HeapPacketManager : public mesh::PacketManager {
 public:
+  std::vector<mesh::Packet*> sent;   // outbound packets, owned by the test
+  ~HeapPacketManager() { for (auto p : sent) delete p; }
   mesh::Packet* allocNew() override { return new mesh::Packet(); }
   void free(mesh::Packet* p) override { delete p; }
-  void queueOutbound(mesh::Packet* p, uint8_t, uint32_t) override { delete p; }
+  void queueOutbound(mesh::Packet* p, uint8_t, uint32_t) override { sent.push_back(p); }
   mesh::Packet* getNextOutbound(uint32_t) override { return nullptr; }
   int getOutboundCount(uint32_t) const override { return 0; }
   int getOutboundTotal() const override { return 0; }
@@ -89,6 +91,8 @@ public:
   std::vector<std::string> group_messages;
   int upgrades = 0;
   int path_extra_len = -1;
+  uint8_t path_extra[256];
+  int signed_received = 0;
   mesh::GroupChannel channel;
   bool has_channel = false;
 
@@ -110,8 +114,9 @@ public:
   void onGroupDataRecv(mesh::Packet*, uint8_t, const mesh::GroupChannel&, uint8_t* data, size_t len) override {
     group_messages.push_back(std::string((const char*)&data[5], strnlen((const char*)&data[5], len - 5)));
   }
-  bool onPeerPathRecv(mesh::Packet*, int, const uint8_t*, uint8_t*, uint8_t, uint8_t, uint8_t*, uint8_t extra_len) override {
+  bool onPeerPathRecv(mesh::Packet*, int, const uint8_t*, uint8_t*, uint8_t, uint8_t, uint8_t* extra, uint8_t extra_len) override {
     path_extra_len = extra_len;
+    memcpy(path_extra, extra, extra_len);
     return false;
   }
 
@@ -121,7 +126,7 @@ public:
   void onMessageRecv(const ContactInfo&, mesh::Packet*, uint32_t, const char* text) override { messages.push_back(text); }
   void onCommandDataRecv(const ContactInfo&, mesh::Packet*, uint32_t, const char*) override {}
   void onCLICommandRecv(const ContactInfo&, mesh::Packet*, uint32_t, const char*, char*) override {}
-  void onSignedMessageRecv(const ContactInfo&, mesh::Packet*, uint32_t, const uint8_t*, const char*) override {}
+  void onSignedMessageRecv(const ContactInfo&, mesh::Packet*, uint32_t, const uint8_t*, const char*) override { signed_received++; }
   void onChannelMessageRecv(const mesh::GroupChannel&, mesh::Packet*, uint32_t, const char*) override {}
   uint8_t onContactRequest(const ContactInfo&, uint32_t, const uint8_t*, uint8_t, uint8_t*) override { return 0; }
   void onContactResponse(const ContactInfo&, const uint8_t*, uint8_t) override {}
@@ -306,6 +311,108 @@ TEST_F(Pair, ChannelV2AndV2Only) {
   alice.node.policies.set(ch.secret, CRYPTO_POLICY_LEGACY);
   deliver(send("Alice: v1 again"));
   EXPECT_EQ(2u, bob.node.group_messages.size());
+}
+
+// ---- malformed / edge-case plaintexts (an authenticated sender can still send garbage) ----
+
+struct Malformed : Pair {
+  // seal an arbitrary plaintext from Alice to Bob as the given type, and deliver it
+  void sendRaw(uint8_t type, const uint8_t* p, int len) {
+    mesh::Packet* pkt = new mesh::Packet();
+    pkt->header = ROUTE_TYPE_FLOOD | (type << PH_TYPE_SHIFT);
+    pkt->path_len = 0;
+    pkt->payload[0] = bob.node.self_id.pub_key[0];
+    pkt->payload[1] = alice.node.self_id.pub_key[0];
+    uint8_t ctx[3] = { type, pkt->payload[0], pkt->payload[1] };
+    int n = mesh::CryptoV2::seal(a2b, &pkt->payload[2], p, len, ctx, 3);
+    ASSERT_GT(n, 0);
+    pkt->payload_len = 2 + n;
+    deliver(pkt);
+  }
+  // the ACK Bob sends back for a text message: Bob replies to a flood message with a PATH carrying the ACK
+  bool ackFromBob(uint8_t out[6]) {
+    for (auto p : bob.mgr.sent) {
+      if (p->getPayloadType() != PAYLOAD_TYPE_PATH) continue;
+      alice.node.path_extra_len = -1;
+      alice.node.onRecvPacket(p);
+      if (alice.node.path_extra_len == 6) { memcpy(out, alice.node.path_extra, 6); return true; }
+    }
+    return false;
+  }
+};
+
+TEST_F(Malformed, AckAttemptByteIsZeroForNormalMessages) {
+  alice.node.policies.set(a2b, CRYPTO_POLICY_V2);
+  bob.node.policies.set(b2a, CRYPTO_POLICY_V2);
+  alice.node.policies.set(a2b, CRYPTO_POLICY_V2);
+  deliver(dm("ordinary"));
+  uint8_t ack[6];
+  ASSERT_TRUE(ackFromBob(ack));
+  EXPECT_EQ(0, ack[4]);
+}
+
+TEST_F(Malformed, AckCarriesExtendedAttemptByte) {
+  alice.node.policies.set(a2b, CRYPTO_POLICY_V2);
+  bob.node.policies.set(b2a, CRYPTO_POLICY_V2);
+  // composeMsgPacket() layout for attempt > 3: timestamp, flags, text, NUL, attempt
+  uint8_t p[32];
+  uint32_t ts = 1700000600;
+  memcpy(p, &ts, 4);
+  p[4] = 5 & 3;
+  memcpy(&p[5], "retry", 5);
+  p[10] = 0;
+  p[11] = 5;
+  sendRaw(PAYLOAD_TYPE_TXT_MSG, p, 12);
+  uint8_t ack[6];
+  ASSERT_TRUE(ackFromBob(ack));
+  EXPECT_EQ(5, ack[4]);
+}
+
+TEST_F(Malformed, TruncatedPathRejected) {
+  uint8_t p[8] = { 10, 0x01, 0x02 };   // claims 10 one-byte hashes, carries 2
+  sendRaw(PAYLOAD_TYPE_PATH, p, 3);
+  EXPECT_EQ(-1, bob.node.path_extra_len);
+  uint8_t q[8] = { 3, 0x01, 0x02, 0x03 };   // path fits exactly but no extra_type byte
+  sendRaw(PAYLOAD_TYPE_PATH, q, 4);
+  EXPECT_EQ(-1, bob.node.path_extra_len);
+  uint8_t r[8] = { 3, 0x01, 0x02, 0x03, PAYLOAD_TYPE_ACK };   // shortest valid: empty extra
+  sendRaw(PAYLOAD_TYPE_PATH, r, 5);
+  EXPECT_EQ(0, bob.node.path_extra_len);
+}
+
+TEST_F(Malformed, ShortSignedMessageDropped) {
+  uint8_t p[8] = { 1, 2, 3, 4, (uint8_t)(TXT_TYPE_SIGNED_PLAIN << 2), 'x' };
+  sendRaw(PAYLOAD_TYPE_TXT_MSG, p, 6);
+  EXPECT_EQ(0, bob.node.signed_received);
+}
+
+TEST_F(Malformed, RandomPlaintextsOfEveryTypeAreHandledSafely) {
+  // runs under AddressSanitizer: any read past the plaintext buffer fails the build's test run
+  bob.node.has_channel = true;
+  memset(&bob.node.channel, 0, sizeof(bob.node.channel));
+  for (int i = 0; i < 16; i++) bob.node.channel.secret[i] = (uint8_t)(0x50 + i);
+  mesh::Utils::sha256(bob.node.channel.hash, 1, bob.node.channel.secret, 16);
+
+  uint32_t x = 12345;
+  auto rnd = [&]() { x = x * 1103515245u + 12345u; return (uint8_t)(x >> 16); };
+  const uint8_t types[] = { PAYLOAD_TYPE_TXT_MSG, PAYLOAD_TYPE_REQ, PAYLOAD_TYPE_RESPONSE, PAYLOAD_TYPE_PATH };
+  uint8_t p[170];
+  for (int round = 0; round < 20; round++) {
+    for (int len = 1; len <= 165; len += 1 + round % 7) {
+      for (int i = 0; i < len; i++) p[i] = rnd();
+      if (len > 4) p[4] = (uint8_t)((rnd() % 4) << 2);   // exercise each text sub-type
+      for (uint8_t t : types) sendRaw(t, p, len);
+
+      mesh::Packet* g = new mesh::Packet();
+      g->header = ROUTE_TYPE_FLOOD | ((round & 1 ? PAYLOAD_TYPE_GRP_DATA : PAYLOAD_TYPE_GRP_TXT) << PH_TYPE_SHIFT);
+      g->path_len = 0;
+      g->payload[0] = bob.node.channel.hash[0];
+      uint8_t ctx[2] = { g->getPayloadType(), g->payload[0] };
+      g->payload_len = 1 + mesh::CryptoV2::seal(bob.node.channel.secret, &g->payload[1], p, len, ctx, 2);
+      deliver(g);
+    }
+  }
+  SUCCEED();
 }
 
 }  // namespace

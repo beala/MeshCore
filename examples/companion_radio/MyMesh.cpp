@@ -539,9 +539,11 @@ void MyMesh::onCLICommandRecv(const ContactInfo &from, mesh::Packet *pkt, uint32
                                const char *text, char* reply) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
   if (from.isRemoteCLIAllowed()) {
+    _cli_remote = true;
     if (!handleCommand(text, sender_timestamp, reply)) {
       strcat(reply, "Unknown command");   // reply may have cmd prefix from 'text'
     }
+    _cli_remote = false;
   } else {
     queueMessage(from, TXT_TYPE_CLI_COMMAND, pkt, sender_timestamp, NULL, 0, text);
   }
@@ -1001,7 +1003,14 @@ void MyMesh::begin() {
   bootstrapRTCfromContacts();
   addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure public channel
   _store->loadChannels(this);
-  _store->loadCryptoPolicies(crypto_policies);
+  _store->loadCryptoPolicies(crypto_policies, _crypto_seq);
+  if (_prefs.crypto_seq > _crypto_seq) {
+    // prefs say a newer policy file was saved than the one we could load: it was lost or rolled back.
+    // Don't silently fall back to accepting v1 (see 'set crypto.recover').
+    _crypto_lost = true;
+    MESH_DEBUG_PRINTLN("encryption policies lost (have seq %u, expected %u): v2 only until recovered",
+                       _crypto_seq, _prefs.crypto_seq);
+  }
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
@@ -2123,12 +2132,48 @@ int MyMesh::findChannelForCLI(const char* arg, ChannelDetails& ch) {
 // a known contact sent us a verified v2 packet, so it can receive v2 too: start sending it v2.
 // This only ever raises the policy, never lowers it.
 void MyMesh::onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) {
+  if (_crypto_lost) return;
   if (crypto_policies.get(secret) == CRYPTO_POLICY_LEGACY) {
     if (crypto_policies.set(secret, CRYPTO_POLICY_V2)) {
-      _store->saveCryptoPolicies(crypto_policies);
+      // if saving fails it still applies until reboot, and is relearned from the next v2 packet
+      saveCryptoPolicies();
       MESH_DEBUG_PRINTLN("contact upgraded to v2 encryption");
     }
   }
+}
+
+// Saves the policy table to a new file, then records its seq in prefs. A later boot that can only
+// load an older file (or none) sees the seq gap and fails closed.
+bool MyMesh::saveCryptoPolicies() {
+  uint32_t seq = (_crypto_seq > _prefs.crypto_seq ? _crypto_seq : _prefs.crypto_seq) + 1;
+  if (!_store->saveCryptoPolicies(crypto_policies, seq)) return false;
+  _crypto_seq = seq;
+  _prefs.crypto_seq = seq;
+  savePrefs();
+  return true;
+}
+
+// Sets and saves a policy. If the save fails, the old policy is restored and an error returned.
+bool MyMesh::setCryptoPolicy(const uint8_t* secret, uint8_t policy, char* reply) {
+  if (_cli_remote) {
+    strcpy(reply, "Error: encryption policies can only be changed on this device");
+    return false;
+  }
+  if (_crypto_lost) {
+    strcpy(reply, "Error: saved policies were lost. Run set crypto.recover first");
+    return false;
+  }
+  uint8_t old = crypto_policies.get(secret);
+  if (!crypto_policies.set(secret, policy)) {
+    strcpy(reply, "Error: policy table full");
+    return false;
+  }
+  if (!saveCryptoPolicies()) {
+    crypto_policies.set(secret, old);
+    strcpy(reply, "Error: couldn't save, policy unchanged");
+    return false;
+  }
+  return true;
 }
 
 bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char* reply) {
@@ -2178,9 +2223,29 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 
   // encryption policy: legacy | v2 | v2only  (see docs/crypto_v2.md)
+  if (strcmp(command, "set crypto.recover") == 0) {
+    if (_cli_remote) {
+      strcpy(reply, "Error: encryption policies can only be changed on this device");
+    } else if (!_crypto_lost) {
+      strcpy(reply, "OK - nothing to recover");
+    } else {
+      _crypto_lost = false;   // accept the policies that did load (possibly older, possibly none)
+      if (saveCryptoPolicies()) {
+        sprintf(reply, "OK - using the %d saved policies that loaded. Check v2only contacts and channels", crypto_policies.count());
+      } else {
+        _crypto_lost = true;
+        strcpy(reply, "Error: couldn't save");
+      }
+    }
+    return true;
+  }
   if (strcmp(command, "get crypto") == 0) {
     int n_ch = 0, n_v2 = 0, n_only = 0;
     char* dp = reply;
+    if (_crypto_lost) {
+      strcpy(reply, "> WARNING: saved policies were lost, everything is v2only until: set crypto.recover");
+      return true;
+    }
     dp += sprintf(dp, ">");
 #ifdef MAX_GROUP_CHANNELS
     for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
@@ -2204,7 +2269,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (memcmp(command, "get crypto ", 11) == 0) {
     ContactInfo* c = findContactForCLI(&command[11]);
     if (c) {
-      sprintf(reply, "> %s: %s", c->name, CryptoPolicyTable::name(crypto_policies.get(c->getSharedSecret(self_id))));
+      sprintf(reply, "> %s: %s", c->name, CryptoPolicyTable::name(getCryptoPolicy(c->getSharedSecret(self_id))));
     } else {
       strcpy(reply, "Error: contact not found");
     }
@@ -2226,10 +2291,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
       strcpy(reply, "Error: mode must be legacy, v2 or v2only");
     } else if (c == NULL) {
       strcpy(reply, "Error: contact not found");
-    } else if (!crypto_policies.set(c->getSharedSecret(self_id), p)) {
-      strcpy(reply, "Error: policy table full");
-    } else {
-      _store->saveCryptoPolicies(crypto_policies);
+    } else if (setCryptoPolicy(c->getSharedSecret(self_id), p, reply)) {
       sprintf(reply, "OK - %s: %s", c->name, CryptoPolicyTable::name(p));
     }
     return true;
@@ -2239,7 +2301,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     ChannelDetails ch;
     int idx = findChannelForCLI(&command[14], ch);
     if (idx >= 0) {
-      sprintf(reply, "> ch%d %s: %s", idx, ch.name, CryptoPolicyTable::name(crypto_policies.get(ch.channel.secret)));
+      sprintf(reply, "> ch%d %s: %s", idx, ch.name, CryptoPolicyTable::name(getCryptoPolicy(ch.channel.secret)));
     } else {
       strcpy(reply, "Error: channel not found");
     }
@@ -2262,10 +2324,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
       strcpy(reply, "Error: mode must be legacy, v2 or v2only");
     } else if (idx < 0) {
       strcpy(reply, "Error: channel not found");
-    } else if (!crypto_policies.set(ch.channel.secret, p)) {
-      strcpy(reply, "Error: policy table full");
-    } else {
-      _store->saveCryptoPolicies(crypto_policies);
+    } else if (setCryptoPolicy(ch.channel.secret, p, reply)) {
       sprintf(reply, "OK - ch%d %s: %s", idx, ch.name, CryptoPolicyTable::name(p));
     }
     return true;

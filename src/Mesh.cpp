@@ -18,15 +18,25 @@ int Mesh::encryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* da
   return Utils::encryptThenMAC(secret, dest, data, data_len);
 }
 
+// dest must be MAX_PACKET_PAYLOAD bytes. Everything after the plaintext is zeroed, so parsers that
+// read a little past the end (as v1's block padding used to allow) see zeroes, never stale stack data.
 int Mesh::decryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* env, int env_len, const uint8_t* ctx, int ctx_len, bool& was_v2) {
+  int len;
   // v1 and v2 are told apart by length: v1 is always a 2-byte MAC plus whole AES blocks
   if (CryptoV2::isLegacyEnvelope(env_len)) {
     was_v2 = false;
-    if (getCryptoPolicy(secret) == CRYPTO_POLICY_V2_ONLY) return 0;   // v1 not accepted for this contact/channel
-    return Utils::MACThenDecrypt(secret, dest, env, env_len);
+    if (getCryptoPolicy(secret) == CRYPTO_POLICY_V2_ONLY) {
+      len = 0;   // v1 not accepted for this contact/channel
+    } else {
+      len = env_len - CIPHER_MAC_SIZE <= MAX_PACKET_PAYLOAD ? Utils::MACThenDecrypt(secret, dest, env, env_len) : 0;
+    }
+  } else {
+    was_v2 = true;
+    len = CryptoV2::open(secret, dest, env, env_len, ctx, ctx_len);
   }
-  was_v2 = true;
-  return CryptoV2::open(secret, dest, env, env_len, ctx, ctx_len);
+  if (len < 0 || len > MAX_PACKET_PAYLOAD) len = 0;
+  memset(&dest[len], 0, MAX_PACKET_PAYLOAD - len);
+  return len;
 }
 
 bool Mesh::fitsPayload(const uint8_t* secret, int header_len, int data_len) {
@@ -193,6 +203,10 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
                 uint8_t hash_size = (path_len >> 6) + 1;
                 uint8_t hash_count = path_len & 63;
                 uint8_t* path = &data[k]; k += hash_size*hash_count;
+                if (k + 1 > len) {
+                  MESH_DEBUG_PRINTLN("%s PAYLOAD_TYPE_PATH, path longer than payload", getLogDateTime());
+                  break;   // declared path doesn't fit in the plaintext
+                }
                 uint8_t extra_type = data[k++] & 0x0F;   // upper 4 bits reserved for future use
                 uint8_t* extra = &data[k];
                 uint8_t extra_len = len - k;   // remainder of packet (may be padded with zeroes!)

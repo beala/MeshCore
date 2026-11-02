@@ -190,8 +190,11 @@ protected:
   bool getChannelForSave(uint8_t channel_idx, ChannelDetails& ch) override { return getChannel(channel_idx, ch); }
 
   // encryption policy (see CryptoV2.h)
-  uint8_t getCryptoPolicy(const uint8_t* secret) override { return crypto_policies.get(secret); }
+  // If saved policies were lost or rolled back, fail closed: v2 only for everything until 'set crypto.recover'
+  uint8_t getCryptoPolicy(const uint8_t* secret) override { return _crypto_lost ? CRYPTO_POLICY_V2_ONLY : crypto_policies.get(secret); }
   void onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) override;
+  bool saveCryptoPolicies();
+  bool setCryptoPolicy(const uint8_t* secret, uint8_t policy, char* reply);
   ContactInfo* findContactForCLI(const char* arg);
   int findChannelForCLI(const char* arg, ChannelDetails& ch);
 
@@ -248,6 +251,9 @@ private:
   DataStore* _store;
   NodePrefs _prefs;
   CryptoPolicyTable crypto_policies;
+  uint32_t _crypto_seq = 0;      // seq of the policy file loaded / last saved
+  bool _crypto_lost = false;     // the newest saved policies couldn't be loaded
+  bool _cli_remote = false;      // handleCommand() is running for a remote admin
   uint32_t pending_login;
   uint32_t pending_status;
   uint32_t pending_telemetry, pending_discovery;   // pending _TELEMETRY_REQ
