@@ -24,14 +24,18 @@ public:
                               RadioDriverType& driver,
                               uint32_t total_air_time_ms,
                               uint32_t total_rx_air_time_ms) {
-    sprintf(reply, 
-      "{\"noise_floor\":%d,\"last_rssi\":%d,\"last_snr\":%.2f,\"tx_air_secs\":%u,\"rx_air_secs\":%u}",
+    int n = sprintf(reply, 
+      "{\"noise_floor\":%d,\"last_rssi\":%d,\"last_snr\":%.2f,\"tx_air_secs\":%u,\"rx_air_secs\":%u",
       (int16_t)radio->getNoiseFloor(),
       (int16_t)driver.getLastRSSI(),
       driver.getLastSNR(),
       total_air_time_ms / 1000,
       total_rx_air_time_ms / 1000
     );
+    // only radios that report it (currently LR2021) add the gain step
+    int gain = driver.getLastGainStep();
+    if (gain >= 0) n += sprintf(&reply[n], ",\"last_gain\":%d", gain);
+    strcpy(&reply[n], "}");
   }
 
   template<typename RadioDriverType>
