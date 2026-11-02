@@ -41,6 +41,9 @@ public:
   /** AES-CMAC (RFC 4493) of a single string (exposed for test vectors). */
   static void cmac(const uint8_t key[16], const uint8_t* msg, size_t len, uint8_t mac[16]);
 
+  /** true if AES runs on hardware (nRF52 CC310 after passing its self-test, or ESP32) */
+  static bool usingHardwareAes();
+
   /** Constant-time comparison. Returns true if equal. */
   static bool equalsCT(const uint8_t* a, const uint8_t* b, size_t len);
 };

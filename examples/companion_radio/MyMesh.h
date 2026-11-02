@@ -254,6 +254,8 @@ private:
   uint32_t _crypto_seq = 0;      // seq of the policy file loaded / last saved
   bool _crypto_lost = false;     // the newest saved policies couldn't be loaded
   bool _cli_remote = false;      // handleCommand() is running for a remote admin
+  bool _crypto_save_pending = false;     // an auto-upgrade is waiting to be written to flash
+  unsigned long _crypto_save_at = 0;
   uint32_t pending_login;
   uint32_t pending_status;
   uint32_t pending_telemetry, pending_discovery;   // pending _TELEMETRY_REQ

@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include <AesSiv.h>
 
 #include <Arduino.h> // needed for PlatformIO
 #ifdef ENABLE_WIFI_INTERFACE
@@ -2135,8 +2136,11 @@ void MyMesh::onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) {
   if (_crypto_lost) return;
   if (crypto_policies.get(secret) == CRYPTO_POLICY_LEGACY) {
     if (crypto_policies.set(secret, CRYPTO_POLICY_V2)) {
-      // if saving fails it still applies until reboot, and is relearned from the next v2 packet
-      saveCryptoPolicies();
+      // Applies right away. The flash write waits a few seconds, so it doesn't hold up this
+      // packet or its ACK. If it's lost (reboot first, or the write fails) the contact is back on
+      // legacy, which still accepts v2, and the upgrade is relearned from its next v2 packet.
+      _crypto_save_pending = true;
+      _crypto_save_at = millis() + 5000;
       MESH_DEBUG_PRINTLN("contact upgraded to v2 encryption");
     }
   }
@@ -2237,6 +2241,41 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
         strcpy(reply, "Error: couldn't save");
       }
     }
+    return true;
+  }
+  // timings of v2 decryption with a fixed test key (nothing secret), in microseconds per call
+  if (strcmp(command, "get crypto.bench") == 0) {
+    uint8_t secret[PUB_KEY_SIZE], ctx[3] = { PAYLOAD_TYPE_TXT_MSG, 0x11, 0x22 };
+    uint8_t p[170], env[MAX_PACKET_PAYLOAD], out[MAX_PACKET_PAYLOAD], key[32];
+    for (int i = 0; i < PUB_KEY_SIZE; i++) secret[i] = (uint8_t)i;
+    for (int i = 0; i < (int)sizeof(p); i++) p[i] = (uint8_t)(i * 7);
+    const int N = 8;
+    auto timeOpen = [&](int env_len) -> uint32_t {
+      uint32_t t0 = micros();
+      for (int k = 0; k < N; k++) mesh::CryptoV2::open(secret, out, env, env_len, ctx, sizeof(ctx));
+      return (micros() - t0) / N;
+    };
+    uint32_t ok[3];
+    const int lens[3] = { 20, 80, 160 };
+    for (int j = 0; j < 3; j++) {
+      ok[j] = timeOpen(mesh::CryptoV2::seal(secret, env, p, lens[j], ctx, sizeof(ctx)));
+    }
+    int n = mesh::CryptoV2::seal(secret, env, p, 160, ctx, sizeof(ctx));
+    env[0] ^= 1;  uint32_t bad0 = timeOpen(n);  env[0] ^= 1;     // tag wrong in its first byte
+    env[15] ^= 1; uint32_t bad15 = timeOpen(n); env[15] ^= 1;    // ... or only in its last byte
+    n = mesh::CryptoV2::seal(secret, env, p, 162, ctx, sizeof(ctx));   // padded: a bad tag costs 2 attempts
+    env[3] ^= 1;  uint32_t pad = timeOpen(n);
+    uint32_t t0 = micros();
+    for (int k = 0; k < N; k++) mesh::CryptoV2::deriveKey(secret, key);
+    uint32_t kdf = (micros() - t0) / N;
+    n = mesh::Utils::encryptThenMAC(secret, env, p, 160);
+    env[0] ^= 1;
+    t0 = micros();
+    for (int k = 0; k < N; k++) mesh::Utils::MACThenDecrypt(secret, out, env, n);
+    uint32_t v1bad = (micros() - t0) / N;
+    sprintf(reply, "> aes=%s us: ok20/80/160 %u/%u/%u bad@0 %u bad@15 %u padretry %u kdf %u v1bad %u",
+            mesh::AesSiv::usingHardwareAes() ? "hw" : "sw", (unsigned)ok[0], (unsigned)ok[1], (unsigned)ok[2],
+            (unsigned)bad0, (unsigned)bad15, (unsigned)pad, (unsigned)kdf, (unsigned)v1bad);
     return true;
   }
   if (strcmp(command, "get crypto") == 0) {
@@ -2743,6 +2782,11 @@ void MyMesh::checkSerialInterface() {
 
 void MyMesh::loop() {
   BaseChatMesh::loop();
+
+  if (_crypto_save_pending && (long)(millis() - _crypto_save_at) >= 0) {
+    _crypto_save_pending = false;
+    if (!_crypto_lost) saveCryptoPolicies();
+  }
 
   if (_cli_rescue) {
     checkCLIRescueCmd();

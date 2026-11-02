@@ -187,16 +187,34 @@ A valid tag proves the sender knows the key, not that the payload is well formed
   - The ACK's extra attempt byte is read only when the message carries one. Otherwise it is 0.
 - **Testing.** `test_crypto_v2_mesh` runs under AddressSanitizer and UBSan. It sends random plaintexts of every encrypted type and length through the receive path.
 
-## Cost of invalid packets
+## Timing and side channels
 
-v1 checks its 2-byte MAC before decrypting. v2 has to decrypt before it can check the tag. An invalid v2 packet aimed at a node therefore costs one decryption attempt per candidate key, or two in the rare padded case. Each attempt is roughly:
-- the HKDF (4 SHA-256 blocks)
-- AES-CTR over the payload (up to 11 AES blocks)
-- S2V (about 15 AES blocks)
+**AES implementation.**
+- **nRF52:** v2 uses the CryptoCell CC310 hardware engine for every AES block, in both CTR and CMAC. Software AES uses lookup tables, so its memory access patterns depend on the key and data. The CC310 doesn't. It is also faster.
+- **CC310 self-test:** on first use, the CC310 path has to reproduce RFC 5297 vector A.1, and the test only passes if the hardware actually produced the result. If the self-test fails, or a CC310 call fails later, that work is done in software instead. A hardware problem can therefore never produce wrong output.
+- **ESP32:** rweather's `AES128` already uses the chip's AES peripheral.
+- **Other platforms** (RP2040, STM32) use rweather's table-based software AES.
+- **Not covered:** none of this is a defence against power or electromagnetic analysis by someone with the device in hand.
 
-The number of candidate keys is the number of contacts or channels whose 1-byte hash matches.
+**Tag comparison.** The comparison is constant-time. It ORs the XOR of every byte into a `volatile` accumulator and has no early exit. The ARM `-Os` output was checked: it is a fixed loop plus a branch-free `clz` at the end.
 
-That cost hasn't been measured on hardware yet. Each packet also needs tens to hundreds of milliseconds of airtime, which limits how many an attacker can deliver, so the CPU cost should stay small next to the radio's receive power. This should be benchmarked on nRF52 before relying on it.
+**Padding retry.** An envelope of length ≡ 3 (mod 16) that ends in `0x00` is tried twice when its tag doesn't verify. An attacker can build such packets on purpose, doubling the cost of a bogus packet. Whether the retry happens depends only on public bytes, and neither attempt releases plaintext, so nothing secret leaks. The cost is CPU time only.
+
+**Candidate keys.** A bogus packet costs one attempt per contact or channel whose 1-byte hash matches. Each attempt is the key derivation (HKDF, 4 SHA-256 blocks), AES-CTR over the payload (up to 11 blocks) and S2V (about 15 blocks). Each packet also needs tens to hundreds of milliseconds of airtime, which limits how many an attacker can deliver.
+
+**Measuring it.** `get crypto.bench` on a companion radio times the following, using a fixed test key and averaging over 8 runs:
+
+| Field | What it times |
+|---|---|
+| `ok20/80/160` | Decrypting valid packets of 20, 80 and 160 bytes |
+| `bad@0`, `bad@15` | A 160-byte packet whose tag is wrong in its first byte, or only in its last byte. These should match. |
+| `padretry` | The two-attempt worst case |
+| `kdf` | Key derivation |
+| `v1bad` | v1 rejecting a bad MAC, for comparison |
+
+The reply also says whether AES is running on hardware (`aes=hw`) or in software (`aes=sw`). These numbers haven't been collected on real boards yet.
+
+**Auto-upgrade write.** When a contact is upgraded to v2 automatically, the upgrade applies at once. The flash write waits 5 seconds, so it doesn't delay that packet or its ACK. If the radio reboots before the write, the contact is back on `legacy`, which still accepts v2, and the upgrade is relearned from the contact's next v2 packet.
 
 ## What v2 does not do
 
@@ -238,7 +256,7 @@ The AES-SIV code is also checked against the RFC 5297 A.1 and A.2 vectors and th
 
 | Area | Files |
 |---|---|
-| AES-SIV, built on the rweather Crypto library's AES-128 | `src/AesSiv.cpp` |
+| AES-SIV, on the CC310 on nRF52 and otherwise the rweather Crypto library's AES-128 | `src/AesSiv.cpp` |
 | Envelope, key derivation and padding | `src/CryptoV2.cpp` |
 | v1/v2 choice on send and receive | `src/Mesh.cpp` (`encryptPayload`, `decryptPayload`, `getCryptoPolicy`, `onPeerCryptoV2Recv`) |
 | Companion firmware: policy table, storage (`/crypto_pol`) and CLI | `examples/companion_radio/` |

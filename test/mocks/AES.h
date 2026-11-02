@@ -10,4 +10,5 @@ public:
   void setKey(const uint8_t* key, size_t keySize) {}
   void encryptBlock(uint8_t* output, const uint8_t* input) {}
   void decryptBlock(uint8_t* output, const uint8_t* input) {}
+  void clear() {}
 };

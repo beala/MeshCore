@@ -530,6 +530,21 @@ Repeaters and room servers with v2 firmware accept v2 requests but still reply i
 
 ---
 
+#### Time v2 decryption on this radio
+**Usage:**
+- `get crypto.bench`
+
+**Note:** Times v2 decryption with a fixed test key, so nothing secret is used. The reply looks like `> aes=hw us: ok20/80/160 a/b/c bad@0 d bad@15 e padretry f kdf g v1bad h`, in microseconds per call:
+- `ok…`: valid packets of 20, 80 and 160 bytes
+- `bad@0`, `bad@15`: a tag that's wrong in its first byte, or only in its last byte (these should be about equal)
+- `padretry`: the worst case for a bogus packet
+- `kdf`: key derivation
+- `v1bad`: v1 rejecting a bad MAC, for comparison
+
+`aes=hw` means AES runs on the chip's hardware (nRF52 CC310, ESP32), and `aes=sw` means software. It takes a moment to run.
+
+---
+
 #### Recover after lost encryption policies
 **Usage:**
 - `set crypto.recover`
