@@ -307,6 +307,22 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+### Power
+
+#### Stay off when a charger is plugged in (nRF52 boards)
+**Usage:**
+- `get charger.wake`
+- `set charger.wake <state>`
+
+**Parameters:**
+- `state`: `on` (plugging in a charger turns the node on) or `off` (it stays off and charges)
+
+**Default:** `on` (or `off` with the `CHARGER_WAKE_DEFAULT_OFF` build flag)
+
+**Note:** The nRF52 always wakes up when power is plugged in. With this `off`, the firmware notices that the charger was the only reason it woke and switches straight back off, before the buzzer, vibration or LED start. The button, the reset button, and a node switched off for low battery still power it on as usual.
+
+---
+
 ### BLE
 
 #### Change BLE PIN

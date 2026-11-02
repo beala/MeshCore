@@ -173,6 +173,14 @@ void setup() {
   #endif
   store.begin();
   the_mesh.begin();
+  #if defined(NRF52_PLATFORM)
+  if (!the_mesh.getNodePrefs()->charger_wake && board.wokeFromCharger()) {
+    // switched off, then woken by plugging in a charger: go back to off (it keeps charging)
+    radio_driver.powerOff();
+    board.powerOff();
+    NRF_POWER->SYSTEMOFF = POWER_SYSTEMOFF_SYSTEMOFF_Enter;   // some boards' powerOff() needs the SoftDevice, not running yet
+  }
+  #endif
 #elif defined(RP2040_PLATFORM)
   LittleFS.begin();
   store.begin();

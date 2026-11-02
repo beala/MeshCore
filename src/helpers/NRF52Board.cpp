@@ -33,6 +33,36 @@ void NRF52Board::begin() {
 }
 
 #ifdef NRF52_POWER_MANAGEMENT
+extern uint8_t g_nrf52_shutdown_reason;
+#endif
+
+// Reset reason for wokeFromCharger(), captured before anything clears it.
+static uint32_t boot_resetreas = 0;
+static void __attribute__((constructor(101))) nrf52_boot_resetreas_capture() {
+  boot_resetreas = NRF_POWER->RESETREAS;
+#ifndef NRF52_POWER_MANAGEMENT
+  // the register keeps old bits until cleared (pwrmgtInit() clears it when power management is on)
+  NRF_POWER->RESETREAS = 0xFFFFFFFF;
+#endif
+}
+
+bool NRF52Board::wokeFromCharger() const {
+#ifdef POWER_RESETREAS_VBUS_Msk
+  const uint32_t other_reasons = POWER_RESETREAS_OFF_Msk | POWER_RESETREAS_RESETPIN_Msk | POWER_RESETREAS_LPCOMP_Msk
+      | POWER_RESETREAS_NFC_Msk | POWER_RESETREAS_DIF_Msk | POWER_RESETREAS_SREQ_Msk | POWER_RESETREAS_DOG_Msk
+      | POWER_RESETREAS_LOCKUP_Msk;
+  if (!(boot_resetreas & POWER_RESETREAS_VBUS_Msk) || (boot_resetreas & other_reasons)) return false;
+  #ifdef NRF52_POWER_MANAGEMENT
+  // switched off for low battery: let the charger bring it back
+  if (g_nrf52_shutdown_reason == SHUTDOWN_REASON_LOW_VOLTAGE || g_nrf52_shutdown_reason == SHUTDOWN_REASON_BOOT_PROTECT) return false;
+  #endif
+  return true;
+#else
+  return false;
+#endif
+}
+
+#ifdef NRF52_POWER_MANAGEMENT
 #include "nrf.h"
 
 // Power Management global variables

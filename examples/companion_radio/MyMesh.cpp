@@ -2141,6 +2141,23 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 #endif
 
+#ifdef NRF52_PLATFORM
+  if (strcmp(command, "get charger.wake") == 0) {
+    sprintf(reply, "> %s", _prefs.charger_wake ? "on" : "off");
+    return true;
+  }
+  if (memcmp(command, "set charger.wake ", 17) == 0) {
+    if (strcmp(&command[17], "on") == 0 || strcmp(&command[17], "off") == 0) {
+      _prefs.charger_wake = strcmp(&command[17], "on") == 0;
+      savePrefs();
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error: state must be on or off");
+    }
+    return true;
+  }
+#endif
+
   if (memcmp(command, "set pin ", 8) == 0) {
     _prefs.ble_pin = atoi(&command[8]);
     savePrefs();

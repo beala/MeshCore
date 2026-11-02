@@ -59,6 +59,12 @@ public:
   virtual void sleep(uint32_t secs) override;
   bool isExternalPowered() override;
 
+  /**
+   * \brief  true if plugging in USB or a charger is what woke the board from power-off
+   *          (not the button, the reset pin, or a reboot).
+   */
+  bool wokeFromCharger() const;
+
   void attachDynamicPrefs(KeyValueStore* prefs) { }  // no-op
 
 #ifdef NRF52_POWER_MANAGEMENT
