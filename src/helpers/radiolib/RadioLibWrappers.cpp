@@ -261,3 +261,32 @@ PacketMillis RadioLibWrapper::calcMaxPacketMillis(uint8_t sf, float bw, uint8_t 
 
   return PacketMillis {(preamble_us + 999) / 1000, (payload_us + 999) / 1000};
 }
+
+// Samples radio noise into the entropy pool, then draws from it. The pool hashes everything, so
+// biased or repetitive radio samples can't weaken the output; extra rounds are taken if the radio
+// looks stuck (some radio drivers return 0 when the read fails).
+#define RADIO_NOISE_SAMPLES   64
+#define RADIO_NOISE_MAX_ROUNDS 4
+
+void RadioNoiseListener::random(uint8_t* dest, size_t sz) {
+  for (int round = 0; round < RADIO_NOISE_MAX_ROUNDS; round++) {
+    uint8_t samples[RADIO_NOISE_SAMPLES];
+    uint32_t times[RADIO_NOISE_SAMPLES];
+    bool seen[256];
+    memset(seen, 0, sizeof(seen));
+    int distinct = 0;
+    for (int i = 0; i < RADIO_NOISE_SAMPLES; i++) {
+      samples[i] = _radio->randomByte();
+      times[i] = micros();
+      if (!seen[samples[i]]) { seen[samples[i]] = true; distinct++; }
+    }
+    EntropyPool::add(samples, sizeof(samples));
+    EntropyPool::add(times, sizeof(times));
+    memset(samples, 0, sizeof(samples));
+
+    // 64 truly random bytes almost always have 50+ distinct values
+    if (distinct >= 32) break;
+    MESH_DEBUG_PRINTLN("RadioNoiseListener: radio noise looks poor (%d distinct of %d), sampling more", distinct, RADIO_NOISE_SAMPLES);
+  }
+  EntropyPool::generate(dest, sz);
+}

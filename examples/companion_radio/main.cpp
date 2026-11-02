@@ -1,4 +1,5 @@
 #include <Arduino.h>   // needed for PlatformIO
+#include <helpers/EntropyPool.h>
 #include <Mesh.h>
 #include "MyMesh.h"
 
@@ -155,7 +156,11 @@ void setup() {
 
   if (!radio_init()) { halt(); }
 
-  fast_rng.begin(radio_driver.getRngSeed());
+  {
+    uint32_t seed = radio_driver.getRngSeed();
+    EntropyPool::add(&seed, sizeof(seed));   // also seeds the pool used for the BLE PIN
+    fast_rng.begin(seed);
+  }
 
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   InternalFS.begin();
@@ -189,8 +194,9 @@ void setup() {
   if (the_mesh.getNodePrefs()->ble_pin == 0) {
 #ifdef DISPLAY_CLASS
     if (disp != NULL && BLE_PIN_CODE == 123456) {
-      StdRNG rng;
-      the_mesh.setBLEPin(rng.nextInt(100000, 999999)); // random pin each session
+      uint32_t r;
+      EntropyPool::generate((uint8_t *)&r, sizeof(r));   // hardware RNG + pool, not the seeded Arduino PRNG
+      the_mesh.setBLEPin(100000 + (r % 900000)); // random pin each session
     } else {
       the_mesh.setBLEPin(BLE_PIN_CODE); // otherwise static pin
     }
