@@ -2112,6 +2112,23 @@ ContactInfo* MyMesh::findContactForCLI(const char* arg) {
   return NULL;
 }
 
+// "contact not found", pointing at crypto.ch when the name is a channel's (mode NULL = a 'get')
+void MyMesh::contactNotFound(const char* name, const char* mode, char* reply) {
+  ChannelDetails ch;
+  while (*name == ' ') name++;
+  bool numeric = *name != 0;
+  for (const char* q = name; *q; q++) if (*q < '0' || *q > '9') numeric = false;
+  if (!numeric && findChannelForCLI(name, ch) >= 0) {
+    if (mode) {
+      sprintf(reply, "Error: %.31s is a channel, use: set crypto.ch %s %.31s", ch.name, mode, ch.name);
+    } else {
+      sprintf(reply, "Error: %.31s is a channel, use: get crypto.ch %.31s", ch.name, ch.name);
+    }
+  } else {
+    strcpy(reply, "Error: contact not found");
+  }
+}
+
 // A channel named exactly 'arg' (case-insensitive), or else channel number 'arg'
 int MyMesh::findChannelForCLI(const char* arg, ChannelDetails& ch) {
 #ifdef MAX_GROUP_CHANNELS
@@ -2310,7 +2327,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     if (c) {
       sprintf(reply, "> %s: %s", c->name, CryptoPolicyTable::name(getCryptoPolicy(c->getSharedSecret(self_id))));
     } else {
-      strcpy(reply, "Error: contact not found");
+      contactNotFound(&command[11], NULL, reply);
     }
     return true;
   }
@@ -2329,7 +2346,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     if (p < 0) {
       strcpy(reply, "Error: mode must be legacy, v2 or v2only");
     } else if (c == NULL) {
-      strcpy(reply, "Error: contact not found");
+      contactNotFound(sp + 1, mode, reply);
     } else if (setCryptoPolicy(c->getSharedSecret(self_id), p, reply)) {
       sprintf(reply, "OK - %s: %s", c->name, CryptoPolicyTable::name(p));
     }

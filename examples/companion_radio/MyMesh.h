@@ -197,6 +197,7 @@ protected:
   bool setCryptoPolicy(const uint8_t* secret, uint8_t policy, char* reply);
   ContactInfo* findContactForCLI(const char* arg);
   int findChannelForCLI(const char* arg, ChannelDetails& ch);
+  void contactNotFound(const char* name, const char* mode, char* reply);
 
   void clearPendingReqs() {
     pending_login = pending_status = pending_telemetry = pending_discovery = pending_req = 0;
