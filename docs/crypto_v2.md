@@ -1,6 +1,56 @@
 # Packet encryption v2 (AES-SIV)
 
-**Status:** experimental and opt-in. It needs review before anyone relies on it.
+**Status:** experimental and opt-in. It needs independent review before anyone relies on it for anything sensitive.
+
+## In plain terms
+
+### What encryption has to do
+
+When your radio sends a private message, the encryption has two jobs:
+
+1. **Scramble it**, so anyone listening on the radio can't read it.
+2. **Seal it**, so the person receiving it can tell it really came from you and wasn't changed or made up along the way.
+
+Both use a secret key that only you and the other person (or the members of a channel) know.
+
+### Why the current encryption is weak
+
+**The scrambling leaks patterns.** MeshCore scrambles a message in 16-character pieces, and the same piece always scrambles to the same result. An eavesdropper can't read the message, but can spot repeats. Send the same words twice and they can see it. It's like a code where every common word always has the same codeword: you don't learn the words, but you learn which ones keep coming up. (The first piece of every message includes the time, so that piece always differs. The repeats show up after it.)
+
+**The seal is far too short.** The check that says "this really came from someone with the key" is only 2 bytes, so there are just 65,536 possible seals. Someone without the key can keep sending fakes, and about 1 in 65,536 will be accepted as genuine. Worse, because each piece is scrambled on its own, a forger can cut and paste pieces from real messages you've sent before. The fake that gets through then reads as real text, made of your own earlier words, rather than as obvious garbage.
+
+### What v2 changes
+
+v2 replaces this with **AES-SIV**, a published, standardized encryption method ([RFC 5297](https://www.rfc-editor.org/rfc/rfc5297)). It isn't a home-made scheme.
+
+- **No more patterns.** The whole message is scrambled together, starting from a value worked out from the message itself. Repeated words and repeated pieces no longer look alike. Only a completely identical message, down to its timestamp, would scramble the same way.
+- **A seal that can't be guessed.** The seal is 16 bytes instead of 2. There are about 3 × 10^38 possible seals, so guessing one is less likely than winning a 1-in-300-million lottery jackpot four times in a row.
+- **No cut and paste.** The seal covers the whole message, plus who it's from, who it's to and what kind of message it is. Change, swap or reuse any part and the seal no longer matches, so the message is thrown away.
+- **Separate keys.** The key that scrambles and the key that seals are different, both derived from the secret you already share. Contacts and channels don't need setting up again.
+
+### How it fits with radios that don't have it
+
+- **Repeaters need no update.** A v2 message looks like any other message from the outside, so every repeater relays it.
+- **Radios without v2 ignore v2 messages.** Since v1.18.0 they drop them cleanly instead of showing junk.
+- **You choose who gets v2.** Each contact and channel starts on the old format (`legacy`). You switch one to `v2` once the other side has v2 firmware (for a channel, every member).
+- **It upgrades by itself, but never downgrades.** If a contact sends you a v2 message, your radio starts replying in v2. Nothing ever switches a contact back to the old format automatically, so an attacker can't trick your radio into falling back by jamming replies.
+- **`v2only` locks out the old format.** Set a contact or channel to `v2only` and your radio refuses old-format messages from it entirely, closing off the weak 2-byte seal for good.
+
+### What it costs
+
+About 7 more bytes per message on average, which means slightly more airtime. The longest possible message gets a little shorter, but 160-character texts still fit.
+
+### What it doesn't fix
+
+- **Channel members can still read and impersonate each other.** Everyone in a channel shares one key, so any member can read every message and send under any name.
+- **Public and hashtag channels aren't private.** Their keys are known to anyone who knows the channel.
+- **Recorded messages can be read later if your key is stolen.** If someone records your messages and later gets hold of your radio's private key, they can read them.
+- **Recorded messages can be replayed.** A genuine message can be recorded and sent again later.
+- **Who is talking is still visible.** Which radios are talking, how often, and how long the messages are can still be seen.
+
+---
+
+# Technical details
 
 v2 replaces the encryption of these payload types, while staying compatible with existing nodes and repeaters:
 - direct payloads: `REQ`, `RESPONSE`, `TXT_MSG` and `PATH`
@@ -9,9 +59,8 @@ v2 replaces the encryption of these payload types, while staying compatible with
 
 The v2 cipher is standard AES-SIV ([RFC 5297](https://www.rfc-editor.org/rfc/rfc5297)). No new cryptographic construction is introduced.
 
-## Why
+## Weaknesses in v1
 
-The v1 encryption has three weaknesses:
 - **ECB mode.** v1 uses AES-128-ECB with zero padding. Identical 16-byte blocks at the same position encrypt identically.
 - **A 2-byte MAC.** A forgery is accepted about 1 time in 65,536 tries. Combined with ECB, the forged ciphertext can be pieced together from blocks of real messages.
 - **Key reuse.** The same secret keys both AES and HMAC.
