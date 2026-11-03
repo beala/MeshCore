@@ -276,6 +276,7 @@ void setup() {
 
   the_mesh.startInterface(interface_manager);
   sensors.begin();
+  sensors.loadSettings(store.getPrimaryFS());
 
 #if ENV_INCLUDE_GPS == 1
   the_mesh.applyGpsPrefs();

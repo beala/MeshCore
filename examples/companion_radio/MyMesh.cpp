@@ -2117,6 +2117,35 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     }
     return true;
   }
+  if (memcmp(command, "sensor get ", 11) == 0) {
+    const char* val = sensors.getSettingByKey(&command[11]);
+    if (val) sprintf(reply, "> %s", val); else strcpy(reply, "null");
+    return true;
+  }
+  if (memcmp(command, "sensor set ", 11) == 0) {
+    char key[24];
+    const char* sp = strchr(&command[11], ' ');
+    int klen = sp ? sp - &command[11] : 0;
+    if (klen > 0 && klen < (int)sizeof(key)) {
+      memcpy(key, &command[11], klen);
+      key[klen] = 0;
+      if (sensors.setSettingValue(key, sp + 1)) {
+        strcpy(reply, "OK");
+        return true;
+      }
+    }
+    strcpy(reply, "Error, unknown setting or bad value");
+    return true;
+  }
+  if (strcmp(command, "sensor list") == 0) {
+    char* dp = reply;
+    *dp = 0;
+    for (int i = 0; i < sensors.getNumSettings() && dp - reply < 100; i++) {
+      dp += sprintf(dp, "%s%s=%s", i ? "\n" : "", sensors.getSettingName(i), sensors.getSettingValue(i));
+    }
+    if (dp == reply) strcpy(reply, "no custom var");
+    return true;
+  }
   if (strcmp(command, "get name") == 0) {
     sprintf(reply, "> %s", _prefs.node_name);
     return true;
