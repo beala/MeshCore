@@ -1007,6 +1007,7 @@ void MyMesh::begin() {
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
 
   board.attachDynamicPrefs(_prefs.getCustom());
+  sensors.attachDynamicPrefs(_prefs.getCustom());
 
   MESH_DEBUG_PRINTLN("RX Boosted Gain Mode: %s",
                      radio_driver.getRxBoostedGainMode() ? "Enabled" : "Disabled");
@@ -1872,6 +1873,7 @@ void MyMesh::handleCmdFrame(size_t len) {
       *np++ = 0; // modify 'cmd_frame', replace ':' with null
       bool success = sensors.setSettingValue(sp, np);
       if (success) {
+        if (_prefs.isDirty()) savePrefs();
         #if ENV_INCLUDE_GPS == 1
         // Update node preferences for GPS settings
         if (strcmp(sp, "gps") == 0) {
@@ -2130,6 +2132,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
       memcpy(key, &command[11], klen);
       key[klen] = 0;
       if (sensors.setSettingValue(key, sp + 1)) {
+        if (_prefs.isDirty()) savePrefs();
         strcpy(reply, "OK");
         return true;
       }

@@ -312,6 +312,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       const char *key = (num > 0) ? parts[0] : "";
       const char *value = (num > 1) ? parts[1] : "null";
       if (_sensors->setSettingValue(key, value)) {
+        if (_prefs->isDirty()) savePrefs();
         strcpy(reply, "ok");
       } else {
         strcpy(reply, "can't find custom var");

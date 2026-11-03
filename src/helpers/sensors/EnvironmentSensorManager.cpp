@@ -773,7 +773,7 @@ bool EnvironmentSensorManager::setSettingValue(const char* name, const char* val
     float ohm = strtof(value, NULL);
     if (!(ohm >= 0.0001f && ohm <= 100.0f)) return false;
     ina219_shunt_ohm = ohm;
-    saveSettings();
+    if (_prefs) _prefs->setByKey("ina219_shunt", formatOhms(ohm));
     return true;
   }
   #endif
@@ -1029,62 +1029,11 @@ void EnvironmentSensorManager::loop() {
 }
 #endif // ENV_INCLUDE_GPS || ENV_INCLUDE_BME680_BSEC
 
-// ============================================================
-// Saved settings: "key=value" lines in SENSOR_SETTINGS_FILE.
-// Only settings that aren't saved elsewhere go here (GPS is in
-// the node prefs).
-// ============================================================
-
-#define SENSOR_SETTINGS_FILE  "/sensor_cfg"
-
-void EnvironmentSensorManager::loadSettings(FILESYSTEM* fs) {
-  _settings_fs = fs;
-  if (fs == NULL || !fs->exists(SENSOR_SETTINGS_FILE)) return;
-#if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
-  File f = fs->open(SENSOR_SETTINGS_FILE, FILE_O_READ);
-#elif defined(RP2040_PLATFORM)
-  File f = fs->open(SENSOR_SETTINGS_FILE, "r");
-#else
-  File f = fs->open(SENSOR_SETTINGS_FILE, "r", false);
-#endif
-  if (!f) return;
-  _loading_settings = true;
-  char line[48];
-  int n = 0;
-  while (true) {
-    int c = f.read();
-    if (c < 0 || c == '\n') {
-      line[n] = 0;
-      char* eq = strchr(line, '=');
-      if (eq) {
-        *eq = 0;
-        setSettingValue(line, eq + 1);
-      }
-      n = 0;
-      if (c < 0) break;
-    } else if (n < (int)sizeof(line) - 1) {
-      line[n++] = (char)c;
-    }
-  }
-  _loading_settings = false;
-  f.close();
-}
-
-void EnvironmentSensorManager::saveSettings() {
-  if (_settings_fs == NULL || _loading_settings) return;
-#if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
-  _settings_fs->remove(SENSOR_SETTINGS_FILE);
-  File f = _settings_fs->open(SENSOR_SETTINGS_FILE, FILE_O_WRITE);
-#elif defined(RP2040_PLATFORM)
-  File f = _settings_fs->open(SENSOR_SETTINGS_FILE, "w");
-#else
-  File f = _settings_fs->open(SENSOR_SETTINGS_FILE, "w", true);
-#endif
-  if (!f) return;
+// Saved settings go in the prefs' "custom" section, under the same key as the setting.
+void EnvironmentSensorManager::attachDynamicPrefs(KeyValueStore* prefs) {
   #if ENV_INCLUDE_INA219
-  f.print("ina219_shunt=");
-  f.print(formatOhms(ina219_shunt_ohm));
-  f.print("\n");
+  char val[16];
+  if (prefs->getByKey("ina219_shunt", val, sizeof(val) - 1)) setSettingValue("ina219_shunt", val);
   #endif
-  f.close();
+  _prefs = prefs;   // set after loading, so loading doesn't write the values back
 }

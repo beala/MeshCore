@@ -1,7 +1,7 @@
 #pragma once
 
 #include <CayenneLPP.h>
-#include <helpers/IdentityStore.h>   // FILESYSTEM
+#include <helpers/KeyValueStore.h>
 #include "sensors/LocationProvider.h"
 
 #define TELEM_PERM_BASE         0x01   // 'base' permission includes battery
@@ -23,8 +23,8 @@ public:
   virtual const char* getSettingName(int i) const { return NULL; }
   virtual const char* getSettingValue(int i) const { return NULL; }
   virtual bool setSettingValue(const char* name, const char* value) { return false; }
-  // Load saved settings from fs, and keep fs for saving later changes. Call after begin().
-  virtual void loadSettings(FILESYSTEM* fs) { }
+  // Saved settings live in the prefs' "custom" section. Called after begin() and loading prefs.
+  virtual void attachDynamicPrefs(KeyValueStore* prefs) { }
   virtual LocationProvider* getLocationProvider() { return NULL; }
   virtual bool isGPSDetected() const { return false; }
 

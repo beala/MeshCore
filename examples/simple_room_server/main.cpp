@@ -84,7 +84,6 @@ void setup() {
 #endif
 
   sensors.begin();
-  sensors.loadSettings(fs);
 
   the_mesh.begin(fs);
 

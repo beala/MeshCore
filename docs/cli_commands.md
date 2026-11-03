@@ -1077,7 +1077,7 @@ region save
 
 **Default:** `0.1`, or `TELEM_INA219_SHUNT_VALUE` if the build sets it
 
-**Note:** Only listed when an INA219 is found. Saved in `/sensor_cfg`, so it survives a reboot. The highest current it can measure is 0.32 V divided by the shunt resistance, for example 3.2 A with 0.1 ohm and 32 A with 0.01 ohm.
+**Note:** Only listed when an INA219 is found. Saved in the prefs (the `custom` section of `/prefs.json`), so it survives a reboot. The highest current it can measure is 0.32 V divided by the shunt resistance, for example 3.2 A with 0.1 ohm and 32 A with 0.01 ohm.
 
 ---
 
