@@ -54,31 +54,44 @@ int MyMesh::findAllowIndex(const uint8_t* pub_key) const {
   return -1;
 }
 
-// file: version, count, then count x (public key, last timestamp)
+// The allow list is saved in the prefs ("find" section). Older builds kept it in FIND_ALLOW_FILE:
+// version, count, then count x (public key, last timestamp).
 void MyMesh::loadFindAllow() {
-  uint8_t buf[2 + MAX_FIND_ALLOW * (PUB_KEY_SIZE + 4)];
-  int n = _store->readFile(FIND_ALLOW_FILE, buf, sizeof(buf));
   _num_find_allow = 0;
+  static const uint8_t unused[FIND_ALLOW_REC] = { 0 };
+  for (int i = 0; i < MAX_FIND_ALLOW; i++) {
+    const uint8_t* rec = _prefs.find_allow[i];
+    if (memcmp(rec, unused, FIND_ALLOW_REC) == 0) continue;
+    memcpy(_find_allow[_num_find_allow].pub_key, rec, PUB_KEY_SIZE);
+    memcpy(&_find_allow[_num_find_allow].last_ts, &rec[PUB_KEY_SIZE], 4);
+    _num_find_allow++;
+  }
+  if (_num_find_allow > 0) return;
+
+  uint8_t buf[2 + MAX_FIND_ALLOW * FIND_ALLOW_REC];
+  int n = _store->readFile(FIND_ALLOW_FILE, buf, sizeof(buf));
   if (n < 2 || buf[0] != FIND_ALLOW_VERSION) return;
   for (int i = 0; i < buf[1] && i < MAX_FIND_ALLOW; i++) {
-    int ofs = 2 + i * (PUB_KEY_SIZE + 4);
-    if (ofs + PUB_KEY_SIZE + 4 > n) break;
+    int ofs = 2 + i * FIND_ALLOW_REC;
+    if (ofs + FIND_ALLOW_REC > n) break;
     memcpy(_find_allow[i].pub_key, &buf[ofs], PUB_KEY_SIZE);
     memcpy(&_find_allow[i].last_ts, &buf[ofs + PUB_KEY_SIZE], 4);
     _num_find_allow++;
   }
+  if (saveFindAllow()) _store->removeFile(FIND_ALLOW_FILE);
 }
 
 bool MyMesh::saveFindAllow() {
-  uint8_t buf[2 + MAX_FIND_ALLOW * (PUB_KEY_SIZE + 4)];
-  buf[0] = FIND_ALLOW_VERSION;
-  buf[1] = _num_find_allow;
+  memset(_prefs.find_allow, 0, sizeof(_prefs.find_allow));
   for (int i = 0; i < _num_find_allow; i++) {
-    int ofs = 2 + i * (PUB_KEY_SIZE + 4);
-    memcpy(&buf[ofs], _find_allow[i].pub_key, PUB_KEY_SIZE);
-    memcpy(&buf[ofs + PUB_KEY_SIZE], &_find_allow[i].last_ts, 4);
+    memcpy(_prefs.find_allow[i], _find_allow[i].pub_key, PUB_KEY_SIZE);
+    memcpy(&_prefs.find_allow[i][PUB_KEY_SIZE], &_find_allow[i].last_ts, 4);
   }
-  return _store->writeFile(FIND_ALLOW_FILE, buf, 2 + _num_find_allow * (PUB_KEY_SIZE + 4));
+  _prefs.node_lat = sensors.node_lat;
+  _prefs.node_lon = sensors.node_lon;
+  bool ok = _store->savePrefs(_prefs);
+  if (ok) _prefs.clearDirty();
+  return ok;
 }
 
 bool MyMesh::rangingAvailable(float freq) {

@@ -296,7 +296,6 @@ private:
     uint8_t pub_key[PUB_KEY_SIZE];
     uint32_t last_ts;   // newest request timestamp accepted from them, so old requests can't be replayed
   };
-  #define MAX_FIND_ALLOW  8
   FindAllow _find_allow[MAX_FIND_ALLOW];
   int _num_find_allow = 0;
   uint8_t _find_peer[PUB_KEY_SIZE];   // finder: who we last asked

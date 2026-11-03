@@ -26,7 +26,7 @@ Limits:
 
 The finder sends a CLI command message (`TXT_TYPE_CLI_COMMAND`) to the target: `find me`, `find me stop`, or `find range`. It's encrypted with the pair's shared secret, like any direct message.
 
-The target handles it only if the finder is on its allow list (`set find.allow`, up to 8 entries, stored in `/find_allow`) or has remote CLI access. It replies with a CLI data message starting `find: `, which the finder saves for `get find` and also passes to the app.
+The target handles it only if the finder is on its allow list (`set find.allow`, up to 8 entries, saved in the `find` section of `/prefs.json`; older builds used `/find_allow`, which is moved over on first boot) or has remote CLI access. It replies with a CLI data message starting `find: `, which the finder saves for `get find` and also passes to the app.
 
 For each allowed finder, the target stores the newest request timestamp it has accepted, and ignores any request that isn't newer. That stops replays, including after a reboot. If the finder's clock goes backwards, its requests are refused with `find: old request ignored (is your clock set?)` until the clock is set.
 
