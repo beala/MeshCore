@@ -26,3 +26,4 @@ beala/charger-stay-off      # set charger.wake on|off: stay off when plugged in 
 beala/crypto-v2             # opt-in AES-SIV packet encryption: set crypto / set crypto.ch (experimental)
 beala/entropy               # identity keys and BLE PIN: hash radio noise + hardware RNG together
 beala/find-me               # find me: beep for a couple of minutes to find a lost radio
+beala/ina219-shunt          # INA219: sensor set ina219_shunt <ohms>, saved in the prefs
