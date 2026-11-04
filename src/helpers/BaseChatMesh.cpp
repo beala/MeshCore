@@ -257,7 +257,7 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
         // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the ACK
         mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
                                                 PAYLOAD_TYPE_ACK, (uint8_t *) &ack_hash, 6);
-        if (path) sendFloodScoped(from, path, TXT_ACK_DELAY);
+        if (path) sendFloodReply(from, path, TXT_ACK_DELAY, ack_hash);
       } else {
         sendAckTo(from, ack_hash, 6);
       }
@@ -307,7 +307,7 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
         // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the ACK
         mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
                                                 PAYLOAD_TYPE_ACK, (uint8_t *) &ack_hash, 4);
-        if (path) sendFloodScoped(from, path, TXT_ACK_DELAY);
+        if (path) sendFloodReply(from, path, TXT_ACK_DELAY, (uint8_t *) &ack_hash);
       } else {
         sendAckTo(from, (uint8_t *) &ack_hash);
       }
@@ -323,7 +323,7 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
         // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the response
         mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
                                               PAYLOAD_TYPE_RESPONSE, temp_buf, reply_len);
-        if (path) sendFloodScoped(from, path, SERVER_RESPONSE_DELAY);
+        if (path) sendFloodReply(from, path, SERVER_RESPONSE_DELAY, NULL);
       } else {
         mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, from.id, secret, temp_buf, reply_len);
         if (reply) {
@@ -341,6 +341,24 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
       // we have direct path, but other node is still sending flood response, so maybe they didn't receive reciprocal path properly(?)
       handleReturnPathRetry(from, packet->path, packet->path_len);
     }
+  }
+}
+
+void BaseChatMesh::onSiblingDatagram(mesh::Packet* packet, uint8_t type, uint8_t dest_hash, const uint8_t* macAndData, size_t len) {
+  int num = searchPeersByHash(&dest_hash);
+  for (int j = 0; j < num; j++) {
+    ContactInfo& to = contacts[matching_peer_indexes[j]];
+    uint8_t data[MAX_PACKET_PAYLOAD];
+    int dlen = mesh::Utils::MACThenDecrypt(to.getSharedSecret(self_id), data, (uint8_t*) macAndData, len);
+    if (dlen <= 0) continue;
+
+    const uint8_t* ack = NULL;
+    if (type == PAYLOAD_TYPE_PATH && dlen >= 1 && mesh::Packet::isValidPathLen(data[0])) {
+      int k = 1 + ((data[0] >> 6) + 1) * (data[0] & 63);   // skip the path
+      if (k + 1 + 4 <= dlen && (data[k] & 0x0F) == PAYLOAD_TYPE_ACK) ack = &data[k + 1];
+    }
+    onSiblingPacket(to, packet, type, ack);
+    return;
   }
 }
 

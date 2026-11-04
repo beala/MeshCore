@@ -31,6 +31,7 @@
 #include <helpers/IdentityStore.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
+#include <helpers/CloneCoordinator.h>
 #include <target.h>
 
 /* ---------------------------------- CONFIGURATION ------------------------------------- */
@@ -139,6 +140,9 @@ protected:
   uint8_t getExtraAckTransmitCount() const override;
   uint8_t getFloodRetries(const mesh::Packet* packet) override;
   uint32_t getFloodRetryWait(const mesh::Packet* packet) override;
+  void sendFloodReply(const ContactInfo& to, mesh::Packet* pkt, uint32_t delay_millis, const uint8_t* ack) override;
+  void onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type, const uint8_t* ack) override;
+  void onSelfDataRecv(mesh::Packet* packet, uint8_t type, const uint8_t* data, size_t len) override;
   bool filterRecvFloodPacket(mesh::Packet* packet) override;
   bool allowPacketForward(const mesh::Packet* packet) override;
 
@@ -235,6 +239,25 @@ private:
   void checkCLIRescueCmd();
   bool handleCommand(const char* text, uint32_t sender_timestamp, char* reply);
   void checkSerialInterface();
+
+  // console: a contact in the app that is really this radio, for commands and notices
+  void fillConsoleContact(ContactInfo& c);
+  bool isConsoleKey(const uint8_t* prefix);
+  void consoleNote(const char* text);
+  void checkConsole();
+  bool handleCloneCommand(const char* command, char* reply);
+  bool sendClaim();
+  void saveCloneState();
+
+  CloneCoordinator _clone;
+  bool _iter_console_pending;    // console contact still to send, at the end of the contacts list
+  bool _console_pending;         // a message to the console is waiting to run
+  uint32_t _console_ack;
+  uint32_t _console_lastmod;
+  char _console_cmd[MAX_FRAME_SIZE + 1];
+  char _sibling_name[32];        // contact another radio with our key last sent to
+  unsigned long _sibling_heard;
+
   bool isValidClientRepeatFreq(uint32_t f) const;
 
   // helpers, short-cuts

@@ -129,6 +129,21 @@ protected:
   virtual void sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis=0);
   virtual void sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis=0);
 
+  /**
+   * \brief  Sends our flood reply (path + ACK, or a response) to a message or request that came in by
+   *         flood. Override to hold it back, e.g. when other radios share this identity.
+   * \param  ack  the 4 ACK bytes the reply carries, or NULL for a response
+   */
+  virtual void sendFloodReply(const ContactInfo& to, mesh::Packet* pkt, uint32_t delay_millis, const uint8_t* ack) {
+    sendFloodScoped(to, pkt, delay_millis);
+  }
+
+  /**
+   * \brief  Heard another radio with our key send a packet to this contact.
+   * \param  ack  if it was a flood reply carrying an ACK, its first 4 bytes, else NULL
+   */
+  virtual void onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type, const uint8_t* ack) { }
+
   // storage concepts, for sub-classes to override/implement
   virtual int  getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) { return 0; }  // not implemented
   virtual bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], int len) { return false; }
@@ -138,6 +153,7 @@ protected:
   int searchPeersByHash(const uint8_t* hash) override;
   void getPeerSharedSecret(uint8_t* dest_secret, int peer_idx) override;
   void onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_idx, const uint8_t* secret, uint8_t* data, size_t len) override;
+  void onSiblingDatagram(mesh::Packet* packet, uint8_t type, uint8_t dest_hash, const uint8_t* macAndData, size_t len) override;
   bool onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override;
   void onAckRecv(mesh::Packet* packet, uint32_t ack_crc) override;
 #ifdef MAX_GROUP_CHANNELS
