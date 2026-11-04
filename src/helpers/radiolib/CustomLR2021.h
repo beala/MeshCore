@@ -4,6 +4,7 @@
 #include "MeshCore.h"
 
 class CustomLR2021 : public LR2021 {
+  friend class LR2021Ranging;   // raw RTToF commands, see LR2021Ranging.h
   uint32_t _preambleMillis = 66;
   uint32_t _maxPayloadMillis = 3934;
   uint32_t _activityAt = 0;

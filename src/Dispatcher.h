@@ -205,6 +205,7 @@ public:
 
   // helper methods
   bool millisHasNowPassed(unsigned long timestamp) const;
+  bool isTransmitting() const { return outbound != NULL; }   // a send is in progress
   unsigned long futureMillis(int millis_from_now) const;
 
   bool tryParsePacket(Packet* pkt, const uint8_t* raw, int len);

@@ -690,9 +690,27 @@ void UITask::loop() {
 
   userLedHandler();
 
+#ifdef HAS_FIND_ME
+  if (isFindingMe() && isButtonPressed()) stopFindMe();   // found it
+#endif
+#ifdef HAS_FIND_ME
+  bool finding = isFindingMe();
+  static bool was_finding = false;
+#endif
 #ifdef PIN_BUZZER
-  if (buzzer.isQuiet() != (bool)_node_prefs->buzzer_quiet) buzzer.quiet(_node_prefs->buzzer_quiet);
+  {
+    bool quiet = _node_prefs->buzzer_quiet && !finding;   // 'find me' beeps even if the buzzer is off
+    if (was_finding && !finding) buzzer.stop();
+    if (buzzer.isQuiet() != quiet) buzzer.quiet(quiet);
+    if (finding && !buzzer.isPlaying()) buzzer.play(FIND_ME_TUNE);
+  }
   if (buzzer.isPlaying())  buzzer.loop();
+#endif
+#ifdef PIN_VIBRATION
+  if (finding) vibration.trigger();   // the cooldown spaces these out
+#endif
+#ifdef HAS_FIND_ME
+  was_finding = finding;
 #endif
 
   if (curr) curr->poll();

@@ -500,12 +500,28 @@ void UITask::loop() {
   #endif
   userLedHandler();
 
+#ifdef HAS_FIND_ME
+  bool finding = isFindingMe();
+  static bool was_finding = false;
+#endif
 #ifdef PIN_BUZZER
-  if (buzzer.isQuiet() != (bool)_node_prefs->buzzer_quiet) buzzer.quiet(_node_prefs->buzzer_quiet);
+  {
+    bool quiet = _node_prefs->buzzer_quiet && !finding;   // 'find me' beeps even if the buzzer is off
+    if (was_finding && !finding) buzzer.stop();
+    if (buzzer.isQuiet() != quiet) buzzer.quiet(quiet);
+    if (finding && !buzzer.isPlaying()) buzzer.play(FIND_ME_TUNE);
+  }
   if (buzzer.isPlaying())  buzzer.loop();
 #endif
 #ifdef HAS_DRV2605
-  if (vibration.isQuiet() != (bool)_node_prefs->vibe_quiet) vibration.quiet(_node_prefs->vibe_quiet);
+  {
+    bool quiet = _node_prefs->vibe_quiet && !finding;
+    if (vibration.isQuiet() != quiet) vibration.quiet(quiet);
+    if (finding) vibration.trigger();   // the cooldown spaces these out
+  }
+#endif
+#ifdef HAS_FIND_ME
+  was_finding = finding;
 #endif
 
   if (_display != NULL && _display->isOn()) {
@@ -540,6 +556,7 @@ void UITask::handleButtonAnyPress() {
   MESH_DEBUG_PRINTLN("UITask: any press triggered");
   // called on any button press before other events, to wake up the display quickly
   // do not refresh the display here, as it may block the button handler
+  stopFindMe();   // found it
   if (_display != NULL) {
     _displayWasOn = _display->isOn();  // Track display state before any action
     if (!_displayWasOn) {

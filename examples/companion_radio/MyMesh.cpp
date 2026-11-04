@@ -542,12 +542,17 @@ void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t 
 
 void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp, const char *text) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
+  onFindReply(from, text);    // an answer to 'find beep/stop/range'?
   queueMessage(from, TXT_TYPE_CLI_DATA, pkt, sender_timestamp, NULL, 0, text);
 }
 
 void MyMesh::onCLICommandRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
                                const char *text, char* reply) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
+  if (isFindRequest(text)) {  // another companion looking for this radio (MyMeshFind.cpp)
+    handleFindRequest(from, sender_timestamp, text, reply);
+    return;
+  }
   if (from.isRemoteCLIAllowed()) {
     _cli_remote = true;
     if (!handleCommand(text, sender_timestamp, reply)) {
@@ -1049,6 +1054,7 @@ void MyMesh::begin() {
   radio_driver.setTxPower(_prefs.tx_power_dbm);
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
   radio_driver.setTxLedEnabled(!_prefs.led_off);
+  loadFindAllow();
 
   board.attachDynamicPrefs(_prefs.getCustom());
 
@@ -2508,6 +2514,26 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 #endif
 
+  if (handleFindCommand(command, reply)) return true;   // find beep/stop/range, get/set find.* (MyMeshFind.cpp)
+
+  // find me: beep (and vibrate) so a lost radio can be found, even if the buzzer is turned off
+  if (strcmp(command, "find me") == 0 || memcmp(command, "find me ", 8) == 0) {
+    const char* arg = command[7] ? &command[8] : "";
+    if (strcmp(arg, "stop") == 0) {
+      strcpy(reply, (_listener && _listener->stopFindMe()) ? "OK, stopped" : "> not running");
+      return true;
+    }
+    int secs = *arg ? atoi(arg) : 120;
+    if (secs < 1 || secs > 600) {
+      strcpy(reply, "Error: seconds must be 1 to 600");
+    } else if (_listener && _listener->startFindMe(secs)) {
+      sprintf(reply, "OK, beeping for %d s. Stop: press the button, or: find me stop", secs);
+    } else {
+      strcpy(reply, "Error: this radio has no buzzer or vibration motor");
+    }
+    return true;
+  }
+
   if (memcmp(command, "set pin ", 8) == 0) {
     _prefs.ble_pin = atoi(&command[8]);
     savePrefs();
@@ -2903,6 +2929,7 @@ void MyMesh::checkSerialInterface() {
 
 void MyMesh::loop() {
   BaseChatMesh::loop();
+  findLoop();
 
   if (_crypto_save_pending && (long)(millis() - _crypto_save_at) >= 0) {
     _crypto_save_pending = false;

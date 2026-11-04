@@ -25,6 +25,7 @@ class genericBuzzer
         void startup();  // play startup sound
         void shutdown();  // play shutdown sound
         bool isPlaying();  // returns true if a sound is still playing else false
+        void stop();  // stop the current sound now
         void quiet(bool buzzer_state);  // enables or disables the buzzer
         bool isQuiet();  // get buzzer state on/off
 

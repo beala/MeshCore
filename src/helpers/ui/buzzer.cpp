@@ -32,6 +32,10 @@ bool genericBuzzer::isPlaying() {
     return rtttl::isPlaying();
 }
 
+void genericBuzzer::stop() {
+    if (isPlaying()) rtttl::stop();
+}
+
 void genericBuzzer::loop() {
     if (!rtttl::done()) rtttl::play();
 }

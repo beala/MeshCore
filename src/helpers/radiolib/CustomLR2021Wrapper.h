@@ -13,6 +13,7 @@
 #endif
 
 class CustomLR2021Wrapper : public RadioLibWrapper {
+  friend class LR2021Ranging;
 public:
   struct TxFault {
     uint32_t at_millis;

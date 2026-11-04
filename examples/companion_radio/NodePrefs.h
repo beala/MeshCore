@@ -40,6 +40,11 @@ public:
   uint8_t  charger_wake = 1;
 #endif
   uint32_t crypto_seq = 0;       // sequence number of the last saved encryption policy file
+#define MAX_FIND_ALLOW   8
+#define FIND_ALLOW_REC   (32 + 4)
+  // contacts allowed to use 'find' on this radio: public key, then the newest request time
+  // accepted from them (little endian, so old requests can't be replayed). All zero = unused.
+  uint8_t  find_allow[MAX_FIND_ALLOW][FIND_ALLOW_REC];
   uint8_t  gps_enabled = 0;      // GPS enabled flag (0=disabled, 1=enabled)
   uint32_t gps_interval = 0;     // GPS read interval in seconds
   uint8_t autoadd_config = 0;    // bitmask for auto-add contacts config
@@ -210,6 +215,27 @@ private:
   };
   CompanionPrefs companion;
 
+  class FindPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      static const uint8_t unused[FIND_ALLOW_REC] = { 0 };
+      for (int i = 0; i < MAX_FIND_ALLOW; i++) {
+        uint8_t* rec = _parent->find_allow[i];
+        if (_context->op() == OP::WRITE && memcmp(rec, unused, FIND_ALLOW_REC) == 0) continue;
+        char key[4] = { 'a', (char)('0' + i), 0 };
+        def(key, (void *) rec, FIND_ALLOW_REC);
+      }
+      def("ext", ext);
+    }
+  public:
+    uint8_t ext = 0;   // 'find range' uses the LR2021's extended ranging mode
+    FindPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+public:
+  FindPrefs find;   // public so the find code can read and set find.ext
+private:
+
   DynamicConfigSerializer custom;
 
 #ifdef ENABLE_WIFI_INTERFACE
@@ -260,6 +286,7 @@ protected:
     def("repeat", repeat);
     def("comp", companion);
     def("custom", custom);
+    def("find", find);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif
@@ -268,7 +295,7 @@ protected:
 #endif
   }
 public:
-  NodePrefs() : radio(this), gps(this), companion(this), custom(&radio)
+  NodePrefs() : radio(this), gps(this), companion(this), find(this), custom(&radio)
 #ifdef ENABLE_WIFI_INTERFACE
     , wifi(this)
 #endif
@@ -279,6 +306,7 @@ public:
     node_name[0] = 0;
     default_scope_name[0] = 0;
     memset(default_scope_key, 0, sizeof(default_scope_key));
+    memset(find_allow, 0, sizeof(find_allow));
   }
   // new accessor methods
   bool isRepeatEn() const { return repeat.disable_fwd == 0; }
