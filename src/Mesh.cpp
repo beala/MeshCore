@@ -7,6 +7,25 @@ void Mesh::begin() {
   Dispatcher::begin();
 }
 
+bool Mesh::cancelQueued(const uint8_t* hash) {
+  uint8_t h[MAX_HASH_SIZE];
+  for (int i = 0; i < _mgr->getOutboundTotal(); i++) {
+    Packet* q = _mgr->getOutboundByIdx(i);
+    q->calculatePacketHash(h);
+    if (memcmp(h, hash, MAX_HASH_SIZE) == 0) {
+      releasePacket(_mgr->removeOutboundByIdx(i));
+      return true;
+    }
+  }
+  return false;
+}
+
+Packet* Mesh::createSelfDatagram(uint8_t type, const uint8_t* data, size_t len) {
+  uint8_t secret[PUB_KEY_SIZE];
+  self_id.calcSharedSecret(secret, self_id);
+  return createDatagram(type, self_id, secret, data, len);
+}
+
 void Mesh::loop() {
   Dispatcher::loop();
 
@@ -335,11 +354,26 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
               break;
             }
           }
-          if (found) {
+          if (!found && self_id.isHashMatch(&src_hash)) {
+            // from our own key to our own key: another radio sharing this identity
+            uint8_t secret[PUB_KEY_SIZE];
+            self_id.calcSharedSecret(secret, self_id);
+            uint8_t data[MAX_PACKET_PAYLOAD];
+            int len = Utils::MACThenDecrypt(secret, data, macAndData, pkt->payload_len - i);
+            if (len > 0) {
+              onSelfDataRecv(pkt, pkt->getPayloadType(), data, len);   // keeps flooding, for the other copies
+              found = true;
+            }
+          } else if (found) {
             pkt->markDoNotRetransmit();  // packet was for this node, so don't retransmit
-          } else {
+          }
+          if (!found) {
             MESH_DEBUG_PRINTLN("%s recv matches no peers, src_hash=%02X", getLogDateTime(), (uint32_t)src_hash);
           }
+        } else if (self_id.isHashMatch(&src_hash)) {
+          // from our key to someone else, and not sent by this radio (our own sends are marked seen):
+          // maybe another radio sharing this identity
+          onSiblingDatagram(pkt, pkt->getPayloadType(), dest_hash, macAndData, pkt->payload_len - i);
         }
         action = routeRecvPacket(pkt);
       }

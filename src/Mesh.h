@@ -188,6 +188,19 @@ protected:
    *         Flood packets this node started have no hops in their path yet; forwarded ones do.
    * \returns  0 (the default) to not watch this packet
   */
+  /**
+   * \brief  A datagram from our own key to our own key: another radio sharing this identity.
+   *         The packet keeps flooding so other copies hear it too.
+   */
+  virtual void onSelfDataRecv(Packet* packet, uint8_t type, const uint8_t* data, size_t len) { }
+
+  /**
+   * \brief  A datagram (PATH, REQ, RESPONSE, TXT_MSG) with our key as the sender, that this radio
+   *         didn't send. Usually another radio sharing this identity; could be a hash collision.
+   *         macAndData is still encrypted, with the secret shared with the peer matching dest_hash.
+   */
+  virtual void onSiblingDatagram(Packet* packet, uint8_t type, uint8_t dest_hash, const uint8_t* macAndData, size_t len) { }
+
   virtual uint8_t getFloodRetries(const Packet* packet) { return 0; }
 
   /**
@@ -200,6 +213,12 @@ protected:
    * \returns  false to skip a resend that is due now (eg. the channel is busy)
   */
   virtual bool allowFloodRetryNow(const Packet* packet) { return true; }
+
+  /** \brief  Takes a packet with this hash off the send queue. \returns false if it isn't queued */
+  bool cancelQueued(const uint8_t* hash);
+
+  /** \brief  A datagram from our key to our key, which only radios sharing this identity can read */
+  Packet* createSelfDatagram(uint8_t type, const uint8_t* data, size_t len);
 
   FloodRetry& getFloodRetry() { return _flood_retry; }
 

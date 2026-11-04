@@ -300,6 +300,182 @@ uint32_t MyMesh::getFloodRetryWait(const mesh::Packet* packet) {
   return _prefs.flood_retry.wait_ms ? _prefs.flood_retry.wait_ms : mesh::Mesh::getFloodRetryWait(packet);
 }
 
+// ---------- radios sharing this identity (see CloneCoordinator) ----------
+
+void MyMesh::sendFloodReply(const ContactInfo& to, mesh::Packet* pkt, uint32_t delay_millis, const uint8_t* ack) {
+  if (_clone.isBackup()) {
+    unsigned long now = _ms->getMillis();
+    if (_clone.alreadyAnswered(to.id.pub_key, ack, now)) {   // the main radio beat us to it
+      releasePacket(pkt);
+      return;
+    }
+    uint8_t hash[MAX_HASH_SIZE];
+    pkt->calculatePacketHash(hash);
+    _clone.hold(hash, to.id.pub_key, ack, now);
+    delay_millis += _clone.waitMs();
+  }
+  sendFloodScoped(to, pkt, delay_millis);
+}
+
+void MyMesh::onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type, const uint8_t* ack) {
+  unsigned long now = _ms->getMillis();
+  uint8_t hash[MAX_HASH_SIZE];
+  if (_clone.onSibling(to.id.pub_key, ack, now, hash)) {
+    cancelQueued(hash);   // another radio answered, so drop our held reply
+  }
+  StrHelper::strncpy(_sibling_name, to.name, sizeof(_sibling_name));
+  _sibling_heard = now;
+
+  // normal: any packet shows another radio uses this key. Main: only a reply (a flood reply carries a
+  // path) means the other radio isn't holding back; it may have missed the takeover.
+  bool reply = type == PAYLOAD_TYPE_PATH;
+  bool alert = _clone.role() == CLONE_ROLE_SOLO || (_clone.role() == CLONE_ROLE_MAIN && reply);
+  if (alert && _clone.alertDue(now)) {
+    char msg[200];
+    if (_clone.role() == CLONE_ROLE_MAIN) {
+      snprintf(msg, sizeof(msg), "Another radio with this key also replied to %s. If it missed the takeover, "
+               "send \"takeover\" again.", to.name);
+    } else {
+      snprintf(msg, sizeof(msg), "Another radio with this key is active: it sent to %s. Send \"takeover\" to "
+               "make this the main radio; the others will stay quiet.", to.name);
+    }
+    consoleNote(msg);
+  }
+}
+
+void MyMesh::onSelfDataRecv(mesh::Packet* packet, uint8_t type, const uint8_t* data, size_t len) {
+  if (type == PAYLOAD_TYPE_REQ && _clone.onClaim(data, len)) {
+    saveCloneState();
+    consoleNote("Another radio with this key took over. This one is now a backup: it shows messages, "
+                "but lets the main radio reply.");
+  }
+}
+
+void MyMesh::saveCloneState() {
+  _prefs.clone.role = _clone.role();
+  _prefs.clone.epoch = _clone.epoch();
+  _prefs.clone.wait_ms = _clone.waitMs();
+  savePrefs();
+}
+
+bool MyMesh::sendClaim() {
+  uint8_t data[16];
+  int len = _clone.writeClaim(data);
+  mesh::Packet* pkt = createSelfDatagram(PAYLOAD_TYPE_REQ, data, len);
+  if (pkt == NULL) return false;
+  if (send_unscoped) {
+    sendFlood(pkt, (uint32_t) 0, _prefs.path_hash_mode + 1);
+  } else {
+    TransportKey default_scope;
+    memcpy(&default_scope.key, _prefs.default_scope_key, sizeof(default_scope.key));
+    sendFloodScoped(send_scope.isNull() ? default_scope : send_scope, pkt, 0);
+  }
+  return true;
+}
+
+bool MyMesh::handleCloneCommand(const char* command, char* reply) {
+  if (strcmp(command, "takeover") == 0) {
+    _clone.takeover(getRTCClock()->getCurrentTime());
+    saveCloneState();
+    if (sendClaim()) {
+      strcpy(reply, "This is now the main radio. Other radios with this key become backups when they hear it.");
+    } else {
+      strcpy(reply, "This is now the main radio, but the claim couldn't be sent (no free packet). Try again.");
+    }
+    return true;
+  }
+  if (strcmp(command, "clone off") == 0) {
+    _clone.setSolo();
+    saveCloneState();
+    strcpy(reply, "OK, this radio answers as normal again.");
+    return true;
+  }
+  if (memcmp(command, "set clone.wait ", 15) == 0) {
+    int ms = atoi(&command[15]);
+    if (ms < 300 || ms > 5000) {
+      strcpy(reply, "Error: wait is 300 to 5000 ms");
+    } else {
+      _clone.setWait(ms);
+      saveCloneState();
+      strcpy(reply, "OK");
+    }
+    return true;
+  }
+  if (strcmp(command, "clone") == 0 || strcmp(command, "get clone") == 0) {
+    static const char* roles[] = { "normal", "main", "backup" };
+    const CloneCoordinator::Stats& st = _clone.getStats();
+    int n = snprintf(reply, 160, "Role: %s. Wait %u ms. Held %u, dropped %u.",
+                     roles[_clone.role()], (uint32_t)_clone.waitMs(), st.held, st.dropped);
+    if (_sibling_heard) {
+      snprintf(&reply[n], 160 - n, " Other radio heard %lu min ago, to %s.",
+               (unsigned long)((_ms->getMillis() - _sibling_heard) / 60000), _sibling_name);
+    } else {
+      snprintf(&reply[n], 160 - n, " No other radio heard yet.");
+    }
+    return true;
+  }
+  return false;
+}
+
+// ---------- console contact ----------
+
+#define CONSOLE_NAME  "Radio console"
+
+void MyMesh::fillConsoleContact(ContactInfo& c) {
+  memset(&c, 0, sizeof(c));
+  // stable, and can't be a real node: a hash of our own key
+  mesh::Utils::sha256(c.id.pub_key, PUB_KEY_SIZE, (const uint8_t *) CONSOLE_NAME, strlen(CONSOLE_NAME),
+                      self_id.pub_key, PUB_KEY_SIZE);
+  StrHelper::strncpy(c.name, CONSOLE_NAME, sizeof(c.name));
+  c.type = ADV_TYPE_CHAT;
+  c.out_path_len = 0;   // shows as a direct contact
+  c.lastmod = _console_lastmod;
+}
+
+bool MyMesh::isConsoleKey(const uint8_t* prefix) {
+  ContactInfo c;
+  fillConsoleContact(c);
+  return memcmp(c.id.pub_key, prefix, 6) == 0;
+}
+
+void MyMesh::consoleNote(const char* text) {
+  ContactInfo c;
+  fillConsoleContact(c);
+  mesh::Packet pkt;   // stands in for a received packet: direct, no path
+  pkt.header = ROUTE_TYPE_DIRECT;
+  pkt.path_len = 0;
+  pkt._snr = 0;
+  uint32_t ts = getRTCClock()->getCurrentTimeUnique();
+  _console_lastmod = ts;
+  queueMessage(c, TXT_TYPE_PLAIN, &pkt, ts, NULL, 0, text);
+}
+
+void MyMesh::checkConsole() {
+  if (!_console_pending || _serial->isWriteBusy()) return;
+  _console_pending = false;
+
+  out_frame[0] = PUSH_CODE_SEND_CONFIRMED;   // "delivered"
+  memcpy(&out_frame[1], &_console_ack, 4);
+  uint32_t trip_time = 0;
+  memcpy(&out_frame[5], &trip_time, 4);
+  _serial->writeFrame(out_frame, 9);
+
+  char reply[166];
+  reply[0] = 0;
+  const char* cmd = _console_cmd;
+  while (*cmd == ' ') cmd++;
+  if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
+    strcpy(reply, "takeover: make this the main radio\n"
+                  "clone: status\n"
+                  "clone off: answer as normal\n"
+                  "set clone.wait <ms>: backup wait\n"
+                  "Other CLI commands work too");
+  } else if (!handleCommand(cmd, 0, reply)) {
+    strcpy(reply, "Unknown command. Send \"help\".");
+  }
+  consoleNote(reply);
+}
+
 uint8_t MyMesh::getExtraAckTransmitCount() const {
   return _prefs.multi_acks;
 }
@@ -835,7 +1011,9 @@ bool MyMesh::onContactPathRecv(ContactInfo& contact, uint8_t* in_path, uint8_t i
     }
   }
   // let base class handle received path and data
-  return BaseChatMesh::onContactPathRecv(contact, in_path, in_path_len, out_path, out_path_len, extra_type, extra, extra_len);
+  bool reciprocal = BaseChatMesh::onContactPathRecv(contact, in_path, in_path_len, out_path, out_path_len, extra_type, extra, extra_len);
+  // a backup leaves the reciprocal path to the main radio, so the contact learns one path to this key
+  return reciprocal && !_clone.isBackup();
 }
 
 void MyMesh::onControlDataRecv(mesh::Packet *packet) {
@@ -932,6 +1110,13 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
     : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables),
       _serial(NULL), telemetry(MAX_PACKET_PAYLOAD - 4), _store(&store), _listener(NULL), _iter(0) {
   _iter_started = false;
+  _iter_console_pending = false;
+  _console_pending = false;
+  _console_ack = 0;
+  _console_lastmod = 0;
+  _console_cmd[0] = 0;
+  _sibling_name[0] = 0;
+  _sibling_heard = 0;
   _cli_rescue = false;
   cli_command[0] = 0;
   offline_queue_len = 0;
@@ -1047,6 +1232,18 @@ void MyMesh::begin() {
   _prefs.tx_power_dbm = constrain(_prefs.tx_power_dbm, -9, MAX_LORA_TX_POWER);
   _prefs.gps_enabled = constrain(_prefs.gps_enabled, 0, 1);  // Ensure boolean 0 or 1
   _prefs.gps_interval = constrain(_prefs.gps_interval, 0, 86400);  // Max 24 hours
+
+  // pick a random tag for our takeover claims, on first boot. Kept below 2^31: prefs read numbers
+  // back with atol(), which stops at 0x7FFFFFFF, so bigger tags would all load as the same value.
+  if (_prefs.clone.tag == 0 || _prefs.clone.tag >= 0x7FFFFFFF) {
+    do {
+      getRNG()->random((uint8_t *) &_prefs.clone.tag, 4);
+      _prefs.clone.tag &= 0x7FFFFFFF;
+    } while (_prefs.clone.tag == 0 || _prefs.clone.tag == 0x7FFFFFFF);
+    savePrefs();
+  }
+  _clone.load(_prefs.clone.role, _prefs.clone.epoch, _prefs.clone.tag, _prefs.clone.wait_ms);
+  _console_lastmod = getRTCClock()->getCurrentTime();
 
   _active_ble_pin = _prefs.ble_pin;
 
@@ -1194,6 +1391,25 @@ void MyMesh::handleCmdFrame(size_t len) {
     int rlen = strlen(reply_buf);
     memcpy(&out_frame[1], reply_buf, rlen);
     _serial->writeFrame(out_frame, 1 + rlen);
+  } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14 && isConsoleKey(&cmd_frame[7])) {
+    // a message to the console contact: run it here, never send it
+    if (_console_pending) {
+      writeErrFrame(ERR_CODE_TABLE_FULL);   // still running the last one
+    } else {
+      int tlen = len - 13;
+      if (tlen > (int) sizeof(_console_cmd) - 1) tlen = sizeof(_console_cmd) - 1;
+      memcpy(_console_cmd, &cmd_frame[13], tlen);
+      _console_cmd[tlen] = 0;
+      do { getRNG()->random((uint8_t *) &_console_ack, 4); } while (_console_ack == 0);
+      _console_pending = true;   // checkConsole() confirms it and replies
+
+      out_frame[0] = RESP_CODE_SENT;
+      out_frame[1] = 0;   // direct
+      memcpy(&out_frame[2], &_console_ack, 4);
+      uint32_t est_timeout = 3000;
+      memcpy(&out_frame[6], &est_timeout, 4);
+      _serial->writeFrame(out_frame, 10);
+    }
   } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14) {
     int i = 1;
     uint8_t txt_type = cmd_frame[i++];
@@ -1314,13 +1530,14 @@ void MyMesh::handleCmdFrame(size_t len) {
 
       uint8_t reply[5];
       reply[0] = RESP_CODE_CONTACTS_START;
-      uint32_t count = getNumContacts(); // total, NOT filtered count
+      uint32_t count = getNumContacts() + 1; // total, NOT filtered count (+1: the console contact)
       memcpy(&reply[1], &count, 4);
       _serial->writeFrame(reply, 5);
 
       // start iterator
       _iter = startContactsIterator();
       _iter_started = true;
+      _iter_console_pending = true;
       _most_recent_lastmod = 0;
     }
   } else if (cmd_frame[0] == CMD_SET_ADVERT_NAME && len >= 2) {
@@ -2273,6 +2490,8 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     return true;
   }
 
+  if (handleCloneCommand(command, reply)) return true;
+
   // hook for variant-specific CLI processing
   if (board.handleCommand(command, sender_timestamp, reply)) {
     if (_prefs.isDirty()) { savePrefs(); }
@@ -2967,6 +3186,11 @@ void MyMesh::checkSerialInterface() {
           _most_recent_lastmod = contact.lastmod; // save for the RESP_CODE_END_OF_CONTACTS frame
         }
       }
+    } else if (_iter_console_pending) {   // always sent, whatever the 'since' filter
+      _iter_console_pending = false;
+      ContactInfo console;
+      fillConsoleContact(console);
+      writeContactRespFrame(RESP_CODE_CONTACT, console);
     } else { // EOF
       out_frame[0] = RESP_CODE_END_OF_CONTACTS;
       memcpy(&out_frame[1], &_most_recent_lastmod,
@@ -2992,6 +3216,7 @@ void MyMesh::loop() {
     checkCLIRescueCmd();
   } else {
     checkSerialInterface();
+    checkConsole();
 #if defined(ENABLE_WIFI_INTERFACE) && defined(RP2040_PLATFORM) && !defined(ENABLE_USB_INTERFACE)
     // RP2040 WiFi builds are headless and have no way into the rescue CLI (that needs a
     // display + long-press), so serve config commands on the otherwise unused USB serial
