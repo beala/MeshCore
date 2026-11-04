@@ -106,6 +106,19 @@ TEST(CloneCoordinator, NewClaimPromptsAgain) {
   EXPECT_TRUE(b.promptDue(2000));   // so the next message sent from b asks again
 }
 
+TEST(CloneCoordinator, QuietCountStartsAtTakeover) {
+  CloneCoordinator a = radio(100), b = radio(300);
+  uint8_t claim[16];
+  a.takeover(1700000000);
+  b.onClaim(claim, a.writeClaim(claim));
+  b.allowReply(); b.allowReply();
+  EXPECT_EQ(b.silenced(), 2u);
+  b.takeover(1700000100);
+  a.takeover(1700000200);
+  b.onClaim(claim, a.writeClaim(claim));
+  EXPECT_EQ(b.silenced(), 0u);
+}
+
 TEST(CloneCoordinator, AlertRateLimited) {
   CloneCoordinator a = radio(100);
   EXPECT_TRUE(a.alertDue(5000));

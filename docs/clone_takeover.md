@@ -47,7 +47,7 @@ again when it hears that radio reply.
 |---|---|
 | `takeover` | Make this the main radio for this key |
 | `yes` | Accept the takeover the console just offered |
-| `clone` | Role, how often a backup stayed quiet, and when another radio was last heard |
+| `clone` | Role, messages a backup left unanswered since it became one, and when another radio was last heard |
 | `clone off` | Answer as normal again |
 
 ## Limits
@@ -75,3 +75,9 @@ third companion sending, on 908 MHz, SF7 / 62.5 kHz.
 | Message sent from the backup | delivered; console offered the takeover once, not again on the next message |
 | `Yes` to the offer | backup became main; the next message to it was acknowledged in 0.9 s |
 | `Clone` with a capital C; a command sent twice by the app | recognised; the repeat was confirmed but not run again |
+| Both radios on, after `takeover` (5 flood messages) | 1 reply each, acknowledged in 0.7 s; the backup showed every message |
+| Message sent from the backup, then `yes` | roles swapped; still 1 reply per message |
+
+On the bench, with no repeater, two radios side by side rarely notice each other while both answer:
+they hear the message at the same moment and reply at the same moment, and a radio can't receive
+while it transmits. On a mesh, each hears the other's reply when a repeater passes it on.

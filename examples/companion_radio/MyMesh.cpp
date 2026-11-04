@@ -384,7 +384,7 @@ bool MyMesh::handleCloneCommand(const char* command, char* reply) {
     static const char* roles[] = { "normal", "main", "backup" };
     int n = snprintf(reply, 160, "Role: %s.", roles[_clone.role()]);
     if (_clone.isBackup()) {
-      n += snprintf(&reply[n], 160 - n, " Stayed quiet %u times.", _clone.silenced());
+      n += snprintf(&reply[n], 160 - n, " Messages left unanswered: %u.", _clone.silenced());
     }
     if (_sibling_heard) {
       snprintf(&reply[n], 160 - n, " Other radio heard %lu min ago, to %s.",

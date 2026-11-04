@@ -31,7 +31,7 @@ class CloneCoordinator {
   bool _prompted;
   unsigned long _last_prompt;
   uint32_t _siblings;    // packets heard from another radio with this key
-  uint32_t _silenced;    // replies a backup didn't send
+  uint32_t _silenced;    // replies not sent since this radio last became a backup
 
   static bool due(bool& done, unsigned long& last, unsigned long now) {
     if (done && (long)(now - (last + CLONE_ALERT_INTERVAL)) < 0) return false;
@@ -87,6 +87,7 @@ public:
     _epoch = epoch;
     _role = CLONE_ROLE_BACKUP;
     _prompted = false;
+    _silenced = 0;
     return true;
   }
 
