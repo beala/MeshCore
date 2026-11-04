@@ -39,6 +39,7 @@ public:
 #else
   uint8_t  charger_wake = 1;
 #endif
+  uint32_t crypto_seq = 0;       // sequence number of the last saved encryption policy file
   uint8_t  gps_enabled = 0;      // GPS enabled flag (0=disabled, 1=enabled)
   uint32_t gps_interval = 0;     // GPS read interval in seconds
   uint8_t autoadd_config = 0;    // bitmask for auto-add contacts config
@@ -196,6 +197,7 @@ private:
       def("vibe_q", _parent->vibe_quiet);
       def("led_off", _parent->led_off);
       def("chg_wake", _parent->charger_wake);
+      def("crypto_seq", _parent->crypto_seq);
       def("auto_add", _parent->autoadd_config);    // bitmask for auto-add contacts config
       def("man_add", _parent->manual_add_contacts);
       def("tel_base", _parent->telemetry_mode_base);

@@ -1,0 +1,3 @@
+# Link the sanitizer runtimes for test envs that compile with -fsanitize=...
+Import("env")
+env.Append(LINKFLAGS=["-fsanitize=address,undefined"])
