@@ -31,6 +31,7 @@ env:
     t1000e_companion_radio_usb t1000e_companion_radio_ble
     Heltec_v3_companion_radio_usb Heltec_v3_companion_radio_ble
     heltec_v4_companion_radio_usb heltec_v4_companion_radio_ble
+    AB_Xiao_nrf52_LR2021_companion_radio_usb AB_Xiao_nrf52_LR2021_companion_radio_ble
     RAK_3401_repeater
   KEEP_RELEASES: 10  # older beala-* releases (and their tags) are deleted
 

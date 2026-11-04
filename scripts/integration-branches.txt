@@ -15,6 +15,7 @@ beala/pr-3521
 beala/lr2021-pram-patch
 beala/fix-lr2021-pa-table
 beala/fix-lr2021-agc-reset
+beala/lr2021-ocp-lf         # LR2021_OCP_LF build flag: sub-GHz PA over-current threshold (builds on fix-lr2021-agc-reset)
 beala/fix-lr2021-rx-boost-status
 beala/lr2021-simo-flag
 beala/x1-simo              # MeshTracker X1: enable SIMO (not hardware-verified yet)
@@ -27,3 +28,7 @@ beala/crypto-v2             # opt-in AES-SIV packet encryption: set crypto / set
 beala/entropy               # identity keys and BLE PIN: hash radio noise + hardware RNG together
 beala/find-me               # find me: beep for a couple of minutes to find a lost radio
 beala/ina219-shunt          # INA219: sensor set ina219_shunt <ohms>, saved in the prefs
+
+# Boards
+beala/ab-xiao-lr2021        # AB Labs XIAO nRF52840 + LR2021 (uses LR2021_USE_SIMO and LR2021_OCP_LF)
+beala/ab-nicerf-lr2021      # AB Labs WisBlock NiceRF LoRa2021F33-2G4 on a RAK3401 core (bench board)
