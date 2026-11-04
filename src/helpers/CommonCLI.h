@@ -203,11 +203,26 @@ private:
   };
   RoomPrefs room;
 
+  class FloodRetryPrefs : public ConfigSerializer {
+  public:
+    uint8_t count = 0;      // resends of a packet when no node is heard passing it on (0 = off)
+    uint16_t wait_ms = 0;   // how long to wait for a repeat, 0 = auto
+  protected:
+    void structure() override {
+      def("n", count);
+      def("wait", wait_ms);
+    }
+  };
+public:
+  FloodRetryPrefs flood_retry;
+private:
+
   DynamicConfigSerializer custom;
 
 protected:
   void structure() override {
     def("name", node_name, sizeof(node_name));
+    def("fretry", flood_retry);
     def("pass", password, sizeof(password));
     def("guest", guest_password, sizeof(guest_password));
     def("owner", owner_info, sizeof(owner_info));

@@ -172,6 +172,9 @@ protected:
   virtual void logRx(Packet* packet, int len, float score) { }   // hooks for custom logging
   virtual void logTx(Packet* packet, int len) { }
   virtual void logTxFail(Packet* packet, int len) { }
+
+  virtual void onPacketSent(Packet* packet) { }    // a packet finished transmitting (before it's freed)
+  virtual void onPacketHeard(Packet* packet) { }   // every received packet, before any delay or filtering
   virtual const char* getLogDateTime() { return ""; }
 
   virtual float getAirtimeBudgetFactor() const;

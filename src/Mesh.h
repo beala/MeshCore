@@ -1,5 +1,6 @@
 #pragma once
 
+#include <FloodRetry.h>
 #include <Dispatcher.h>
 #include <CryptoV2.h>
 
@@ -29,6 +30,7 @@ class Mesh : public Dispatcher {
   RTCClock* _rtc;
   RNG* _rng;
   MeshTables* _tables;
+  FloodRetry _flood_retry;
 
   void removeSelfFromPath(Packet* packet);
   void routeDirectRecvAcks(Packet* packet, uint32_t delay_millis);
@@ -178,6 +180,31 @@ protected:
    *         NOTE: same ACK can be received multiple times, via different routes
   */
   virtual void onAckRecv(Packet* packet, uint32_t ack_crc) { }
+
+  /**
+   * \brief  Flood retry: how many times to resend a packet this node has just sent, if no other
+   *         node is heard passing it on. Asked once per packet, after its first send, and only for
+   *         packets that can be echoed (FloodRetry::canEcho): flood, or direct with a next hop.
+   *         Flood packets this node started have no hops in their path yet; forwarded ones do.
+   * \returns  0 (the default) to not watch this packet
+  */
+  virtual uint8_t getFloodRetries(const Packet* packet) { return 0; }
+
+  /**
+   * \returns  how long to wait for an echo after each send. The default covers a neighbour's
+   *           receive and retransmit delays, plus its transmit time.
+  */
+  virtual uint32_t getFloodRetryWait(const Packet* packet);
+
+  /**
+   * \returns  false to skip a resend that is due now (eg. the channel is busy)
+  */
+  virtual bool allowFloodRetryNow(const Packet* packet) { return true; }
+
+  FloodRetry& getFloodRetry() { return _flood_retry; }
+
+  void onPacketSent(Packet* packet) override;
+  void onPacketHeard(Packet* packet) override;
 
   Mesh(Radio& radio, MillisecondClock& ms, RNG& rng, RTCClock& rtc, PacketManager& mgr, MeshTables& tables)
     : Dispatcher(radio, ms, mgr), _rng(&rng), _rtc(&rtc), _tables(&tables)

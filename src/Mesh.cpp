@@ -9,6 +9,54 @@ void Mesh::begin() {
 
 void Mesh::loop() {
   Dispatcher::loop();
+
+  const uint8_t* raw;   // no copy here: this frame is live under every receive path
+  uint8_t len;
+  int idx = _flood_retry.nextDue(_ms->getMillis(), raw, len);
+  if (idx >= 0) {
+    Packet* pkt = obtainNewPacket();
+    if (pkt == NULL || !pkt->readFrom(raw, len) || !allowFloodRetryNow(pkt)) {
+      if (pkt) releasePacket(pkt);
+      _flood_retry.skip(idx);
+    } else {
+      MESH_DEBUG_PRINTLN("%s Mesh::loop(): no echo heard, resending flood packet", getLogDateTime());
+      // same bytes and path as before, so nodes that have it drop it. Direct packets go first, as
+      // when they are forwarded; flood packets further from the source get lower priority.
+      uint8_t hops = pkt->getPathHashCount();
+      sendPacket(pkt, pkt->isRouteDirect() ? 0 : (hops ? hops : 1));
+    }
+  }
+}
+
+uint32_t Mesh::getFloodRetryWait(const Packet* packet) {
+  // neighbours wait up to a few airtimes before they forward (tx_delay_factor), then transmit
+  return 1000 + 8 * _radio->getEstAirtimeFor(packet->getRawLength() + packet->getPathHashSize());
+}
+
+void Mesh::onPacketSent(Packet* packet) {
+  if (_flood_retry.onSent(packet, _ms->getMillis())) return;   // one of our resends
+  if (!FloodRetry::canEcho(packet)) return;
+
+  uint8_t n = getFloodRetries(packet);
+  if (n > 0) _flood_retry.track(packet, _ms->getMillis(), n, getFloodRetryWait(packet));
+}
+
+void Mesh::onPacketHeard(Packet* packet) {
+  if (_flood_retry.onHeard(packet) == FloodRetry::ECHO_CANCEL_RESEND) {
+    // the echo arrived after all, so take our queued resend (same hash) off the send queue
+    uint8_t heard[MAX_HASH_SIZE], h[MAX_HASH_SIZE];
+    packet->calculatePacketHash(heard);
+    for (int i = 0; i < _mgr->getOutboundTotal(); i++) {
+      Packet* q = _mgr->getOutboundByIdx(i);
+      q->calculatePacketHash(h);
+      if (memcmp(h, heard, MAX_HASH_SIZE) == 0) {
+        releasePacket(_mgr->removeOutboundByIdx(i));
+        _flood_retry.resendCancelled(heard);
+        break;
+      }
+    }
+    // if it wasn't queued, it's transmitting now, and onSent() closes it
+  }
 }
 
 int Mesh::encryptPayload(const uint8_t* secret, uint8_t* dest, const uint8_t* data, int data_len, const uint8_t* ctx, int ctx_len) {

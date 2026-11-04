@@ -143,6 +143,9 @@ protected:
 
   uint32_t getRetransmitDelay(const mesh::Packet* packet) override;
   uint32_t getDirectRetransmitDelay(const mesh::Packet* packet) override;
+  uint8_t getFloodRetries(const mesh::Packet* packet) override;
+  uint32_t getFloodRetryWait(const mesh::Packet* packet) override;
+  bool allowFloodRetryNow(const mesh::Packet* packet) override;
 
   int getInterferenceThreshold() const override {
     return _prefs.interference_threshold;

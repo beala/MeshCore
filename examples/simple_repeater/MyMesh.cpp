@@ -1,5 +1,6 @@
 #include "MyMesh.h"
 #include <algorithm>
+#include <helpers/FloodRetryCLI.h>
 
 /* ------------------------------ Config -------------------------------- */
 
@@ -553,6 +554,24 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
 int MyMesh::calcRxDelay(float score, uint32_t air_time) const {
   if (_prefs.rx_delay_base <= 0.0f) return 0;
   return (int)((pow(_prefs.rx_delay_base, 0.85f - score) - 1.0) * air_time);
+}
+
+uint8_t MyMesh::getFloodRetries(const mesh::Packet* packet) {
+  // only asked for packets some node should pass on (see FloodRetry::canEcho)
+  if (packet->getPayloadType() == PAYLOAD_TYPE_ADVERT) return 0;   // most of the flood traffic, and losing one is cheap
+  return _prefs.flood_retry.count;
+}
+
+uint32_t MyMesh::getFloodRetryWait(const mesh::Packet* packet) {
+  return _prefs.flood_retry.wait_ms ? _prefs.flood_retry.wait_ms : mesh::Mesh::getFloodRetryWait(packet);
+}
+
+#ifndef FLOOD_RETRY_BUSY_QUEUE
+  #define FLOOD_RETRY_BUSY_QUEUE  2   // skip a resend if this many packets are already waiting to go out
+#endif
+
+bool MyMesh::allowFloodRetryNow(const mesh::Packet* packet) {
+  return _mgr->getOutboundTotal() < FLOOD_RETRY_BUSY_QUEUE;
 }
 
 uint32_t MyMesh::getRetransmitDelay(const mesh::Packet *packet) {
@@ -1250,6 +1269,12 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     memcpy(reply, command, 3);                    // reflect the prefix back
     reply += 3;
     command += 3;
+  }
+
+  bool retry_changed;
+  if (handleFloodRetryCommand(command, _prefs.flood_retry.count, _prefs.flood_retry.wait_ms, getFloodRetry(), reply, retry_changed)) {
+    if (retry_changed) savePrefs();
+    return;
   }
 
   // handle ACL related commands
