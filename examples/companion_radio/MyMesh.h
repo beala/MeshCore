@@ -257,6 +257,7 @@ private:
   bool _cli_remote = false;      // handleCommand() is running for a remote admin
   bool _crypto_save_pending = false;     // an auto-upgrade is waiting to be written to flash
   unsigned long _crypto_save_at = 0;
+  uint8_t _identity_state = 0;   // 0 loaded from flash, 1 made this boot and saved, 2 made but not saved
   uint32_t pending_login;
   uint32_t pending_status;
   uint32_t pending_telemetry, pending_discovery;   // pending _TELEMETRY_REQ

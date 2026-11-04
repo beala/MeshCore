@@ -2,6 +2,7 @@
 
 #include <Mesh.h>
 #include <RadioLib.h>
+#include <helpers/EntropyPool.h>
 
 #ifdef USE_CC310_HW_CRYPTO
 #include <Adafruit_nRFCrypto.h>
@@ -93,24 +94,15 @@ public:
 };
 
 /**
- * \brief  an RNG impl using the noise from the LoRa radio as entropy.
- *         NOTE: this is VERY SLOW!  Use only for things like creating new LocalIdentity
+ * \brief  an RNG for keys: hardware RNG and radio noise, through EntropyPool (see EntropyPool.h).
+ *         NOTE: this is SLOW (it samples the radio up to 1536 times) and leaves the radio in standby.
+ *         Use only for things like creating a new LocalIdentity, before the radio starts receiving,
+ *         and only keep the key if EntropyPool::readyForKeys() afterwards.
 */
 class RadioNoiseListener : public mesh::RNG {
   PhysicalLayer* _radio;
 public:
   RadioNoiseListener(PhysicalLayer& radio): _radio(&radio) { }
 
-  void random(uint8_t* dest, size_t sz) override {
-#ifdef USE_CC310_HW_CRYPTO
-    nRFCrypto.Random.generate(dest, (uint16_t)sz);
-    for (int i = 0; i < sz; i++) {
-      dest[i] ^= _radio->randomByte() ^ (::random(0, 256) & 0xFF); // combine with Radio's entropy
-    }
-#else
-    for (int i = 0; i < sz; i++) {
-      dest[i] = _radio->randomByte() ^ (::random(0, 256) & 0xFF);
-    }
-#endif
-  }
+  void random(uint8_t* dest, size_t sz) override;
 };

@@ -1,4 +1,5 @@
 #include <Arduino.h>   // needed for PlatformIO
+#include <helpers/EntropyPool.h>
 #include <Mesh.h>
 
 #if defined(NRF52_PLATFORM)
@@ -318,13 +319,20 @@ public:
         if (Serial.available()) c = Serial.read();
       }
       ((StdRNG *)getRNG())->begin(millis());
+      uint32_t t = millis();
+      EntropyPool::addUntrusted(&t, sizeof(t));   // keypress timing: mixed in, not credited
 
-      self_id = mesh::LocalIdentity(getRNG());  // create new random identity
+      // the key comes from the radio/hardware entropy pool, not the seeded Arduino PRNG
+      self_id = radio_new_identity();  // create new random identity
       int count = 0;
       while (count < 10 && (self_id.pub_key[0] == 0x00 || self_id.pub_key[0] == 0xFF)) {  // reserved id hashes
-        self_id = mesh::LocalIdentity(getRNG()); count++;
+        self_id = radio_new_identity(); count++;
       }
-      store.save("_main", self_id);
+      if (EntropyPool::readyForKeys()) {
+        store.save("_main", self_id);
+      } else {
+        Serial.println("WARNING: not enough entropy for a permanent key, identity not saved");
+      }
     }
 
     // load persisted prefs
@@ -568,6 +576,7 @@ void halt() {
 }
 
 void setup() {
+  EntropyPool::collectEarly();   // first: ESP32 needs this before the ADC and RF are used
   Serial.begin(115200);
 
   board.begin();

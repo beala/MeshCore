@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <helpers/EntropyPool.h>
 #include <target.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/IdentityStore.h>
@@ -53,7 +54,12 @@ void loadOrCreateIdentity() {
     while (identity.pub_key[0] == 0x00 || identity.pub_key[0] == 0xFF) {
       identity = radio_new_identity();
     }
-    store.save("_main", identity);
+    if (EntropyPool::readyForKeys()) {
+      store.save("_main", identity);
+    } else {
+      // not enough trusted entropy: use this key for now but don't keep it, try again next boot
+      MESH_DEBUG_PRINTLN("WARNING: not enough entropy for a permanent key, identity not saved");
+    }
   }
 }
 
@@ -76,6 +82,7 @@ void onGetStats(uint32_t* rx, uint32_t* tx, uint32_t* errors) {
 }
 
 void setup() {
+  EntropyPool::collectEarly();   // first: ESP32 needs this before the ADC and RF are used
   board.begin();
 
   if (!radio_init()) {

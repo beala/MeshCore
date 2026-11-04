@@ -1,4 +1,5 @@
 #include "SensorMesh.h"
+#include <helpers/EntropyPool.h>
 
 #ifdef DISPLAY_CLASS
   #include "UITask.h"
@@ -53,6 +54,7 @@ void halt() {
 static char command[160];
 
 void setup() {
+  EntropyPool::collectEarly();   // first: ESP32 needs this before the ADC and RF are used
   Serial.begin(115200);
   delay(1000);
 
@@ -98,7 +100,12 @@ void setup() {
     while (count < 10 && (the_mesh.self_id.pub_key[0] == 0x00 || the_mesh.self_id.pub_key[0] == 0xFF)) {  // reserved id hashes
       the_mesh.self_id = radio_new_identity(); count++;
     }
-    store.save("_main", the_mesh.self_id);
+    if (EntropyPool::readyForKeys()) {
+      store.save("_main", the_mesh.self_id);
+    } else {
+      // not enough trusted entropy: use this key for now but don't keep it, try again next boot
+      MESH_DEBUG_PRINTLN("WARNING: not enough entropy for a permanent key, identity not saved");
+    }
   }
 
   Serial.print("Sensor ID: ");

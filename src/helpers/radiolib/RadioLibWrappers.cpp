@@ -268,3 +268,32 @@ PacketMillis RadioLibWrapper::calcMaxPacketMillis(uint8_t sf, float bw, uint8_t 
 
   return PacketMillis {(preamble_us + 999) / 1000, (payload_us + 999) / 1000};
 }
+
+// Feeds radio noise into the entropy pool, then draws from it. If the pool doesn't yet have enough
+// credited entropy for a key (e.g. no trusted hardware RNG on this platform), it collects full
+// health-tested batches (credited 1 bit per sample); otherwise a small batch as extra input.
+// Callers that keep a key must check EntropyPool::readyForKeys() afterwards.
+#define RADIO_NOISE_EXTRA_SAMPLES  64
+#define RADIO_NOISE_MAX_BATCHES    3
+
+void RadioNoiseListener::random(uint8_t* dest, size_t sz) {
+  static uint8_t samples[EntropyPool::RADIO_BATCH];
+  static uint8_t timings[EntropyPool::RADIO_BATCH];
+
+  EntropyPool::addHardware();
+  int batches = 0;
+  do {
+    size_t n = EntropyPool::readyForKeys() ? RADIO_NOISE_EXTRA_SAMPLES : EntropyPool::RADIO_BATCH;
+    for (size_t i = 0; i < n; i++) {
+      samples[i] = _radio->randomByte();
+      timings[i] = (uint8_t)micros();   // not credited
+    }
+    if (!EntropyPool::addRadioSamples(samples, n)) {
+      MESH_DEBUG_PRINTLN("RadioNoiseListener: radio noise failed the health tests");
+    }
+    EntropyPool::addUntrusted(timings, n);
+  } while (!EntropyPool::readyForKeys() && ++batches < RADIO_NOISE_MAX_BATCHES);
+
+  EntropyPool::secureZero(samples, sizeof(samples));
+  EntropyPool::generate(dest, sz);
+}
