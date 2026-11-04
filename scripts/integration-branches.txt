@@ -29,6 +29,8 @@ beala/entropy               # identity keys and BLE PIN: hash radio noise + hard
 beala/find-me               # find me: beep for a couple of minutes to find a lost radio
 beala/ina219-shunt          # INA219: sensor set ina219_shunt <ohms>, saved in the prefs
 beala/flood-retry           # resend a flood packet when no node is heard passing it on (companion on, repeater opt-in)
+beala/clone-takeover        # radios sharing a key: one takes over, the others hold back their replies; Radio console contact
+beala/clone-takeover-crypto-v2  # glue for the two above: clone takeover reads crypto v2 packets (crypto-v2 merged into clone-takeover)
 
 # Boards
 beala/ab-xiao-lr2021        # AB Labs XIAO nRF52840 + LR2021 (uses LR2021_USE_SIMO and LR2021_OCP_LF)
