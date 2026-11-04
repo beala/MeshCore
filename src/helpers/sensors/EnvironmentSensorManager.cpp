@@ -114,6 +114,10 @@ static Adafruit_INA3221 INA3221;
 #ifndef TELEM_INA219_ADDRESS
 #define TELEM_INA219_ADDRESS    0x40      // INA219 single channel current sensor I2C address
 #endif
+#ifndef TELEM_INA219_SHUNT_VALUE
+#define TELEM_INA219_SHUNT_VALUE 0.100    // ohms; most INA219 boards have a 0.1 ohm shunt (R100)
+#endif
+static float ina219_shunt_ohm = TELEM_INA219_SHUNT_VALUE;   // changed with "sensor set ina219_shunt"
 #include <Adafruit_INA219.h>
 static Adafruit_INA219 INA219(TELEM_INA219_ADDRESS);
 #endif
@@ -380,9 +384,13 @@ static uint8_t init_ina219(TwoWire* wire, uint8_t) {
   return INA219.begin(wire) ? 1 : 0;
 }
 static void query_ina219(uint8_t ch, uint8_t, CayenneLPP& lpp) {
-  lpp.addVoltage(ch, INA219.getBusVoltage_V());
-  lpp.addCurrent(ch, INA219.getCurrent_mA() / 1000.0f);
-  lpp.addPower(ch, INA219.getPower_mW() / 1000.0f);
+  // The library's current and power registers assume a 0.1 ohm shunt, so work them out from
+  // the shunt voltage instead (10 uV steps, +/-320 mV range) and the configured resistance.
+  float volts = INA219.getBusVoltage_V();
+  float amps = INA219.getShuntVoltage_mV() / 1000.0f / ina219_shunt_ohm;
+  lpp.addVoltage(ch, volts);
+  lpp.addCurrent(ch, amps);
+  lpp.addPower(ch, volts * amps);
 }
 #endif
 
@@ -699,10 +707,32 @@ bool EnvironmentSensorManager::querySensors(uint8_t requester_permissions, Cayen
 }
 
 
+#if ENV_INCLUDE_INA219
+// shunt resistance in ohms as text, e.g. "0.1" or "0.0015"
+static const char* formatOhms(float ohm) {
+  static char s[16];
+  uint32_t uohm = (uint32_t)(ohm * 1000000.0f + 0.5f);
+  snprintf(s, sizeof(s), "%lu.%06lu", (unsigned long)(uohm / 1000000), (unsigned long)(uohm % 1000000));
+  for (int i = strlen(s) - 1; s[i] == '0' && s[i - 1] != '.'; i--) s[i] = 0;
+  return s;
+}
+
+#endif
+
+bool EnvironmentSensorManager::hasSensor(void (*query)(uint8_t, uint8_t, CayenneLPP&)) const {
+  for (int i = 0; i < _active_sensor_count; i++) {
+    if (_active_sensors[i].query == query) return true;
+  }
+  return false;
+}
+
 int EnvironmentSensorManager::getNumSettings() const {
   int settings = 0;
   #if ENV_INCLUDE_GPS
     if (gps_detected) settings++;  // only show GPS setting if GPS is detected
+  #endif
+  #if ENV_INCLUDE_INA219
+    if (hasSensor(query_ina219)) settings++;
   #endif
   return settings;
 }
@@ -712,6 +742,11 @@ const char* EnvironmentSensorManager::getSettingName(int i) const {
   #if ENV_INCLUDE_GPS
     if (gps_detected && i == settings++) {
       return "gps";
+    }
+  #endif
+  #if ENV_INCLUDE_INA219
+    if (hasSensor(query_ina219) && i == settings++) {
+      return "ina219_shunt";
     }
   #endif
   return NULL;
@@ -724,10 +759,24 @@ const char* EnvironmentSensorManager::getSettingValue(int i) const {
       return gps_active ? "1" : "0";
     }
   #endif
+  #if ENV_INCLUDE_INA219
+    if (hasSensor(query_ina219) && i == settings++) {
+      return formatOhms(ina219_shunt_ohm);
+    }
+  #endif
   return NULL;
 }
 
 bool EnvironmentSensorManager::setSettingValue(const char* name, const char* value) {
+  #if ENV_INCLUDE_INA219
+  if (strcmp(name, "ina219_shunt") == 0) {   // ohms
+    float ohm = strtof(value, NULL);
+    if (!(ohm >= 0.0001f && ohm <= 100.0f)) return false;
+    ina219_shunt_ohm = ohm;
+    if (_prefs) _prefs->setByKey("ina219_shunt", formatOhms(ohm));
+    return true;
+  }
+  #endif
   #if ENV_INCLUDE_GPS
   if (gps_detected && strcmp(name, "gps") == 0) {
     if (strcmp(value, "0") == 0) {
@@ -979,3 +1028,12 @@ void EnvironmentSensorManager::loop() {
   #endif  // ENV_INCLUDE_BME680_BSEC
 }
 #endif // ENV_INCLUDE_GPS || ENV_INCLUDE_BME680_BSEC
+
+// Saved settings go in the prefs' "custom" section, under the same key as the setting.
+void EnvironmentSensorManager::attachDynamicPrefs(KeyValueStore* prefs) {
+  #if ENV_INCLUDE_INA219
+  char val[16];
+  if (prefs->getByKey("ina219_shunt", val, sizeof(val) - 1)) setSettingValue("ina219_shunt", val);
+  #endif
+  _prefs = prefs;   // set after loading, so loading doesn't write the values back
+}

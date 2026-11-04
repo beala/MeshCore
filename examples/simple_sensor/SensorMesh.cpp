@@ -859,6 +859,7 @@ void SensorMesh::begin(FILESYSTEM* fs) {
   radio_driver.setTxPower(_prefs.tx_power_dbm);
 
   board.attachDynamicPrefs(_prefs.getCustom());
+  sensors.attachDynamicPrefs(_prefs.getCustom());
 
   updateAdvertTimer();
   updateFloodAdvertTimer();

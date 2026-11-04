@@ -998,6 +998,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
                      radio_driver.getRxBoostedGainMode() ? "Enabled" : "Disabled");
 
   board.attachDynamicPrefs(_prefs.getCustom());
+  sensors.attachDynamicPrefs(_prefs.getCustom());
 
   updateAdvertTimer();
   updateFloodAdvertTimer();

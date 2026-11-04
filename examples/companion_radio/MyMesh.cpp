@@ -1057,6 +1057,7 @@ void MyMesh::begin() {
   loadFindAllow();
 
   board.attachDynamicPrefs(_prefs.getCustom());
+  sensors.attachDynamicPrefs(_prefs.getCustom());
 
   MESH_DEBUG_PRINTLN("RX Boosted Gain Mode: %s",
                      radio_driver.getRxBoostedGainMode() ? "Enabled" : "Disabled");
@@ -1924,6 +1925,7 @@ void MyMesh::handleCmdFrame(size_t len) {
       *np++ = 0; // modify 'cmd_frame', replace ':' with null
       bool success = sensors.setSettingValue(sp, np);
       if (success) {
+        if (_prefs.isDirty()) savePrefs();
         #if ENV_INCLUDE_GPS == 1
         // Update node preferences for GPS settings
         if (strcmp(sp, "gps") == 0) {
@@ -2280,6 +2282,36 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     } else {
       strcpy(reply, "Error, bad chars");
     }
+    return true;
+  }
+  if (memcmp(command, "sensor get ", 11) == 0) {
+    const char* val = sensors.getSettingByKey(&command[11]);
+    if (val) sprintf(reply, "> %s", val); else strcpy(reply, "null");
+    return true;
+  }
+  if (memcmp(command, "sensor set ", 11) == 0) {
+    char key[24];
+    const char* sp = strchr(&command[11], ' ');
+    int klen = sp ? sp - &command[11] : 0;
+    if (klen > 0 && klen < (int)sizeof(key)) {
+      memcpy(key, &command[11], klen);
+      key[klen] = 0;
+      if (sensors.setSettingValue(key, sp + 1)) {
+        if (_prefs.isDirty()) savePrefs();
+        strcpy(reply, "OK");
+        return true;
+      }
+    }
+    strcpy(reply, "Error, unknown setting or bad value");
+    return true;
+  }
+  if (strcmp(command, "sensor list") == 0) {
+    char* dp = reply;
+    *dp = 0;
+    for (int i = 0; i < sensors.getNumSettings() && dp - reply < 100; i++) {
+      dp += sprintf(dp, "%s%s=%s", i ? "\n" : "", sensors.getSettingName(i), sensors.getSettingValue(i));
+    }
+    if (dp == reply) strcpy(reply, "no custom var");
     return true;
   }
   if (strcmp(command, "get name") == 0) {

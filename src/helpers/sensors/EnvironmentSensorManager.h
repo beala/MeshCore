@@ -23,6 +23,9 @@ protected:
   bool     gps_active = false;
   uint32_t gps_update_interval_sec = 1;
 
+  KeyValueStore* _prefs = NULL;
+  bool hasSensor(void (*query)(uint8_t, uint8_t, CayenneLPP&)) const;
+
   #if ENV_INCLUDE_GPS
   LocationProvider* _location;
   void start_gps();
@@ -51,4 +54,5 @@ public:
   const char* getSettingName(int i) const override;
   const char* getSettingValue(int i) const override;
   bool setSettingValue(const char* name, const char* value) override;
+  void attachDynamicPrefs(KeyValueStore* prefs) override;
 };
