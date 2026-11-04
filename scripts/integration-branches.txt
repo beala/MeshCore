@@ -28,6 +28,7 @@ beala/crypto-v2             # opt-in AES-SIV packet encryption: set crypto / set
 beala/entropy               # identity keys and BLE PIN: hash radio noise + hardware RNG together
 beala/find-me               # find me: beep for a couple of minutes to find a lost radio
 beala/ina219-shunt          # INA219: sensor set ina219_shunt <ohms>, saved in the prefs
+beala/flood-retry           # resend a flood packet when no node is heard passing it on (companion on, repeater opt-in)
 
 # Boards
 beala/ab-xiao-lr2021        # AB Labs XIAO nRF52840 + LR2021 (uses LR2021_USE_SIMO and LR2021_OCP_LF)
