@@ -355,5 +355,6 @@ void MyMesh::runRanging(bool manager, const uint8_t* addr_key) {
   rng.end();
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+  rng.restartRx();   // otherwise the radio stays deaf until it next transmits
 #endif
 }

@@ -7,7 +7,7 @@
 //
 // Ranging uses LoRa SF9 at 500 kHz bandwidth on the current frequency, so it is only allowed where
 // a 500 kHz channel fits the band (902-928 MHz). The caller restores the normal LoRa settings
-// afterwards with end() and then the wrapper's setParams().
+// afterwards with end(), the wrapper's setParams(), then restartRx().
 
 #include "CustomLR2021Wrapper.h"
 
@@ -23,7 +23,7 @@ public:
   // one raw unit is 150 / (4096 * 0.5 MHz) = 7.3 cm
   static float rawToMeters(int32_t raw) { return raw * 150.0f / (4096.0f * 0.5f); }
 
-  explicit LR2021Ranging(CustomLR2021Wrapper& w) : _r((CustomLR2021 *)w._radio) { }
+  explicit LR2021Ranging(CustomLR2021Wrapper& w) : _w(&w), _r((CustomLR2021 *)w._radio) { }
 
   // Switch to RTToF. addr: the subordinate answers only requests for this address (all 4 bytes checked).
   int16_t begin(bool manager, uint32_t addr) {
@@ -100,12 +100,17 @@ public:
     return st;
   }
 
+  // After the wrapper's setParams(): the radio is in standby, but the wrapper still thinks it's
+  // receiving and would never restart Rx. Mark it idle so the next loop calls startReceive().
+  void restartRx() { _w->idle(); }
+
 private:
   static const uint32_t IRQ_REQ_VALID = 1UL << 2, IRQ_TIMEOUT = 1UL << 21, IRQ_RESP_DONE = 1UL << 28,
                         IRQ_REQ_DIS = 1UL << 29, IRQ_EXCH_VALID = 1UL << 30, IRQ_RNG_TIMEOUT = 1UL << 31;
   static const uint32_t RNG_IRQS = IRQ_REQ_VALID | IRQ_RESP_DONE | IRQ_REQ_DIS | IRQ_EXCH_VALID |
                                    IRQ_RNG_TIMEOUT | IRQ_TIMEOUT;
 
+  CustomLR2021Wrapper* _w;
   CustomLR2021* _r;
 
   static void be32(uint8_t* b, uint32_t v) {
