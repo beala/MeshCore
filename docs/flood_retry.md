@@ -1,7 +1,9 @@
 # Flood retry
 
-When a radio sends a channel message, it listens for a repeater passing it on. If it hears
-nothing, it sends the same message again, byte for byte.
+When a radio sends a packet, it listens for the next node passing it on. If it hears nothing,
+it sends the same packet again, byte for byte. This works for flood packets (channel messages,
+messages to contacts without a known path, requests) and for direct packets that follow a path
+through repeaters.
 
 ## Why resending is safe
 
@@ -18,35 +20,47 @@ timestamp.
 
 ## How it decides
 
-After a flood packet goes out, the radio waits for an echo: a copy of the same packet with more
-hops in its path than ours. Hearing one means at least one node got it and passed it on.
+After a packet goes out, the radio waits for an echo: a copy of the same packet that went
+further than ours. A flood copy that went further has more hops in its path. A direct copy has
+fewer, because each repeater removes itself from the path before passing it on. Hearing one
+means the next node got it.
+
+Some packets never produce an echo, so they're never resent:
+
+- a direct packet with an empty path: the last hand-off to the recipient, or a zero-hop packet
+  to a neighbour. The recipient doesn't pass it on;
+- trace packets, whose duplicate check includes the path, so a resend wouldn't be dropped;
+- multipart packets, which the next hop passes on as a different packet.
 
 If no echo comes within the wait time, it resends. It does this up to the set number of times,
 then stops. If the echo arrives while a resend is still queued, the resend is cancelled.
 
 The wait is 1 second plus 8 airtimes of the packet, about 2.5 s for a short message at
 SF7 / 62.5 kHz. That covers a repeater's own random delay before it forwards (up to 2.5 airtimes
-at the default `txdelay`), plus its transmit time.
+for flood at the default `txdelay`, 1.5 for direct), plus its transmit time.
 
 ## Companion
 
-On by default, with 1 resend. It covers the radio's own channel messages (text and channel
-data). It doesn't cover direct messages, which already have acknowledgements and retries, or
-adverts.
+On by default, with 1 resend. It covers every flood packet the radio starts except adverts
+(they repeat on a timer anyway), and every direct packet it sends through a repeater. For direct
+messages this fixes a lost hop within a few seconds. Without it, the app waits for its
+acknowledgement timeout, retries, and after a few failures gives up on the path and floods.
 
 ## Repeater
 
-Off by default. When on, a repeater watches every flood packet it forwards, except adverts. If
-it hears nothing go further, it resends its copy. This helps on links with a single path, for
-example one repeater bridging two areas, where a single lost packet stops the flood.
+Off by default. When on, a repeater watches every packet it sends or forwards that can be
+echoed, except adverts. If it hears nothing go further, it resends its copy. This helps on links
+with a single path, for example one repeater bridging two areas, where a single lost packet
+stops the flood, and on every hop of a direct route.
 
 Guardrails:
 
 - Adverts are never resent. They're most of the flood traffic, and losing one costs little.
 - A resend is skipped when 2 or more packets are already waiting to go out, so it doesn't add
   to a busy channel.
-- A repeater at the edge of the mesh (nobody further out) will resend each packet once,
-  because no echo comes. Leave it off on such repeaters.
+- A repeater at the edge of the mesh (nobody further out) will resend each flood packet once,
+  because no echo comes. Leave it off on such repeaters. Direct packets aren't affected: their
+  path names the next hop.
 
 ## Commands
 
@@ -87,6 +101,14 @@ first copy of each packet, to stand in for a lost packet.
 | Repeater, next repeater passes it on (8 packets) | 8 echoed, 0 resends |
 | Repeater, next repeater misses the first copy (8 packets) | 8 resent once, 8 echoed after the resend |
 | Repeater, nobody passes it on (3 packets) | 1 resend each, then stopped |
+| Repeater, direct, next hop passes it on (5 packets) | 5 echoed, 0 resends |
+| Repeater, direct, next hop misses the first copy (5 packets) | 5 resent once, 5 echoed after the resend |
+| Repeater, direct, next hop doesn't exist (3 packets) | 1 resend each, then stopped |
+| Repeater, direct, last hand-off to the recipient (3 packets) | not watched |
+| Companion, direct through a repeater (3 packets) | 3 echoed, 0 resends |
+| Companion, direct, repeater misses the first copy (3 packets) | 3 resent once, 3 echoed after the resend |
+| Companion, flood request (3 packets) | 3 echoed |
+| Companion, zero-hop direct packet, flood advert | not watched |
 | Companion on the live mesh, private channel (3 messages) | 3 echoed by local repeaters, 0 resends |
 
 An RTL-SDR recording of the companion test showed exactly three transmissions: the message,

@@ -10,7 +10,7 @@ void Mesh::begin() {
 void Mesh::loop() {
   Dispatcher::loop();
 
-  uint8_t raw[MAX_TRANS_UNIT];
+  const uint8_t* raw;   // no copy here: this frame is live under every receive path
   uint8_t len;
   int idx = _flood_retry.nextDue(_ms->getMillis(), raw, len);
   if (idx >= 0) {
@@ -20,10 +20,10 @@ void Mesh::loop() {
       _flood_retry.skip(idx);
     } else {
       MESH_DEBUG_PRINTLN("%s Mesh::loop(): no echo heard, resending flood packet", getLogDateTime());
-      // same bytes and path as before, so nodes that have it drop it. Forwarded packets keep the
-      // priority they were forwarded with (further from the source = lower).
+      // same bytes and path as before, so nodes that have it drop it. Direct packets go first, as
+      // when they are forwarded; flood packets further from the source get lower priority.
       uint8_t hops = pkt->getPathHashCount();
-      sendPacket(pkt, hops ? hops : 1);
+      sendPacket(pkt, pkt->isRouteDirect() ? 0 : (hops ? hops : 1));
     }
   }
 }
@@ -34,8 +34,8 @@ uint32_t Mesh::getFloodRetryWait(const Packet* packet) {
 }
 
 void Mesh::onPacketSent(Packet* packet) {
-  if (!packet->isRouteFlood()) return;
   if (_flood_retry.onSent(packet, _ms->getMillis())) return;   // one of our resends
+  if (!FloodRetry::canEcho(packet)) return;
 
   uint8_t n = getFloodRetries(packet);
   if (n > 0) _flood_retry.track(packet, _ms->getMillis(), n, getFloodRetryWait(packet));
@@ -48,7 +48,6 @@ void Mesh::onPacketHeard(Packet* packet) {
     packet->calculatePacketHash(heard);
     for (int i = 0; i < _mgr->getOutboundTotal(); i++) {
       Packet* q = _mgr->getOutboundByIdx(i);
-      if (!q->isRouteFlood()) continue;
       q->calculatePacketHash(h);
       if (memcmp(h, heard, MAX_HASH_SIZE) == 0) {
         releasePacket(_mgr->removeOutboundByIdx(i));

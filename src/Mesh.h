@@ -169,9 +169,10 @@ protected:
   virtual void onAckRecv(Packet* packet, uint32_t ack_crc) { }
 
   /**
-   * \brief  Flood retry: how many times to resend a flood packet this node has just sent, if no
-   *         other node is heard repeating it. Asked once per packet, after its first send.
-   *         Packets this node started have no hops in their path yet; forwarded ones do.
+   * \brief  Flood retry: how many times to resend a packet this node has just sent, if no other
+   *         node is heard passing it on. Asked once per packet, after its first send, and only for
+   *         packets that can be echoed (FloodRetry::canEcho): flood, or direct with a next hop.
+   *         Flood packets this node started have no hops in their path yet; forwarded ones do.
    * \returns  0 (the default) to not watch this packet
   */
   virtual uint8_t getFloodRetries(const Packet* packet) { return 0; }

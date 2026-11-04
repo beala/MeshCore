@@ -32,7 +32,7 @@ TEST(FloodRetry, EchoHeard_NoResend) {
   ASSERT_TRUE(r.track(&p, 1000, 1, WAIT));
   Packet echo = repeated(p, 1);
   EXPECT_EQ(r.onHeard(&echo), FloodRetry::ECHO_HEARD);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   EXPECT_EQ(r.nextDue(1000 + 10 * WAIT, raw, len), -1);
   EXPECT_EQ(r.getActiveCount(), 0);
   EXPECT_EQ(r.getStats().echoed, 1u);
@@ -46,7 +46,7 @@ TEST(FloodRetry, NoEcho_ResendsSameBytes) {
   uint8_t orig_len = p.writeTo(orig);
   ASSERT_TRUE(r.track(&p, 1000, 1, WAIT));
 
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   EXPECT_EQ(r.nextDue(1000 + WAIT - 1, raw, len), -1);   // not yet
   int idx = r.nextDue(1000 + WAIT, raw, len);
   ASSERT_GE(idx, 0);
@@ -59,7 +59,7 @@ TEST(FloodRetry, ResendIsNotTrackedAsNewPacket) {
   FloodRetry r;
   Packet p = makeFlood(3);
   r.track(&p, 0, 1, WAIT);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   ASSERT_GE(r.nextDue(WAIT, raw, len), 0);
   Packet resend; resend.readFrom(raw, len);
   EXPECT_TRUE(r.onSent(&resend, WAIT + 100));            // recognised as our resend
@@ -76,7 +76,7 @@ TEST(FloodRetry, EchoAfterResend_Counted) {
   FloodRetry r;
   Packet p = makeFlood(4);
   r.track(&p, 0, 2, WAIT);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   ASSERT_GE(r.nextDue(WAIT, raw, len), 0);
   r.onSent(&p, WAIT + 50);
   Packet echo = repeated(p, 1);
@@ -107,16 +107,15 @@ TEST(FloodRetry, OtherPacketsIgnored) {
   EXPECT_EQ(r.onHeard(&other), FloodRetry::ECHO_NONE);
   Packet direct = repeated(p, 1);
   direct.header = ROUTE_TYPE_DIRECT | (PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT);
-  EXPECT_EQ(r.onHeard(&direct), FloodRetry::ECHO_NONE);
+  EXPECT_EQ(r.onHeard(&direct), FloodRetry::ECHO_NONE);   // direct copy doesn't count for flood
   EXPECT_FALSE(r.onSent(&other, 10));
-  EXPECT_FALSE(r.track(&direct, 0, 1, WAIT));
 }
 
 TEST(FloodRetry, EchoWhileResendQueued_Cancels) {
   FloodRetry r;
   Packet p = makeFlood(8);
   r.track(&p, 0, 1, WAIT);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   ASSERT_GE(r.nextDue(WAIT, raw, len), 0);
   Packet echo = repeated(p, 1);
   EXPECT_EQ(r.onHeard(&echo), FloodRetry::ECHO_CANCEL_RESEND);
@@ -134,7 +133,7 @@ TEST(FloodRetry, EchoWhileResendTransmitting_ClosesOnSent) {
   FloodRetry r;
   Packet p = makeFlood(9);
   r.track(&p, 0, 2, WAIT);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   ASSERT_GE(r.nextDue(WAIT, raw, len), 0);
   Packet echo = repeated(p, 1);
   EXPECT_EQ(r.onHeard(&echo), FloodRetry::ECHO_CANCEL_RESEND);
@@ -149,7 +148,7 @@ TEST(FloodRetry, ResendThatNeverGoesOut_Expires) {
   FloodRetry r;
   Packet p = makeFlood(10);
   r.track(&p, 0, 1, WAIT);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   ASSERT_GE(r.nextDue(WAIT, raw, len), 0);
   EXPECT_EQ(r.nextDue(WAIT + 4 * WAIT + 29999, raw, len), -1);
   EXPECT_EQ(r.getActiveCount(), 1);
@@ -173,7 +172,7 @@ TEST(FloodRetry, SkipReleasesSlot) {
   FloodRetry r;
   Packet p = makeFlood(11);
   r.track(&p, 0, 1, WAIT);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   int idx = r.nextDue(WAIT, raw, len);
   ASSERT_GE(idx, 0);
   r.skip(idx);
@@ -186,7 +185,7 @@ TEST(FloodRetry, MillisWraparound) {
   Packet p = makeFlood(12);
   unsigned long start = (unsigned long)-1000;   // 1 s before millis() wraps
   r.track(&p, start, 1, WAIT);
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   EXPECT_EQ(r.nextDue(start + 500, raw, len), -1);
   EXPECT_EQ(r.nextDue(5, raw, len), -1);                  // wrapped, 1005 ms in
   EXPECT_GE(r.nextDue(start + WAIT, raw, len), 0);
@@ -198,12 +197,78 @@ TEST(FloodRetry, TransportFloodTracked) {
   p.header = ROUTE_TYPE_TRANSPORT_FLOOD | (PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT);
   p.transport_codes[0] = 0x1234; p.transport_codes[1] = 0;
   ASSERT_TRUE(r.track(&p, 0, 1, WAIT));
-  uint8_t raw[MAX_TRANS_UNIT]; uint8_t len;
+  const uint8_t* raw; uint8_t len;
   ASSERT_GE(r.nextDue(WAIT, raw, len), 0);
   Packet back;
   ASSERT_TRUE(back.readFrom(raw, len));
   EXPECT_EQ(back.transport_codes[0], 0x1234);
   EXPECT_TRUE(back.isRouteFlood());
+}
+
+// A direct packet with hops repeaters still to go. Each hop removes itself before forwarding.
+static Packet makeDirect(uint8_t seed, uint8_t hops, uint8_t type = PAYLOAD_TYPE_TXT_MSG) {
+  Packet p = makeFlood(seed, hops);
+  p.header = ROUTE_TYPE_DIRECT | (type << PH_TYPE_SHIFT);
+  return p;
+}
+
+static Packet forwardedDirect(const Packet& p) {   // what the next hop sends
+  Packet q = p;
+  uint8_t n = q.getPathHashCount();
+  for (int i = 0; i + 1 < n; i++) q.path[i] = q.path[i + 1];
+  q.setPathHashCount(n - 1);
+  return q;
+}
+
+TEST(FloodRetry, Direct_EchoHasFewerHops) {
+  FloodRetry r;
+  Packet p = makeDirect(30, 2);
+  ASSERT_TRUE(r.track(&p, 0, 1, WAIT));
+  Packet same = p;
+  EXPECT_EQ(r.onHeard(&same), FloodRetry::ECHO_NONE);       // an upstream copy, not further
+  Packet as_flood = repeated(makeFlood(30, 2), 1);
+  EXPECT_EQ(r.onHeard(&as_flood), FloodRetry::ECHO_NONE);   // flood copy doesn't count for direct
+  Packet next = forwardedDirect(p);
+  EXPECT_EQ(r.onHeard(&next), FloodRetry::ECHO_HEARD);
+  EXPECT_EQ(r.getActiveCount(), 0);
+}
+
+TEST(FloodRetry, Direct_LastHopToRecipientEchoesWithEmptyPath) {
+  FloodRetry r;
+  Packet p = makeDirect(31, 1);      // the next node is the last repeater
+  ASSERT_TRUE(r.track(&p, 0, 1, WAIT));
+  Packet next = forwardedDirect(p);  // it hands it to the recipient with an empty path
+  EXPECT_EQ(next.getPathHashCount(), 0);
+  EXPECT_EQ(r.onHeard(&next), FloodRetry::ECHO_HEARD);
+}
+
+TEST(FloodRetry, Direct_NoEcho_ResendsAndRecognisesResend) {
+  FloodRetry r;
+  Packet p = makeDirect(32, 2, PAYLOAD_TYPE_ACK);
+  ASSERT_TRUE(r.track(&p, 0, 1, WAIT));
+  const uint8_t* raw; uint8_t len;
+  ASSERT_GE(r.nextDue(WAIT, raw, len), 0);
+  Packet resend; ASSERT_TRUE(resend.readFrom(raw, len));
+  EXPECT_TRUE(resend.isRouteDirect());
+  EXPECT_EQ(resend.getPathHashCount(), 2);
+  EXPECT_TRUE(r.onSent(&resend, WAIT + 50));
+  Packet next = forwardedDirect(p);
+  EXPECT_EQ(r.onHeard(&next), FloodRetry::ECHO_HEARD);
+  EXPECT_EQ(r.getStats().echoed_after, 1u);
+}
+
+TEST(FloodRetry, NoEchoPossible_NotTracked) {
+  FloodRetry r;
+  Packet to_recipient = makeDirect(33, 0);   // last hand-off, or zero-hop
+  EXPECT_FALSE(FloodRetry::canEcho(&to_recipient));
+  EXPECT_FALSE(r.track(&to_recipient, 0, 1, WAIT));
+  Packet trace = makeDirect(34, 2, PAYLOAD_TYPE_TRACE);
+  EXPECT_FALSE(r.track(&trace, 0, 1, WAIT));
+  Packet multi = makeDirect(35, 2, PAYLOAD_TYPE_MULTIPART);
+  EXPECT_FALSE(r.track(&multi, 0, 1, WAIT));
+  EXPECT_EQ(r.getActiveCount(), 0);
+  Packet flood = makeFlood(36);
+  EXPECT_TRUE(FloodRetry::canEcho(&flood));
 }
 
 int main(int argc, char** argv) {

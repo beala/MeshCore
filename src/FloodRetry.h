@@ -10,13 +10,18 @@
 namespace mesh {
 
 /**
- * \brief  Resends a flood packet when no other node is heard repeating it.
+ * \brief  Resends a packet when no other node is heard passing it on.
  *
- * After a flood packet goes out, listen for a copy of it that has travelled further than ours
- * (more hops in its path). Hearing one means at least one node received it and passed it on.
+ * After a packet goes out, listen for a copy of it that has travelled further than ours. A flood
+ * copy that went further has more hops in its path. A direct copy has fewer, because each hop
+ * removes itself from the path before forwarding. Hearing one means the next node received it.
  * If none is heard within the wait time, the exact same bytes are sent again. Nodes that already
  * have the packet drop the copy as a duplicate (the duplicate check ignores the path), so the
  * resend only reaches nodes that missed the first one.
+ *
+ * Some packets never produce an echo, so they are not tracked: direct packets sent with an empty
+ * path (the hand-off to the final recipient, or zero-hop), TRACE (its duplicate check includes
+ * the path), and MULTIPART (the next hop forwards it as a different packet).
  *
  * Keeps its own copy of each packet, so it never holds on to pool packets. Times are millis().
  */
@@ -38,7 +43,8 @@ private:
     uint8_t  hash[MAX_HASH_SIZE];
     uint8_t  raw[MAX_TRANS_UNIT];
     uint8_t  raw_len;        // 0 = free
-    uint8_t  sent_hops;      // hops in our copy; an echo has more
+    uint8_t  sent_hops;      // hops in our copy; a flood echo has more, a direct echo fewer
+    bool     direct;
     uint8_t  retries_left;
     uint8_t  resends_sent;
     uint32_t wait_ms;
@@ -68,7 +74,7 @@ public:
    * \returns  true if it was one of our resends. Otherwise the caller decides whether to track() it.
    */
   bool onSent(const Packet* pkt, unsigned long now) {
-    if (_active == 0 || !pkt->isRouteFlood()) return false;
+    if (_active == 0) return false;
     uint8_t hash[MAX_HASH_SIZE];
     pkt->calculatePacketHash(hash);
     Slot* s = find(hash);
@@ -85,14 +91,22 @@ public:
     return true;
   }
 
+  /** \returns  true if some node should pass this packet on, so an echo can be heard */
+  static bool canEcho(const Packet* pkt) {
+    uint8_t type = pkt->getPayloadType();
+    if (type == PAYLOAD_TYPE_TRACE || type == PAYLOAD_TYPE_MULTIPART) return false;
+    if (pkt->isRouteFlood()) return true;
+    return pkt->isRouteDirect() && pkt->getPathHashCount() > 0;
+  }
+
   /**
-   * \brief  Start watching a flood packet that has just been sent for the first time.
+   * \brief  Start watching a packet that has just been sent for the first time.
    * \param  retries  how many times to resend it if no echo is heard (1 or more)
    * \param  wait_ms  how long to wait for an echo after each send
-   * \returns  false if not tracked (not flood, or no free slot)
+   * \returns  false if not tracked (no echo possible, or no free slot)
    */
   bool track(const Packet* pkt, unsigned long now, uint8_t retries, uint32_t wait_ms) {
-    if (retries == 0 || !pkt->isRouteFlood()) return false;
+    if (retries == 0 || !canEcho(pkt)) return false;
     Slot* s = NULL;
     for (int i = 0; i < FLOOD_RETRY_SLOTS; i++) {
       if (_slots[i].raw_len == 0) { s = &_slots[i]; break; }
@@ -103,6 +117,7 @@ public:
     if (s->raw_len == 0) return false;
     pkt->calculatePacketHash(s->hash);
     s->sent_hops = pkt->getPathHashCount();
+    s->direct = pkt->isRouteDirect();
     s->retries_left = retries;
     s->resends_sent = 0;
     s->wait_ms = wait_ms;
@@ -121,11 +136,14 @@ public:
    *           found it there, call resendCancelled().
    */
   int onHeard(const Packet* pkt) {
-    if (_active == 0 || !pkt->isRouteFlood()) return ECHO_NONE;
+    if (_active == 0) return ECHO_NONE;
     uint8_t hash[MAX_HASH_SIZE];
     pkt->calculatePacketHash(hash);
     Slot* s = find(hash);
-    if (s == NULL || s->echoed || pkt->getPathHashCount() <= s->sent_hops) return ECHO_NONE;
+    if (s == NULL || s->echoed) return ECHO_NONE;
+    bool further = s->direct ? pkt->isRouteDirect() && pkt->getPathHashCount() < s->sent_hops
+                             : pkt->isRouteFlood() && pkt->getPathHashCount() > s->sent_hops;
+    if (!further) return ECHO_NONE;
 
     _stats.echoed++;
     if (s->resends_sent) _stats.echoed_after++;
@@ -144,10 +162,11 @@ public:
   }
 
   /**
-   * \brief  Call often. If a resend is due, copies the packet bytes to raw and returns the slot
-   *         index (call skip() with it if the resend can't be queued). Returns -1 if none is due.
+   * \brief  Call often. If a resend is due, points raw at the stored packet bytes (valid until the
+   *         next call into this class) and returns the slot index (call skip() with it if the
+   *         resend can't be queued). Returns -1 if none is due.
    */
-  int nextDue(unsigned long now, uint8_t* raw, uint8_t& raw_len) {
+  int nextDue(unsigned long now, const uint8_t*& raw, uint8_t& raw_len) {
     if (_active == 0) return -1;
     for (int i = 0; i < FLOOD_RETRY_SLOTS; i++) {
       Slot* s = &_slots[i];
@@ -161,7 +180,7 @@ public:
       s->retries_left--;
       s->waiting = false;
       s->deadline = now + 4*s->wait_ms + 30000;   // safety net in case the resend never goes out
-      memcpy(raw, s->raw, s->raw_len);
+      raw = s->raw;
       raw_len = s->raw_len;
       return i;
     }

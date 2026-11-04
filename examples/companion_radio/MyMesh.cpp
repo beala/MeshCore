@@ -286,10 +286,10 @@ uint32_t MyMesh::getDirectRetransmitDelay(const mesh::Packet *packet) {
 }
 
 uint8_t MyMesh::getFloodRetries(const mesh::Packet* packet) {
-  // our own channel messages (no hops yet): resend if no repeater is heard passing them on
-  uint8_t type = packet->getPayloadType();
-  if (packet->getPathHashCount() == 0 && (type == PAYLOAD_TYPE_GRP_TXT || type == PAYLOAD_TYPE_GRP_DATA)) {
-    return _prefs.flood_retry.count;
+  // only asked for packets some node should pass on (see FloodRetry::canEcho)
+  if (packet->isRouteDirect()) return _prefs.flood_retry.count;   // a repeater is next on the path
+  if (packet->getPathHashCount() == 0 && packet->getPayloadType() != PAYLOAD_TYPE_ADVERT) {
+    return _prefs.flood_retry.count;   // a flood packet we started (adverts repeat on a timer anyway)
   }
   return 0;
 }

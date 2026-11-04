@@ -180,7 +180,7 @@ private:
 
   class FloodRetryPrefs : public ConfigSerializer {
   public:
-    uint8_t count = 1;      // resends of our channel messages when no repeat is heard (0 = off)
+    uint8_t count = 1;      // resends of a packet when no node is heard passing it on (0 = off)
     uint16_t wait_ms = 0;   // how long to wait for a repeat, 0 = auto
   protected:
     void structure() override {

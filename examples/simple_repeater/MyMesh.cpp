@@ -546,8 +546,7 @@ int MyMesh::calcRxDelay(float score, uint32_t air_time) const {
 }
 
 uint8_t MyMesh::getFloodRetries(const mesh::Packet* packet) {
-  if (_prefs.flood_retry.count == 0) return 0;
-  if (packet->getPathHashCount() == 0) return 0;   // only packets we forwarded
+  // only asked for packets some node should pass on (see FloodRetry::canEcho)
   if (packet->getPayloadType() == PAYLOAD_TYPE_ADVERT) return 0;   // most of the flood traffic, and losing one is cheap
   return _prefs.flood_retry.count;
 }
