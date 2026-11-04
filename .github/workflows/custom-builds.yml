@@ -1,0 +1,209 @@
+name: Custom Builds
+
+# Releases firmware from beala/main, this fork's own main line. Each run first merges new upstream
+# dev commits into beala/main (when they merge cleanly), then builds the boards below and publishes
+# a release if beala/main changed since the last one.
+#
+# Features: commit them to beala/main (or merge a short-lived branch into it) and push; the push
+# starts a run. Upstream PRs: cut a branch from upstream/dev and cherry-pick the feature onto it.
+# If upstream dev stops merging cleanly, this run fails; merge it by hand and push:
+#   git fetch upstream dev && git merge upstream/dev
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'  # check upstream every 30 minutes; runs with nothing new stop early
+  push:
+    branches: [beala/main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Build and release even if nothing changed since the last release.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: custom-builds
+  cancel-in-progress: false
+
+env:
+  TARGETS: >-
+    Heltec_t1_companion_radio_usb Heltec_t1_companion_radio_ble
+    MeshTracker_X1_companion_radio_usb MeshTracker_X1_companion_radio_ble
+    RAK_WisMesh_Tag_companion_radio_usb RAK_WisMesh_Tag_companion_radio_ble
+    t1000e_companion_radio_usb t1000e_companion_radio_ble
+    Heltec_v3_companion_radio_usb Heltec_v3_companion_radio_ble
+    heltec_v4_companion_radio_usb heltec_v4_companion_radio_ble
+    AB_Xiao_nrf52_LR2021_companion_radio_usb AB_Xiao_nrf52_LR2021_companion_radio_ble
+    RAK_3401_repeater
+  KEEP_RELEASES: 10  # older beala-* releases (and their tags) are deleted
+
+jobs:
+
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      sha: ${{ steps.rebuild.outputs.sha }}
+      tag: ${{ steps.check.outputs.tag }}
+      short: ${{ steps.check.outputs.short }}
+      targets: ${{ steps.describe.outputs.targets }}
+      firmware_version: ${{ steps.describe.outputs.firmware_version }}
+      date: ${{ steps.describe.outputs.date }}
+      notes: ${{ steps.describe.outputs.notes }}
+    steps:
+
+      - name: Clone Repo
+        uses: actions/checkout@v4
+        with:
+          ref: beala/main
+          fetch-depth: 0
+          # GITHUB_TOKEN cannot push commits that change workflow files. If an upstream merge changes
+          # one and the push is refused, add a personal access token as the INTEGRATION_PUSH_TOKEN secret.
+          token: ${{ secrets.INTEGRATION_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream dev
+        id: rebuild
+        run: |
+          git remote add upstream https://github.com/meshcore-dev/MeshCore.git
+          git fetch --no-tags upstream dev
+          if git merge-base --is-ancestor upstream/dev HEAD; then
+            echo "beala/main already has upstream dev"
+          elif git merge -q --no-ff --no-edit -m "Merge upstream dev into beala/main" upstream/dev; then
+            git push origin HEAD:beala/main
+          else
+            git merge --abort
+            echo "::error::upstream dev doesn't merge cleanly into beala/main. Merge it by hand: git fetch upstream dev && git merge upstream/dev, fix, push."
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Check for existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.rebuild.outputs.sha }}
+        run: |
+          SHORT=${SHA:0:7}
+          TAG="beala-${SHORT}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "short=$SHORT" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.inputs.force }}" != "true" ] \
+            && gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
+            echo "Release $TAG already exists; nothing to do."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Describe build
+        if: steps.check.outputs.should_build == 'true'
+        id: describe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "targets=$(echo $TARGETS | jq -Rc 'split(" ")')" >> $GITHUB_OUTPUT
+          # Name builds after the latest upstream release they are newer than, e.g. v1.18.0-dev-beala
+          LATEST=$(git ls-remote --tags --refs upstream 'companion-v*' | sed 's#.*/companion-##' | sort -V | tail -1)
+          echo "firmware_version=${LATEST}-dev-beala" >> $GITHUB_OUTPUT
+          echo "date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          {
+            echo 'notes<<EOF'
+            echo "Firmware built from [beala/main](https://github.com/${GITHUB_REPOSITORY}/tree/beala/main) at $(git rev-parse --short HEAD), which includes upstream \`dev\` up to $(git rev-parse --short upstream/dev)."
+            PREV=$(gh release list --repo ${{ github.repository }} --limit 50 --json tagName,createdAt \
+              -q '[.[] | select(.tagName | startswith("beala-"))] | sort_by(.createdAt) | reverse | .[0].tagName')
+            if [ -n "$PREV" ] && git rev-parse -q --verify "$PREV^{commit}" >/dev/null \
+               && git merge-base --is-ancestor "$PREV" HEAD; then
+              echo
+              echo "Changes since $PREV:"
+              echo
+              git log --first-parent --format='- %s' "$PREV..HEAD"
+            fi
+            echo
+            echo "Full diff against upstream: https://github.com/${GITHUB_REPOSITORY}/compare/$(git rev-parse upstream/dev)...$(git rev-parse HEAD)"
+            echo EOF
+          } >> $GITHUB_OUTPUT
+
+  # One job per firmware, all in parallel
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: ${{ fromJson(needs.prepare.outputs.targets) }}
+    steps:
+
+      - name: Clone Repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup Build Environment
+        uses: ./.github/actions/setup-build-environment
+
+      - name: Build ${{ matrix.target }}
+        env:
+          FIRMWARE_VERSION: ${{ needs.prepare.outputs.firmware_version }}
+        run: /usr/bin/env bash build.sh build-firmware ${{ matrix.target }}
+
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.target }}
+          path: out
+
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Download Firmwares
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          merge-multiple: true
+          path: out
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ needs.prepare.outputs.sha }}
+          name: ${{ needs.prepare.outputs.date }} (${{ needs.prepare.outputs.short }})
+          body: ${{ needs.prepare.outputs.notes }}
+          files: out/*
+
+      - name: Delete old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --repo ${{ github.repository }} --limit 200 --json tagName,createdAt \
+            -q '[.[] | select(.tagName | startswith("beala-"))] | sort_by(.createdAt) | reverse | .[]
+                | .tagName' \
+            | tail -n +$((KEEP_RELEASES + 1)) \
+            | while read -r tag; do
+                echo "Deleting $tag"
+                gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag
+              done
+
+      - name: Update the flasher
+        # Starts the flasher deploy in beala/beala.github.io now, instead of waiting for its
+        # 15-minute schedule (GitHub runs schedules best-effort and often skips them).
+        # Needs a FLASHER_DISPATCH_TOKEN secret: a fine-grained token for beala/beala.github.io
+        # with "Actions: Read and write". Without it this step just says so and does nothing.
+        env:
+          GH_TOKEN: ${{ secrets.FLASHER_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "No FLASHER_DISPATCH_TOKEN secret: the flasher will pick this release up on its schedule"
+            exit 0
+          fi
+          gh workflow run flasher.yml --repo beala/beala.github.io --ref master
