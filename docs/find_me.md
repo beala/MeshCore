@@ -34,7 +34,7 @@ For each allowed finder, the target stores the newest request timestamp it has a
 
 This uses the LR2021's round-trip time-of-flight mode (RTToF). The command sequence follows Semtech's usp v1.2.1 radio layer and the bench tests in [beala/lr2021-re](https://github.com/beala/lr2021-re/blob/main/docs/ranging.md).
 
-1. The finder sends `find range`. The target replies `find: ranging` and waits until that reply has been transmitted.
+1. The finder sends `find range`. The target picks a random ranging address for this session, replies `find: ranging <address>` (8 hex digits), and waits until that reply has been transmitted.
 2. The target switches to RTToF subordinate and answers ranging requests for 5 seconds.
 3. The finder hears the reply, switches to RTToF manager, and runs up to 32 exchanges in 2.5 seconds. Each exchange is given up after 100 ms.
 4. Both radios return to normal LoRa: standby, packet type LoRa, sync word, then the usual frequency, bandwidth, SF, CR, preamble and side-detector settings.
@@ -43,13 +43,21 @@ The settings are:
 - SF9, BW 500 kHz, CR 4/5, preamble 12, explicit header, CRC, on the current frequency.
 - 15 response symbols, normal mode.
 - TxRxDelay 20305, Semtech's value for BW 500 kHz, SF9.
-- The ranging address is the first 4 bytes of the target's public key, all 4 checked, so it ignores other ranging sessions.
+- The ranging address is random for each session and only sent inside the encrypted reply. All 4 bytes are checked, so the target ignores other ranging sessions. If the reply has no address (older firmware), the finder uses the first 4 bytes of the target's public key, as before.
 
 The reported distance is the median of the valid exchanges, at 150 / (4096 × 0.5 MHz) = 7.3 cm per raw unit. The ± figure is half the interquartile range, and the RSSI is the median.
 
 After every packet type change, the code applies the same DC-DC workaround as RadioLib's own `setPacketType()`: the DCDC_SWITCHER bits, DCDC_FREQ_LF, and setting the frequency again.
 
 The target is blocked for 5 seconds and the finder for up to 2.5 seconds while ranging, and can't receive mesh traffic during that time. A target accepts at most one ranging session every 5 seconds.
+
+### Security
+
+The request and the reply are encrypted and signed, so only allowed radios can start a ranging session. The ranging exchange itself is plain LR2021 RTToF packets, with no encryption or signature.
+
+Because the ranging address is random and only travels inside the encrypted reply, another radio can't easily answer the finder's requests (to fake a distance), or send its own requests to the target while it's listening (to measure its distance to it).
+
+A determined attacker could still fake the distance: listen for the requests on the air, then answer faster or slower than the target would. Preventing that needs a distance-bounding protocol, which the LR2021's RTToF mode doesn't support. Treat the distance as a guide for finding your own radio, not as proof of where it is.
 
 ### Accuracy
 

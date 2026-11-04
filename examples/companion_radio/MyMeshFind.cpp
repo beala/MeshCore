@@ -5,7 +5,7 @@
 // access. Messages are encrypted and authenticated with the pair's shared secret, and the target
 // remembers the newest request timestamp from each finder so an old request can't be replayed.
 //
-// Ranging (LR2021 on both ends): the target replies "find: ranging", waits until that reply has
+// Ranging (LR2021 on both ends): the target replies "find: ranging <addr>", waits until that reply has
 // been transmitted, then answers RTToF ranging requests for RANGE_WINDOW_MILLIS. The finder starts
 // sending requests as soon as it hears the reply. Both return to normal LoRa afterwards.
 
@@ -132,7 +132,10 @@ void MyMesh::handleFindRequest(const ContactInfo& from, uint32_t sender_timestam
     } else {
       _range_armed_at = millis() | 1;
       _range_sent_mark = radio_driver.getPacketsSent();
-      strcpy(reply, "find: ranging");
+      // A fresh random ranging address each session, sent only inside the encrypted reply, so other
+      // radios don't know which address to answer (to fake the distance) or to ask (to range us).
+      do { getRNG()->random((uint8_t*)&_range_addr, sizeof(_range_addr)); } while (_range_addr == 0);
+      sprintf(reply, "find: ranging %08lx", (unsigned long)_range_addr);
     }
 #else
     strcpy(reply, "find: error: this radio can't range (needs an LR2021)");
@@ -160,7 +163,13 @@ void MyMesh::onFindReply(const ContactInfo& from, const char* text) {
   if (!_find_asked_at || memcmp(from.id.pub_key, _find_peer, PUB_KEY_SIZE) != 0) return;
   if (strncmp(text, "find: ", 6) != 0) return;
   _find_asked_at = 0;
-  if (_find_asked_range && strcmp(&text[6], "ranging") == 0) {
+  const char* r = &text[6];
+  if (_find_asked_range && strncmp(r, "ranging", 7) == 0 && (r[7] == 0 || r[7] == ' ')) {
+    if (r[7] == ' ') {
+      _range_addr = strtoul(&r[8], NULL, 16);
+    } else {   // older firmware: the address is the target's public key prefix
+      _range_addr = (uint32_t)_find_peer[0] << 24 | (uint32_t)_find_peer[1] << 16 | (uint32_t)_find_peer[2] << 8 | _find_peer[3];
+    }
     _range_go_at = millis() | 1;
     setFindStatus("%s: ranging...", from.name);
   } else {
@@ -293,7 +302,7 @@ void MyMesh::findLoop() {
   if (_range_go_at) {   // finder: start as soon as we're not transmitting
     if (!isTransmitting()) {
       _range_go_at = 0;
-      runRanging(true, _find_peer);
+      runRanging(true, _range_addr);
     } else if ((int32_t)(millis() - _range_go_at) > RANGE_START_MILLIS) {
       _range_go_at = 0;
       setFindStatus("ranging didn't start: this radio was busy transmitting. Try again");
@@ -304,18 +313,16 @@ void MyMesh::findLoop() {
       _range_armed_at = 0;
     } else if (radio_driver.getPacketsSent() != _range_sent_mark && !isTransmitting()) {
       _range_armed_at = 0;
-      runRanging(false, self_id.pub_key);
+      runRanging(false, _range_addr);
       _range_last = millis();
     }
   }
 #endif
 }
 
-void MyMesh::runRanging(bool manager, const uint8_t* addr_key) {
+void MyMesh::runRanging(bool manager, uint32_t addr) {
 #ifdef HAS_RANGING
   LR2021Ranging rng(radio_driver);
-  // the target's public key prefix, so requests from other ranging sessions are ignored
-  uint32_t addr = (uint32_t)addr_key[0] << 24 | (uint32_t)addr_key[1] << 16 | (uint32_t)addr_key[2] << 8 | addr_key[3];
   int16_t st = rng.begin(manager, addr);
   if (st != RADIOLIB_ERR_NONE) {
     if (manager) setFindStatus("ranging failed to start (%d)", st);

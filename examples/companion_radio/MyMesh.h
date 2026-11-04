@@ -305,6 +305,7 @@ private:
   unsigned long _range_armed_at = 0;  // target: answer ranging once our reply has gone out (0 = no)
   uint32_t _range_sent_mark = 0;
   unsigned long _range_last = 0;      // target: last ranging session, for rate limiting
+  uint32_t _range_addr = 0;           // ranging address for this session, random, sent inside the encrypted reply
   char _find_status[100];
   unsigned long _find_status_at = 0;
 
@@ -318,7 +319,7 @@ private:
   void onFindReply(const ContactInfo& from, const char* text);
   void findLoop();
   static bool rangingAvailable(float freq);
-  void runRanging(bool manager, const uint8_t* addr_key);
+  void runRanging(bool manager, uint32_t addr);
   void setFindStatus(const char* fmt, ...);
 };
 
