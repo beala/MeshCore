@@ -17,7 +17,6 @@ Only radios you've allowed can do this, and they can't do anything else. The req
 **Extended ranging (opt-in).** `set find.extended on` makes `find range` use the LR2021's extended mode. Each measurement takes two exchanges instead of one. That keeps the distance right when the radios are moving relative to each other, which can otherwise throw it off by tens of metres. It also reports the relative speed, but only roughly: in steps of about 20 m/s (70 km/h), so it can tell a car driving away from a parked one, not walking pace. Both radios need firmware with this feature.
 
 Limits:
-- **Experimental.** It hasn't been tested on real radios yet.
 - The radios must hear each other directly, not through a repeater.
 - The distance is uncalibrated and can be off by several metres. Walls and bodies make it read longer.
 - It only works on 902–928 MHz (US, Canada, Australia, New Zealand), because the measurement uses a 500 kHz wide signal.
@@ -82,7 +81,5 @@ On the bench, with the antenna ports on dummy loads, a single exchange at SF9 wa
 
 ### Not done yet
 
-- Hardware testing between two MeshTracker X1s, including whether the X1's RF switch follows the chip when the subordinate answers by itself (it did on the NiceRF bench board).
 - Calibrating TxRxDelay per board.
 - The narrower bandwidths other regions would need. A higher SF or narrower bandwidth would also give extended mode finer speed steps (they scale with the LoRa bin width, BW / 2^SF).
-- Checking the extended-mode offset (1120) on other boards, and with real motion rather than an emulated Doppler shift.
