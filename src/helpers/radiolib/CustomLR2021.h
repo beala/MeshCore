@@ -9,6 +9,11 @@ class CustomLR2021 : public LR2021 {
   uint32_t _activityAt = 0;
   bool _headerSeen = false;
   bool _rx_boosted = false;
+  bool _pram_pending = false;   // load the firmware patch on the next standby() (set before begin())
+  int16_t _pram_status = RADIOLIB_ERR_UNKNOWN;
+  uint16_t _pram_version = 0;   // patch type (high byte) and version (low byte) read back from the chip
+
+  int16_t loadPram();
 
   public:
     CustomLR2021(Module *mod) : LR2021(mod) { irqDioNum = LR2021_IRQ_DIO; }
@@ -43,12 +48,15 @@ class CustomLR2021 : public LR2021 {
       if (spi) spi->begin(P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI);
     #endif
   #endif
+      _pram_pending = true; _pram_status = RADIOLIB_ERR_UNKNOWN;
       int status = begin(LORA_FREQ, LORA_BW, LORA_SF, cr, RADIOLIB_LR2021_LORA_SYNC_WORD_PRIVATE, LORA_TX_POWER, 16, tcxo);
       // if radio init fails with -707/-706, try again with tcxo voltage set to 0.0f
       if (status == RADIOLIB_ERR_SPI_CMD_FAILED || status == RADIOLIB_ERR_SPI_CMD_INVALID) {
         tcxo = 0.0f;
+        _pram_pending = true; _pram_status = RADIOLIB_ERR_UNKNOWN;
         status = begin(LORA_FREQ, LORA_BW, LORA_SF, cr, RADIOLIB_LR2021_LORA_SYNC_WORD_PRIVATE, LORA_TX_POWER, 16, tcxo);
       }
+      _pram_pending = false;
       if (status != RADIOLIB_ERR_NONE) {
         Serial.print("ERROR: radio init failed: ");
         Serial.println(status);
@@ -58,6 +66,16 @@ class CustomLR2021 : public LR2021 {
       setCRC(2);
       explicitHeader();
 
+      if (_pram_status == RADIOLIB_ERR_NONE) {
+        Serial.print("LR2021 PRAM patch loaded: type ");
+        Serial.print(_pram_version >> 8);
+        Serial.print(", version 0x");
+        Serial.println(_pram_version & 0xFF, HEX);
+      } else {
+        Serial.print("WARNING: LR2021 PRAM patch not loaded: ");
+        Serial.println(_pram_status);
+      }
+
       
     #ifdef LR2021_RX_BOOSTED_GAIN
       setRxBoostedGainMode(LR2021_RX_BOOSTED_GAIN);
@@ -66,6 +84,19 @@ class CustomLR2021 : public LR2021 {
       return true;  // success
     }
     
+    // begin() resets the chip, which clears PRAM. RadioLib calls standby() right
+    // after that reset and before TCXO setup and calibration, which is where
+    // Semtech's own driver loads the patch, so the load is hooked in here.
+    using LR2021::standby;
+    int16_t standby() override {
+      int16_t state = LR2021::standby();
+      if (_pram_pending && state == RADIOLIB_ERR_NONE) {
+        _pram_pending = false;
+        _pram_status = loadPram();
+      }
+      return state;
+    }
+
     float getFreqMHz() const { return freqMHz; }
 
     bool getRxBoostedGainMode() const { return _rx_boosted; }
