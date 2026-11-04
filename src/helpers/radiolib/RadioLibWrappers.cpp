@@ -167,7 +167,14 @@ uint32_t RadioLibWrapper::getEstAirtimeFor(int len_bytes) {
 }
 
 bool RadioLibWrapper::startSendRaw(const uint8_t* bytes, int len) {
+#ifdef P_LORA_TX_LED
+  int tx_led_idle = digitalRead(P_LORA_TX_LED);   // the LED is off between transmits
+#endif
   _board->onBeforeTransmit();
+#ifdef P_LORA_TX_LED
+  // onBeforeTransmit() can also switch the RF front end, so it always runs; just put the LED back
+  if (!_tx_led_enabled) digitalWrite(P_LORA_TX_LED, tx_led_idle);
+#endif
   int err = _radio->startTransmit((uint8_t *) bytes, len);
   if (err == RADIOLIB_ERR_NONE) {
     state = STATE_TX_WAIT;

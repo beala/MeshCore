@@ -144,7 +144,7 @@ void UITask::onMessageRecv(mesh::Packet *pkt, const ContactInfo &from, uint8_t t
   if (!(txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN)) return;
 
 #ifdef HAS_DRV2605
-  vibration.trigger();   // vibrate even while the app is connected (honors quiet + cooldown)
+  if (!hasConnection()) vibration.trigger();   // like the buzzer: only when the app isn't connected
 #endif
 
   uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
@@ -171,7 +171,7 @@ void UITask::onMessageRecv(mesh::Packet *pkt, const ContactInfo &from, uint8_t t
 
 void UITask::onChannelMessageRecv(mesh::Packet *pkt, ChannelDetails& channel_details, const char* text) {
 #ifdef HAS_DRV2605
-  vibration.trigger();   // vibrate even while the app is connected (honors quiet + cooldown)
+  if (!hasConnection()) vibration.trigger();   // like the buzzer: only when the app isn't connected
 #endif
 
   uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
@@ -335,6 +335,22 @@ static void statusLedWheel(uint8_t pos) {   // smooth hue sweep, 0..255
 #endif
 
 void UITask::userLedHandler() {
+#if defined(STATUS_LED_RGB) || defined(PIN_STATUS_LED)
+  static bool led_was_off = false;
+  if (_node_prefs->led_off) {   // turned off with 'set led off'
+    if (!led_was_off) {
+  #ifdef STATUS_LED_RGB
+      statusLedWrite(0, 0, 0);
+  #else
+      digitalWrite(PIN_STATUS_LED, !LED_STATE_ON);
+  #endif
+      led_was_off = true;
+    }
+    return;
+  }
+  led_was_off = false;
+#endif
+
 #ifdef STATUS_LED_RGB
   static bool booted = false;
   static bool flourish_active = false;
@@ -487,6 +503,9 @@ void UITask::loop() {
 #ifdef PIN_BUZZER
   if (buzzer.isQuiet() != (bool)_node_prefs->buzzer_quiet) buzzer.quiet(_node_prefs->buzzer_quiet);
   if (buzzer.isPlaying())  buzzer.loop();
+#endif
+#ifdef HAS_DRV2605
+  if (vibration.isQuiet() != (bool)_node_prefs->vibe_quiet) vibration.quiet(_node_prefs->vibe_quiet);
 #endif
 
   if (_display != NULL && _display->isOn()) {

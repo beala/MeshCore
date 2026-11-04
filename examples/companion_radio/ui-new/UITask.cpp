@@ -865,6 +865,13 @@ void UITask::onControlDataRecv(const mesh::Packet* packet) {
 
 void UITask::userLedHandler() {
 #ifdef PIN_STATUS_LED
+  if (_node_prefs->led_off) {   // turned off with 'set led off'
+    if (led_state != 0) {
+      led_state = 0;
+      digitalWrite(PIN_STATUS_LED, !LED_STATE_ON);
+    }
+    return;
+  }
   int cur_time = millis();
   if (cur_time > next_led_change) {
     if (led_state == 0) {

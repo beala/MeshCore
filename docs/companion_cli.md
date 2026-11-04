@@ -348,6 +348,52 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+### Alerts and lights
+
+#### Turn the buzzer on or off
+**Usage:**
+- `get buzzer`
+- `set buzzer <state>`
+
+**Parameters:**
+- `state`: `on` or `off`
+
+**Default:** `on` (or `off` with the `BUZZER_DEFAULT_OFF` build flag)
+
+**Note:** Only on boards with a buzzer. Takes effect immediately. Triple-pressing the button also toggles it.
+
+---
+
+#### Turn the vibration motor on or off
+**Usage:**
+- `get vibe`
+- `set vibe <state>`
+
+**Parameters:**
+- `state`: `on` or `off`
+
+**Default:** `on` (or `off` with the `VIBE_DEFAULT_OFF` build flag)
+
+**Note:** Only on boards with a DRV2605 haptic driver (eg. MeshTracker X1). Independent of the buzzer. Takes effect immediately. Like the buzzer, it only goes off for new messages while the app isn't connected.
+
+---
+
+#### Turn the LEDs on or off
+**Usage:**
+- `get led`
+- `set led <state>`
+
+**Parameters:**
+- `state`: `on` or `off`
+
+**Default:** `on` (or `off` with the `STATUS_LED_DEFAULT_OFF` build flag)
+
+**Note:** Covers the status LED (heartbeat, unread messages, charging) and the flash of the TX LED on transmit. Only on boards with one of them. Takes effect immediately.
+
+**Build flag defaults** apply to a new device, and once to an existing device the first time it boots a firmware with this setting. After that the saved settings win.
+
+---
+
 ### Wifi
 
 #### Get status

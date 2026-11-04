@@ -16,6 +16,7 @@ protected:
   PhysicalLayer* _radio;
   mesh::MainBoard* _board;
   uint32_t n_recv, n_sent, n_recv_errors;
+  bool _tx_led_enabled = true;
   int16_t _noise_floor, _threshold;
   bool _cad_enabled;
   uint16_t _num_floor_samples;
@@ -80,6 +81,12 @@ public:
   float packetScore(float snr, int packet_len) override { return packetScoreInt(snr, 10, packet_len); }  // assume sf=10
 
   virtual bool setRxBoostedGainMode(bool) { return false; }
+
+  /**
+   * \brief  turns the flash of the board's TX LED (P_LORA_TX_LED) on transmit on or off.
+   */
+  void setTxLedEnabled(bool en) { _tx_led_enabled = en; }
+  bool isTxLedEnabled() const { return _tx_led_enabled; }
   virtual bool getRxBoostedGainMode() const { return false; }
   
   virtual bool configSideDetectors(const uint8_t sideDetSFs[], uint8_t num, float bw) { return false; }
