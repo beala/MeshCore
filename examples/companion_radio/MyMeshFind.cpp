@@ -279,7 +279,9 @@ bool MyMesh::handleFindCommand(const char* command, char* reply) {
 }
 
 void MyMesh::findLoop() {
-  if (_find_asked_at && millis() - _find_asked_at > FIND_ANSWER_MILLIS) {
+  // The *_at timestamps are millis() | 1 (0 means unset), which can be 1 ms in the future, so
+  // compare the elapsed time as signed: unsigned, it wraps to ~4e9 and times out at once.
+  if (_find_asked_at && (int32_t)(millis() - _find_asked_at) > FIND_ANSWER_MILLIS) {
     _find_asked_at = 0;
     ContactInfo* c = lookupContactByPubKey(_find_peer, PUB_KEY_SIZE);
     setFindStatus("%s: no answer", c ? c->name : "?");
@@ -292,13 +294,13 @@ void MyMesh::findLoop() {
     if (!isTransmitting()) {
       _range_go_at = 0;
       runRanging(true, _find_peer);
-    } else if (millis() - _range_go_at > RANGE_START_MILLIS) {
+    } else if ((int32_t)(millis() - _range_go_at) > RANGE_START_MILLIS) {
       _range_go_at = 0;
       setFindStatus("ranging didn't start: this radio was busy transmitting. Try again");
     }
   }
   if (_range_armed_at) {   // target: start once the "find: ranging" reply has been sent
-    if (millis() - _range_armed_at > RANGE_ARM_MILLIS) {
+    if ((int32_t)(millis() - _range_armed_at) > RANGE_ARM_MILLIS) {
       _range_armed_at = 0;
     } else if (radio_driver.getPacketsSent() != _range_sent_mark && !isTransmitting()) {
       _range_armed_at = 0;
