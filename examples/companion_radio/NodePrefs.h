@@ -34,6 +34,11 @@ public:
   uint8_t  buzzer_quiet = 0;
   uint8_t  vibe_quiet = 0;
   uint8_t  led_off = 0;        // status LED and TX LED off
+#ifdef CHARGER_WAKE_DEFAULT_OFF
+  uint8_t  charger_wake = 0;     // power on when a charger is plugged in
+#else
+  uint8_t  charger_wake = 1;
+#endif
   uint8_t  gps_enabled = 0;      // GPS enabled flag (0=disabled, 1=enabled)
   uint32_t gps_interval = 0;     // GPS read interval in seconds
   uint8_t autoadd_config = 0;    // bitmask for auto-add contacts config
@@ -190,6 +195,7 @@ private:
       def("buzz_q", _parent->buzzer_quiet);
       def("vibe_q", _parent->vibe_quiet);
       def("led_off", _parent->led_off);
+      def("chg_wake", _parent->charger_wake);
       def("auto_add", _parent->autoadd_config);    // bitmask for auto-add contacts config
       def("man_add", _parent->manual_add_contacts);
       def("tel_base", _parent->telemetry_mode_base);
