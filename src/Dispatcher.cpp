@@ -107,6 +107,7 @@ void Dispatcher::loop() {
 
       _radio->onSendFinished();
       logTx(outbound, 2 + outbound->getPathByteLen() + outbound->payload_len);
+      onPacketSent(outbound);
       if (outbound->isRouteFlood()) {
         n_sent_flood++;
       } else {
@@ -236,6 +237,7 @@ void Dispatcher::checkRecv() {
     }
     #endif
     logRx(pkt, pkt->getRawLength(), score);   // hook for custom logging
+    onPacketHeard(pkt);
 
     if (pkt->isRouteFlood()) {
       n_recv_flood++;

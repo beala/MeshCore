@@ -9,6 +9,55 @@ void Mesh::begin() {
 
 void Mesh::loop() {
   Dispatcher::loop();
+
+  uint8_t raw[MAX_TRANS_UNIT];
+  uint8_t len;
+  int idx = _flood_retry.nextDue(_ms->getMillis(), raw, len);
+  if (idx >= 0) {
+    Packet* pkt = obtainNewPacket();
+    if (pkt == NULL || !pkt->readFrom(raw, len) || !allowFloodRetryNow(pkt)) {
+      if (pkt) releasePacket(pkt);
+      _flood_retry.skip(idx);
+    } else {
+      MESH_DEBUG_PRINTLN("%s Mesh::loop(): no echo heard, resending flood packet", getLogDateTime());
+      // same bytes and path as before, so nodes that have it drop it. Forwarded packets keep the
+      // priority they were forwarded with (further from the source = lower).
+      uint8_t hops = pkt->getPathHashCount();
+      sendPacket(pkt, hops ? hops : 1);
+    }
+  }
+}
+
+uint32_t Mesh::getFloodRetryWait(const Packet* packet) {
+  // neighbours wait up to a few airtimes before they forward (tx_delay_factor), then transmit
+  return 1000 + 8 * _radio->getEstAirtimeFor(packet->getRawLength() + packet->getPathHashSize());
+}
+
+void Mesh::onPacketSent(Packet* packet) {
+  if (!packet->isRouteFlood()) return;
+  if (_flood_retry.onSent(packet, _ms->getMillis())) return;   // one of our resends
+
+  uint8_t n = getFloodRetries(packet);
+  if (n > 0) _flood_retry.track(packet, _ms->getMillis(), n, getFloodRetryWait(packet));
+}
+
+void Mesh::onPacketHeard(Packet* packet) {
+  if (_flood_retry.onHeard(packet) == FloodRetry::ECHO_CANCEL_RESEND) {
+    // the echo arrived after all, so take our queued resend (same hash) off the send queue
+    uint8_t heard[MAX_HASH_SIZE], h[MAX_HASH_SIZE];
+    packet->calculatePacketHash(heard);
+    for (int i = 0; i < _mgr->getOutboundTotal(); i++) {
+      Packet* q = _mgr->getOutboundByIdx(i);
+      if (!q->isRouteFlood()) continue;
+      q->calculatePacketHash(h);
+      if (memcmp(h, heard, MAX_HASH_SIZE) == 0) {
+        releasePacket(_mgr->removeOutboundByIdx(i));
+        _flood_retry.resendCancelled(heard);
+        break;
+      }
+    }
+    // if it wasn't queued, it's transmitting now, and onSent() closes it
+  }
 }
 
 bool Mesh::allowPacketForward(const mesh::Packet* packet) { 

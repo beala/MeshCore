@@ -178,6 +178,20 @@ private:
   };
   RepeatPrefs repeat;
 
+  class FloodRetryPrefs : public ConfigSerializer {
+  public:
+    uint8_t count = 1;      // resends of our channel messages when no repeat is heard (0 = off)
+    uint16_t wait_ms = 0;   // how long to wait for a repeat, 0 = auto
+  protected:
+    void structure() override {
+      def("n", count);
+      def("wait", wait_ms);
+    }
+  };
+public:
+  FloodRetryPrefs flood_retry;
+private:
+
   class CompanionPrefs : public ConfigSerializer {
     NodePrefs* _parent;
   protected:
@@ -241,6 +255,7 @@ private:
 protected:
   void structure() override {
     def("name", node_name, sizeof(node_name));
+    def("fretry", flood_retry);
     //def("adv_int", advert_interval);
     //def("f_adv_int", flood_advert_interval);
     def("lat", node_lat);

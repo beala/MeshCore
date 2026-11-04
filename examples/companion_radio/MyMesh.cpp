@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #endif
 #include <Mesh.h>
+#include <helpers/FloodRetryCLI.h>
 
 #define CMD_APP_START                 1
 #define CMD_SEND_TXT_MSG              2
@@ -282,6 +283,19 @@ uint32_t MyMesh::getRetransmitDelay(const mesh::Packet *packet) {
 uint32_t MyMesh::getDirectRetransmitDelay(const mesh::Packet *packet) {
   uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.direct_tx_delay_factor);
   return getRNG()->nextInt(0, 5*t + 1);
+}
+
+uint8_t MyMesh::getFloodRetries(const mesh::Packet* packet) {
+  // our own channel messages (no hops yet): resend if no repeater is heard passing them on
+  uint8_t type = packet->getPayloadType();
+  if (packet->getPathHashCount() == 0 && (type == PAYLOAD_TYPE_GRP_TXT || type == PAYLOAD_TYPE_GRP_DATA)) {
+    return _prefs.flood_retry.count;
+  }
+  return 0;
+}
+
+uint32_t MyMesh::getFloodRetryWait(const mesh::Packet* packet) {
+  return _prefs.flood_retry.wait_ms ? _prefs.flood_retry.wait_ms : mesh::Mesh::getFloodRetryWait(packet);
 }
 
 uint8_t MyMesh::getExtraAckTransmitCount() const {
@@ -2090,6 +2104,12 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
 
   if (_prefs.getRadioPrefs()->handleCommand(command, sender_timestamp, reply)) {  // is radio CLI command?
     if (_prefs.getRadioPrefs()->isDirty()) { savePrefs(); }
+    return true;
+  }
+
+  bool retry_changed;
+  if (handleFloodRetryCommand(command, _prefs.flood_retry.count, _prefs.flood_retry.wait_ms, getFloodRetry(), reply, retry_changed)) {
+    if (retry_changed) savePrefs();
     return true;
   }
 
