@@ -2099,6 +2099,11 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     return true;
   }
 
+  // hook for radio-specific CLI processing
+  if (_radio->handleCommand(command, sender_timestamp, reply)) {
+    return true;
+  }
+
   if (strcmp(command, "reboot") == 0) {
     board.reboot(); // doesn't return
     return true;

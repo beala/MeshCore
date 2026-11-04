@@ -307,6 +307,34 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+#### View recent transmit faults (LR2021 only)
+**Usage:** `get radio.faults`
+
+**Example reply:** `> 3 since boot: 12s OCP; 95s ERR=0004; 300s NODONE`
+
+**Notes:**
+- Shows how many transmits have gone wrong since boot, then the most recent ones (up to 8, newest first, as many as fit in the reply), each with its age in seconds and what went wrong:
+  - `NODONE`: the transmit did not finish (TX_DONE not set)
+  - `OCP`: the power amplifier hit its over-current or over-voltage limit
+  - `ERR=<hex>`: the chip reported an error; the value is its error register (eg. `0004` is a PLL lock failure)
+  - `CMD`: the chip rejected a command
+  - `TIMEOUT`, `EOL`: the chip's timeout and end-of-life IRQs
+- Not available on other radios (`Unknown command`).
+
+---
+
+#### View the receiver gain of recent packets (LR2021 only)
+**Usage:** `get radio.agc`
+
+**Example reply:** `> G13 -112dBm -6.5dB 4s; G9 -71dBm 9.2dB 31s`
+
+**Notes:**
+- For the most recent received packets (up to 8, newest first, as many as fit in the reply): the gain step the chip's automatic gain control used (`G1` to `G13`, 13 = most gain), the packet's RSSI and SNR, and its age in seconds.
+- Strong signals should use lower gain steps. A high gain step with a strong RSSI can point at interference or a receiver problem.
+- Not available on other radios (`Unknown command`).
+
+---
+
 ### BLE
 
 #### Change BLE PIN

@@ -2,6 +2,7 @@
 
 #include "CustomLR2021.h"
 #include "RadioLibWrappers.h"
+#include "../RecentHistory.h"
 
 #ifndef USE_LR2021
 #define USE_LR2021
@@ -12,12 +13,52 @@
 #endif
 
 class CustomLR2021Wrapper : public RadioLibWrapper {
-#ifdef MESH_DEBUG
-  // Logs fault IRQs, decoded chip errors, and a missing TX_DONE after a transmit.
-  void logTxFaults() {
+public:
+  struct TxFault {
+    uint32_t at_millis;
+    uint32_t irq;          // IRQ status after the transmit
+    uint16_t chip_errors;  // error register, when the ERROR IRQ was set
+  };
+  static const int TX_FAULT_HISTORY = 8;
+
+  struct RxGain {
+    uint32_t at_millis;
+    uint8_t gain_step;  // AGC gain step G1..G13 (13 = most gain)
+    int16_t rssi;       // dBm
+    int8_t snr_x4;      // dB * 4
+  };
+  static const int RX_GAIN_HISTORY = 8;
+
+private:
+  // IRQ bits that mean a transmit went wrong (a missing TX_DONE is also a fault)
+  static constexpr uint32_t TX_FAULT_IRQS = RADIOLIB_LR2021_IRQ_EOL | RADIOLIB_LR2021_IRQ_PA_OCP_OVP |
+      RADIOLIB_LR2021_IRQ_ERROR | RADIOLIB_LR2021_IRQ_CMD_ERROR | RADIOLIB_LR2021_IRQ_TIMEOUT;
+
+  // Checks how the last transmit ended. Returns true on a fault, with the IRQ status and, when the
+  // ERROR bit is set, the chip error register (which is then cleared). Must run before
+  // finishTransmit(), which clears all IRQ flags.
+  bool checkTxFault(uint32_t* irq_out, uint16_t* err_out) {
     CustomLR2021* radio = (CustomLR2021 *)_radio;
     uint32_t irq = radio->getIrqStatus();
+    uint16_t err = 0;
+    bool fault = !(irq & RADIOLIB_LR2021_IRQ_TX_DONE) || (irq & TX_FAULT_IRQS);
+    if (fault && (irq & RADIOLIB_LR2021_IRQ_ERROR)) {
+      // ERROR is a summary bit; the cause is in the chip's error register
+      int16_t state = radio->getErrors(&err);
+      if (state == RADIOLIB_ERR_NONE) {
+        radio->clearErrors();
+      } else {
+        MESH_DEBUG_PRINTLN("LR2021:   getErrors failed (%d)", state);
+      }
+    }
+    *irq_out = irq;
+    *err_out = err;
+    return fault;
+  }
 
+#ifdef MESH_DEBUG
+  // Logs a TX fault: the fault IRQs, a missing TX_DONE, and the decoded chip errors.
+  static void logTxFault(uint32_t irq, uint16_t err) {
     static const struct { uint32_t bit; const char* name; } irqFaults[] = {
       { RADIOLIB_LR2021_IRQ_EOL,        "EOL" },
       { RADIOLIB_LR2021_IRQ_PA_OCP_OVP, "PA_OCP_OVP" },
@@ -25,40 +66,72 @@ class CustomLR2021Wrapper : public RadioLibWrapper {
       { RADIOLIB_LR2021_IRQ_CMD_ERROR,  "CMD_ERROR" },
       { RADIOLIB_LR2021_IRQ_TIMEOUT,    "TIMEOUT" },
     };
-    bool fault = !(irq & RADIOLIB_LR2021_IRQ_TX_DONE);
-    for (auto& f : irqFaults) {
-      if (irq & f.bit) fault = true;
-    }
-    if (!fault) return;
-
+    static const char* const errNames[16] = {
+      "HF_XOSC_START", "LF_XOSC_START", "PLL_LOCK", "LF_RC_CALIB",
+      "HF_RC_CALIB", "PLL_CALIB", "AAF_CALIB", "IMG_CALIB",
+      "CHIP_BUSY", "RXFREQ_NO_FE_CAL", "MEAS_UNIT_ADC_CALIB", "PA_OFFSET_CALIB",
+      "PPF_CALIB", "SRC_CALIB", "SRC_SATURATION_CALIB", "SRC_TOLERANCE_CALIB",
+    };
     MESH_DEBUG_PRINTLN("LR2021: TX fault, irq=0x%08lX", (unsigned long)irq);
     if (!(irq & RADIOLIB_LR2021_IRQ_TX_DONE)) MESH_DEBUG_PRINTLN("LR2021:   TX_DONE not set");
     for (auto& f : irqFaults) {
       if (irq & f.bit) MESH_DEBUG_PRINTLN("LR2021:   %s", f.name);
     }
-
-    // ERROR is a summary bit; the cause is in the chip's error register
-    if (irq & RADIOLIB_LR2021_IRQ_ERROR) {
-      static const char* const errNames[16] = {
-        "HF_XOSC_START", "LF_XOSC_START", "PLL_LOCK", "LF_RC_CALIB",
-        "HF_RC_CALIB", "PLL_CALIB", "AAF_CALIB", "IMG_CALIB",
-        "CHIP_BUSY", "RXFREQ_NO_FE_CAL", "MEAS_UNIT_ADC_CALIB", "PA_OFFSET_CALIB",
-        "PPF_CALIB", "SRC_CALIB", "SRC_SATURATION_CALIB", "SRC_TOLERANCE_CALIB",
-      };
-      uint16_t err = 0;
-      int16_t state = radio->getErrors(&err);
-      if (state != RADIOLIB_ERR_NONE) {
-        MESH_DEBUG_PRINTLN("LR2021:   getErrors failed (%d)", state);
-        return;
-      }
+    if (err) {
       MESH_DEBUG_PRINTLN("LR2021:   chip errors=0x%04X", err);
       for (int i = 0; i < 16; i++) {
         if (err & (1u << i)) MESH_DEBUG_PRINTLN("LR2021:     %s", errNames[i]);
       }
-      radio->clearErrors();
     }
   }
 #endif
+
+  static const int REPLY_MAX = 140;  // CLI replies go into a 166 byte buffer, after an optional prefix
+
+  // eg. "> 3 since boot: 12s OCP; 95s ERR=0004; 300s NODONE,TIMEOUT"
+  void formatTxFaults(char* reply) const {
+    if (_tx_faults.total() == 0) {
+      strcpy(reply, "> no TX faults since boot");
+      return;
+    }
+    int n = sprintf(reply, "> %lu since boot:", (unsigned long)_tx_faults.total());
+    uint32_t now = millis();
+    for (int i = 0; i < _tx_faults.count(); i++) {
+      const TxFault& f = _tx_faults.get(i);
+      char entry[64];
+      int e = sprintf(entry, "%s %lus ", i == 0 ? "" : ";", (unsigned long)((now - f.at_millis) / 1000));
+      const char* sep = "";
+      if (!(f.irq & RADIOLIB_LR2021_IRQ_TX_DONE)) { e += sprintf(&entry[e], "%sNODONE", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_PA_OCP_OVP) { e += sprintf(&entry[e], "%sOCP", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_ERROR)      { e += sprintf(&entry[e], "%sERR=%04X", sep, f.chip_errors); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_CMD_ERROR)  { e += sprintf(&entry[e], "%sCMD", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_TIMEOUT)    { e += sprintf(&entry[e], "%sTIMEOUT", sep); sep = ","; }
+      if (f.irq & RADIOLIB_LR2021_IRQ_EOL)        { e += sprintf(&entry[e], "%sEOL", sep); sep = ","; }
+      if (n + e > REPLY_MAX) break;
+      strcpy(&reply[n], entry);
+      n += e;
+    }
+  }
+
+  // eg. "> G13 -112dBm -6.5dB 4s; G9 -71dBm 9.2dB 31s"
+  void formatRxGains(char* reply) const {
+    if (_rx_gains.count() == 0) {
+      strcpy(reply, "> no packets received yet");
+      return;
+    }
+    strcpy(reply, ">");
+    int n = 1;
+    uint32_t now = millis();
+    for (int i = 0; i < _rx_gains.count(); i++) {
+      const RxGain& g = _rx_gains.get(i);
+      char entry[64];
+      int e = sprintf(entry, "%s G%u %ddBm %.1fdB %lus", i == 0 ? "" : ";", g.gain_step, g.rssi,
+                      g.snr_x4 / 4.0f, (unsigned long)((now - g.at_millis) / 1000));
+      if (n + e > REPLY_MAX) break;
+      strcpy(&reply[n], entry);
+      n += e;
+    }
+  }
 
 public:
   CustomLR2021Wrapper(CustomLR2021& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
@@ -145,9 +218,14 @@ public:
   }
 
   void onSendFinished() override {
-  #ifdef MESH_DEBUG
-    logTxFaults();  // must run before finishTransmit() clears all IRQ flags
-  #endif
+    uint32_t irq;
+    uint16_t err;
+    if (checkTxFault(&irq, &err)) {  // must run before finishTransmit() clears all IRQ flags
+      _tx_faults.add({ (uint32_t)millis(), irq, err });
+    #ifdef MESH_DEBUG
+      logTxFault(irq, err);
+    #endif
+    }
     RadioLibWrapper::onSendFinished();
     _radio->setPreambleLength(preambleLengthForSF(getSpreadingFactor())); // overcomes weird issues with small and big pkts
   }
@@ -158,6 +236,7 @@ public:
       uint8_t step = 0;
       if (((CustomLR2021 *)_radio)->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
         _last_gain_step = step;
+        _rx_gains.add({ (uint32_t)millis(), step, (int16_t)getLastRSSI(), (int8_t)(getLastSNR() * 4) });
         MESH_DEBUG_PRINTLN("LR2021: RX gain step G%u", step);
       } else {
         _last_gain_step = -1;
@@ -167,6 +246,26 @@ public:
   }
 
   int getLastGainStep() const override { return _last_gain_step; }
+
+  // Companion/remote CLI: recent TX faults and AGC gain steps. Replies list the newest entries
+  // first, as many as fit in REPLY_MAX characters.
+  bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) override {
+    if (strcmp(command, "get radio.faults") == 0) {
+      formatTxFaults(reply);
+      return true;
+    }
+    if (strcmp(command, "get radio.agc") == 0) {
+      formatRxGains(reply);
+      return true;
+    }
+    return false;
+  }
+
+  // the most recent TX faults since boot (newest first via get(0))
+  const RecentHistory<TxFault, TX_FAULT_HISTORY>& getTxFaults() const { return _tx_faults; }
+
+  // gain step, RSSI and SNR of the most recent received packets (newest first via get(0))
+  const RecentHistory<RxGain, RX_GAIN_HISTORY>& getRxGains() const { return _rx_gains; }
 
   float getLastRSSI() const override { return ((CustomLR2021 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomLR2021 *)_radio)->getSNR(); }
@@ -195,6 +294,8 @@ public:
 
   protected:
     int _last_gain_step = -1;
+    RecentHistory<TxFault, TX_FAULT_HISTORY> _tx_faults;
+    RecentHistory<RxGain, RX_GAIN_HISTORY> _rx_gains;
     LR2021LoRaSideDetector_t _sideDet[3];
     size_t _numSideDet = 0;
 

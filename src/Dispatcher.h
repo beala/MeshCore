@@ -83,6 +83,12 @@ public:
    * \returns  the receiver gain step used for the last received packet, or -1 if the radio can't report it.
    */
   virtual int getLastGainStep() const { return -1; }
+
+  /**
+   * \brief  lets the radio driver answer its own CLI commands, eg. for radio-specific diagnostics.
+   * \returns  true if the command was handled, with the reply in 'reply'.
+   */
+  virtual bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) { return false; }
 };
 
 /**
