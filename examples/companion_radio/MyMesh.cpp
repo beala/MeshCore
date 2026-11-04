@@ -302,59 +302,45 @@ uint32_t MyMesh::getFloodRetryWait(const mesh::Packet* packet) {
 
 // ---------- radios sharing this identity (see CloneCoordinator) ----------
 
-void MyMesh::sendFloodReply(const ContactInfo& to, mesh::Packet* pkt, uint32_t delay_millis, const uint8_t* ack) {
-  if (_clone.isBackup()) {
-    unsigned long now = _ms->getMillis();
-    if (_clone.alreadyAnswered(to.id.pub_key, ack, now)) {   // the main radio beat us to it
-      releasePacket(pkt);
-      return;
-    }
-    uint8_t hash[MAX_HASH_SIZE];
-    pkt->calculatePacketHash(hash);
-    _clone.hold(hash, to.id.pub_key, ack, now);
-    delay_millis += _clone.waitMs();
-  }
-  sendFloodScoped(to, pkt, delay_millis);
+bool MyMesh::allowReplyTo(const ContactInfo& to) {
+  return _clone.allowReply();   // a backup leaves all answers to the main radio
 }
 
-void MyMesh::onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type, const uint8_t* ack) {
+void MyMesh::onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type) {
   unsigned long now = _ms->getMillis();
-  uint8_t hash[MAX_HASH_SIZE];
-  if (_clone.onSibling(to.id.pub_key, ack, now, hash)) {
-    cancelQueued(hash);   // another radio answered, so drop our held reply
-  }
+  _clone.onSibling();
   StrHelper::strncpy(_sibling_name, to.name, sizeof(_sibling_name));
   _sibling_heard = now;
 
   // normal: any packet shows another radio uses this key. Main: only a reply (a flood reply carries a
-  // path) means the other radio isn't holding back; it may have missed the takeover.
+  // path), since backups never send one; that radio must have missed the takeover.
   bool reply = type == PAYLOAD_TYPE_PATH;
   bool alert = _clone.role() == CLONE_ROLE_SOLO || (_clone.role() == CLONE_ROLE_MAIN && reply);
   if (alert && _clone.alertDue(now)) {
     char msg[200];
     if (_clone.role() == CLONE_ROLE_MAIN) {
-      snprintf(msg, sizeof(msg), "Another radio with this key also replied to %s. If it missed the takeover, "
-               "send \"takeover\" again.", to.name);
+      snprintf(msg, sizeof(msg), "Another radio with this key also replied to %s, so it missed the takeover. "
+               "Send the takeover again? Reply \"yes\".", to.name);
     } else {
-      snprintf(msg, sizeof(msg), "Another radio with this key is active: it sent to %s. Send \"takeover\" to "
-               "make this the main radio; the others will stay quiet.", to.name);
+      snprintf(msg, sizeof(msg), "Another radio with this key is active: it sent to %s. Make this the main "
+               "radio, so the others stay quiet? Reply \"yes\".", to.name);
     }
     consoleNote(msg);
+    _takeover_offered = true;
   }
 }
 
 void MyMesh::onSelfDataRecv(mesh::Packet* packet, uint8_t type, const uint8_t* data, size_t len) {
   if (type == PAYLOAD_TYPE_REQ && _clone.onClaim(data, len)) {
     saveCloneState();
-    consoleNote("Another radio with this key took over. This one is now a backup: it shows messages, "
-                "but lets the main radio reply.");
+    consoleNote("Another radio with this key took over. This one is now a backup: it shows the messages it "
+                "hears, but doesn't answer them.");
   }
 }
 
 void MyMesh::saveCloneState() {
   _prefs.clone.role = _clone.role();
   _prefs.clone.epoch = _clone.epoch();
-  _prefs.clone.wait_ms = _clone.waitMs();
   savePrefs();
 }
 
@@ -373,15 +359,19 @@ bool MyMesh::sendClaim() {
   return true;
 }
 
+void MyMesh::takeover(char* reply) {
+  _clone.takeover(getRTCClock()->getCurrentTime());
+  saveCloneState();
+  if (sendClaim()) {
+    strcpy(reply, "This is now the main radio. Other radios with this key go quiet when they hear it.");
+  } else {
+    strcpy(reply, "This is now the main radio, but the claim couldn't be sent (no free packet). Try again.");
+  }
+}
+
 bool MyMesh::handleCloneCommand(const char* command, char* reply) {
   if (strcmp(command, "takeover") == 0) {
-    _clone.takeover(getRTCClock()->getCurrentTime());
-    saveCloneState();
-    if (sendClaim()) {
-      strcpy(reply, "This is now the main radio. Other radios with this key become backups when they hear it.");
-    } else {
-      strcpy(reply, "This is now the main radio, but the claim couldn't be sent (no free packet). Try again.");
-    }
+    takeover(reply);
     return true;
   }
   if (strcmp(command, "clone off") == 0) {
@@ -390,22 +380,12 @@ bool MyMesh::handleCloneCommand(const char* command, char* reply) {
     strcpy(reply, "OK, this radio answers as normal again.");
     return true;
   }
-  if (memcmp(command, "set clone.wait ", 15) == 0) {
-    int ms = atoi(&command[15]);
-    if (ms < 300 || ms > 5000) {
-      strcpy(reply, "Error: wait is 300 to 5000 ms");
-    } else {
-      _clone.setWait(ms);
-      saveCloneState();
-      strcpy(reply, "OK");
-    }
-    return true;
-  }
   if (strcmp(command, "clone") == 0 || strcmp(command, "get clone") == 0) {
     static const char* roles[] = { "normal", "main", "backup" };
-    const CloneCoordinator::Stats& st = _clone.getStats();
-    int n = snprintf(reply, 160, "Role: %s. Wait %u ms. Held %u, dropped %u.",
-                     roles[_clone.role()], (uint32_t)_clone.waitMs(), st.held, st.dropped);
+    int n = snprintf(reply, 160, "Role: %s.", roles[_clone.role()]);
+    if (_clone.isBackup()) {
+      n += snprintf(&reply[n], 160 - n, " Stayed quiet %u times.", _clone.silenced());
+    }
     if (_sibling_heard) {
       snprintf(&reply[n], 160 - n, " Other radio heard %lu min ago, to %s.",
                (unsigned long)((_ms->getMillis() - _sibling_heard) / 60000), _sibling_name);
@@ -420,6 +400,7 @@ bool MyMesh::handleCloneCommand(const char* command, char* reply) {
 // ---------- console contact ----------
 
 #define CONSOLE_NAME  "Radio console"
+#define CONSOLE_CONFIRM_DELAY  300   // ms: give the app time to note the ACK code before it's confirmed
 
 void MyMesh::fillConsoleContact(ContactInfo& c) {
   memset(&c, 0, sizeof(c));
@@ -451,7 +432,17 @@ void MyMesh::consoleNote(const char* text) {
 }
 
 void MyMesh::checkConsole() {
-  if (!_console_pending || _serial->isWriteBusy()) return;
+  if (_serial->isWriteBusy()) return;
+  if (!_console_pending) {
+    if (_console_offer_pending) {   // the user sent a message from a backup
+      _console_offer_pending = false;
+      consoleNote("This radio is a backup, so it doesn't answer messages, and replies to you may go to the "
+                  "main radio. Make this the main radio? Reply \"yes\".");
+      _takeover_offered = true;
+    }
+    return;
+  }
+  if (!millisHasNowPassed(_console_due)) return;
   _console_pending = false;
 
   out_frame[0] = PUSH_CODE_SEND_CONFIRMED;   // "delivered"
@@ -459,17 +450,25 @@ void MyMesh::checkConsole() {
   uint32_t trip_time = 0;
   memcpy(&out_frame[5], &trip_time, 4);
   _serial->writeFrame(out_frame, 9);
+  if (_console_cmd[0] == 0) return;   // the app sent the last command again: already run
+
+  // phones capitalise the first letter, so match the command word in lower case
+  char* cmd = _console_cmd;
+  while (*cmd == ' ') cmd++;
+  for (char* c = cmd; *c && *c != ' '; c++) *c = tolower(*c);
 
   char reply[166];
   reply[0] = 0;
-  const char* cmd = _console_cmd;
-  while (*cmd == ' ') cmd++;
+  bool offered = _takeover_offered;
+  _takeover_offered = false;
   if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
     strcpy(reply, "takeover: make this the main radio\n"
                   "clone: status\n"
                   "clone off: answer as normal\n"
-                  "set clone.wait <ms>: backup wait\n"
                   "Other CLI commands work too");
+  } else if (strcmp(cmd, "yes") == 0) {
+    if (offered) takeover(reply);
+    else strcpy(reply, "Nothing to confirm. Send \"help\".");
   } else if (!handleCommand(cmd, 0, reply)) {
     strcpy(reply, "Unknown command. Send \"help\".");
   }
@@ -1115,6 +1114,10 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   _console_ack = 0;
   _console_lastmod = 0;
   _console_cmd[0] = 0;
+  _console_last_ts = 0;
+  _console_due = 0;
+  _console_offer_pending = false;
+  _takeover_offered = false;
   _sibling_name[0] = 0;
   _sibling_heard = 0;
   _cli_rescue = false;
@@ -1242,7 +1245,7 @@ void MyMesh::begin() {
     } while (_prefs.clone.tag == 0 || _prefs.clone.tag == 0x7FFFFFFF);
     savePrefs();
   }
-  _clone.load(_prefs.clone.role, _prefs.clone.epoch, _prefs.clone.tag, _prefs.clone.wait_ms);
+  _clone.load(_prefs.clone.role, _prefs.clone.epoch, _prefs.clone.tag);
   _console_lastmod = getRTCClock()->getCurrentTime();
 
   _active_ble_pin = _prefs.ble_pin;
@@ -1396,12 +1399,20 @@ void MyMesh::handleCmdFrame(size_t len) {
     if (_console_pending) {
       writeErrFrame(ERR_CODE_TABLE_FULL);   // still running the last one
     } else {
-      int tlen = len - 13;
-      if (tlen > (int) sizeof(_console_cmd) - 1) tlen = sizeof(_console_cmd) - 1;
-      memcpy(_console_cmd, &cmd_frame[13], tlen);
-      _console_cmd[tlen] = 0;
+      uint32_t ts;
+      memcpy(&ts, &cmd_frame[3], 4);
+      if (ts != 0 && ts == _console_last_ts) {
+        _console_cmd[0] = 0;   // the app is resending a command it sent: confirm it, but don't run it again
+      } else {
+        int tlen = len - 13;
+        if (tlen > (int) sizeof(_console_cmd) - 1) tlen = sizeof(_console_cmd) - 1;
+        memcpy(_console_cmd, &cmd_frame[13], tlen);
+        _console_cmd[tlen] = 0;
+      }
+      _console_last_ts = ts;
       do { getRNG()->random((uint8_t *) &_console_ack, 4); } while (_console_ack == 0);
       _console_pending = true;   // checkConsole() confirms it and replies
+      _console_due = futureMillis(CONSOLE_CONFIRM_DELAY);
 
       out_frame[0] = RESP_CODE_SENT;
       out_frame[1] = 0;   // direct
@@ -1450,6 +1461,9 @@ void MyMesh::handleCmdFrame(size_t len) {
         memcpy(&out_frame[2], &expected_ack, 4);
         memcpy(&out_frame[6], &est_timeout, 4);
         _serial->writeFrame(out_frame, 10);
+
+        // the user is writing from a backup, which doesn't answer: offer to make it main
+        if (txt_type == TXT_TYPE_PLAIN && _clone.promptDue(_ms->getMillis())) _console_offer_pending = true;
       }
     } else {
       writeErrFrame(recipient == NULL

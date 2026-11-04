@@ -1,16 +1,9 @@
 #include <gtest/gtest.h>
 #include "helpers/CloneCoordinator.h"
 
-static const uint8_t BOB[6]   = { 1, 2, 3, 4, 5, 6 };
-static const uint8_t CAROL[6] = { 9, 8, 7, 6, 5, 4 };
-static const uint8_t ACK1[4]  = { 0x11, 0x22, 0x33, 0x44 };
-static const uint8_t ACK2[4]  = { 0x55, 0x66, 0x77, 0x88 };
-
-static void hashOf(uint8_t* h, uint8_t seed) { for (int i = 0; i < MAX_HASH_SIZE; i++) h[i] = seed + i; }
-
 static CloneCoordinator radio(uint32_t tag, uint8_t role = CLONE_ROLE_SOLO, uint32_t epoch = 0) {
   CloneCoordinator c;
-  c.load(role, epoch, tag, 0);
+  c.load(role, epoch, tag);
   return c;
 }
 
@@ -76,52 +69,41 @@ TEST(CloneCoordinator, NotAClaim) {
   EXPECT_EQ(b.role(), CLONE_ROLE_SOLO);
 }
 
-TEST(CloneCoordinator, BackupDropsHeldReplyWhenMainAnswers) {
-  CloneCoordinator b = radio(200, CLONE_ROLE_BACKUP, 5);
-  uint8_t h[MAX_HASH_SIZE], cancel[MAX_HASH_SIZE];
-  hashOf(h, 7);
-  b.hold(h, BOB, ACK1, 1000);
-  EXPECT_FALSE(b.onSibling(CAROL, ACK1, 1200, cancel));   // other contact
-  EXPECT_FALSE(b.onSibling(BOB, ACK2, 1300, cancel));     // other message
-  EXPECT_TRUE(b.onSibling(BOB, ACK1, 1400, cancel));
-  EXPECT_EQ(memcmp(cancel, h, MAX_HASH_SIZE), 0);
-  EXPECT_FALSE(b.onSibling(BOB, ACK1, 1500, cancel));     // already dropped
-  EXPECT_EQ(b.getStats().dropped, 1u);
+TEST(CloneCoordinator, OnlyBackupStaysQuiet) {
+  CloneCoordinator solo = radio(100), main = radio(200, CLONE_ROLE_MAIN, 5), backup = radio(300, CLONE_ROLE_BACKUP, 5);
+  EXPECT_TRUE(solo.allowReply());
+  EXPECT_TRUE(main.allowReply());
+  EXPECT_FALSE(backup.allowReply());
+  EXPECT_FALSE(backup.allowReply());
+  EXPECT_EQ(backup.silenced(), 2u);
+  EXPECT_EQ(main.silenced(), 0u);
 }
 
-TEST(CloneCoordinator, ResponseMatchedByContact) {
-  CloneCoordinator b = radio(200, CLONE_ROLE_BACKUP, 5);
-  uint8_t h[MAX_HASH_SIZE], cancel[MAX_HASH_SIZE];
-  hashOf(h, 3);
-  b.hold(h, BOB, NULL, 1000);
-  EXPECT_FALSE(b.onSibling(BOB, ACK1, 1100, cancel));   // an ACK doesn't answer a request
-  EXPECT_TRUE(b.onSibling(BOB, NULL, 1200, cancel));
+TEST(CloneCoordinator, BackupAnswersAgainAfterTakeoverOrOff) {
+  CloneCoordinator b = radio(300, CLONE_ROLE_BACKUP, 5);
+  b.takeover(1700000000);
+  EXPECT_TRUE(b.allowReply());
+  CloneCoordinator c = radio(400, CLONE_ROLE_BACKUP, 5);
+  c.setSolo();
+  EXPECT_TRUE(c.allowReply());
 }
 
-TEST(CloneCoordinator, HeldReplyExpires) {
-  CloneCoordinator b = radio(200, CLONE_ROLE_BACKUP, 5);
-  uint8_t h[MAX_HASH_SIZE], cancel[MAX_HASH_SIZE];
-  hashOf(h, 1);
-  b.hold(h, BOB, ACK1, 1000);
-  EXPECT_FALSE(b.onSibling(BOB, ACK1, 1000 + CLONE_DEFAULT_WAIT_MS + 6000, cancel));
+TEST(CloneCoordinator, PromptOnlyOnBackup_RateLimited) {
+  CloneCoordinator main = radio(200, CLONE_ROLE_MAIN, 5), b = radio(300, CLONE_ROLE_BACKUP, 5);
+  EXPECT_FALSE(main.promptDue(1000));
+  EXPECT_TRUE(b.promptDue(1000));
+  EXPECT_FALSE(b.promptDue(2000));
+  EXPECT_TRUE(b.promptDue(1000 + CLONE_ALERT_INTERVAL));
 }
 
-TEST(CloneCoordinator, MainAnsweredBeforeWeGotTheMessage) {
-  CloneCoordinator b = radio(200, CLONE_ROLE_BACKUP, 5);
-  uint8_t cancel[MAX_HASH_SIZE];
-  b.onSibling(BOB, ACK1, 1000, cancel);
-  EXPECT_TRUE(b.alreadyAnswered(BOB, ACK1, 2000));
-  EXPECT_FALSE(b.alreadyAnswered(BOB, ACK2, 2000));
-  EXPECT_FALSE(b.alreadyAnswered(CAROL, ACK1, 2000));
-  EXPECT_FALSE(b.alreadyAnswered(BOB, NULL, 2000));
-  EXPECT_FALSE(b.alreadyAnswered(BOB, ACK1, 1000 + CLONE_RECENT_MS + 1));
-}
-
-TEST(CloneCoordinator, HoldWhenFullStillWorks) {
-  CloneCoordinator b = radio(200, CLONE_ROLE_BACKUP, 5);
-  uint8_t h[MAX_HASH_SIZE], cancel[MAX_HASH_SIZE];
-  for (int i = 0; i < CLONE_HELD_SLOTS + 2; i++) { hashOf(h, i); b.hold(h, BOB, ACK1, 1000); }
-  EXPECT_TRUE(b.onSibling(BOB, ACK1, 1100, cancel));
+TEST(CloneCoordinator, NewClaimPromptsAgain) {
+  CloneCoordinator a = radio(100), b = radio(300, CLONE_ROLE_BACKUP, 5);
+  EXPECT_TRUE(b.promptDue(1000));
+  b.takeover(1700000000);   // the user said yes
+  uint8_t claim[16];
+  a.takeover(1700000100);   // later, another radio takes over again
+  EXPECT_TRUE(b.onClaim(claim, a.writeClaim(claim)));
+  EXPECT_TRUE(b.promptDue(2000));   // so the next message sent from b asks again
 }
 
 TEST(CloneCoordinator, AlertRateLimited) {
@@ -134,9 +116,8 @@ TEST(CloneCoordinator, AlertRateLimited) {
 
 TEST(CloneCoordinator, LoadSanitises) {
   CloneCoordinator c;
-  c.load(9, 0, 1, 0);
+  c.load(9, 0, 1);
   EXPECT_EQ(c.role(), CLONE_ROLE_SOLO);
-  EXPECT_EQ(c.waitMs(), CLONE_DEFAULT_WAIT_MS);
 }
 
 int main(int argc, char** argv) {

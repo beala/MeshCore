@@ -254,11 +254,13 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
       ack_hash[4] = (5 + text_len + 1 < (int)len) ? data[5 + text_len + 1] : 0;
       getRNG()->random(&ack_hash[5], 1);  // make 6th byte random
 
-      if (packet->isRouteFlood()) {
+      if (!allowReplyTo(from)) {
+        // stay quiet
+      } else if (packet->isRouteFlood()) {
         // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the ACK
         mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
                                                 PAYLOAD_TYPE_ACK, (uint8_t *) &ack_hash, 6);
-        if (path) sendFloodReply(from, path, TXT_ACK_DELAY, ack_hash);
+        if (path) sendFloodScoped(from, path, TXT_ACK_DELAY);
       } else {
         sendAckTo(from, ack_hash, 6);
       }
@@ -276,7 +278,7 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
       // NOTE: no ack expected for CLI_COMMAND replies
 
       int text_len = strlen(reply);
-      if (text_len > 0) {
+      if (text_len > 0 && allowReplyTo(from)) {
         uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
         if (timestamp == sender_timestamp) {
           // WORKAROUND: the two timestamps need to be different, in the CLI view
@@ -308,11 +310,13 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
       uint32_t ack_hash;    // calc truncated hash of the message timestamp + text + OUR pub_key, to prove to sender that we got it
       mesh::Utils::sha256((uint8_t *) &ack_hash, 4, data, 9 + strlen((char *)&data[9]), self_id.pub_key, PUB_KEY_SIZE);
 
-      if (packet->isRouteFlood()) {
+      if (!allowReplyTo(from)) {
+        // stay quiet
+      } else if (packet->isRouteFlood()) {
         // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the ACK
         mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
                                                 PAYLOAD_TYPE_ACK, (uint8_t *) &ack_hash, 4);
-        if (path) sendFloodReply(from, path, TXT_ACK_DELAY, (uint8_t *) &ack_hash);
+        if (path) sendFloodScoped(from, path, TXT_ACK_DELAY);
       } else {
         sendAckTo(from, (uint8_t *) &ack_hash);
       }
@@ -323,12 +327,12 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
     uint32_t sender_timestamp;
     memcpy(&sender_timestamp, data, 4);
     uint8_t reply_len = onContactRequest(from, sender_timestamp, &data[4], len - 4, temp_buf);
-    if (reply_len > 0) {
+    if (reply_len > 0 && allowReplyTo(from)) {
       if (packet->isRouteFlood()) {
         // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the response
         mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
                                               PAYLOAD_TYPE_RESPONSE, temp_buf, reply_len);
-        if (path) sendFloodReply(from, path, SERVER_RESPONSE_DELAY, NULL);
+        if (path) sendFloodScoped(from, path, SERVER_RESPONSE_DELAY);
       } else {
         mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, from.id, secret, temp_buf, reply_len);
         if (reply) {
@@ -359,12 +363,7 @@ void BaseChatMesh::onSiblingDatagram(mesh::Packet* packet, uint8_t type, uint8_t
     int dlen = decryptPayload(to.getSharedSecret(self_id), data, macAndData, len, ctx, sizeof(ctx), was_v2);
     if (dlen <= 0) continue;
 
-    const uint8_t* ack = NULL;
-    if (type == PAYLOAD_TYPE_PATH && dlen >= 1 && mesh::Packet::isValidPathLen(data[0])) {
-      int k = 1 + ((data[0] >> 6) + 1) * (data[0] & 63);   // skip the path
-      if (k + 1 + 4 <= dlen && (data[k] & 0x0F) == PAYLOAD_TYPE_ACK) ack = &data[k + 1];
-    }
-    onSiblingPacket(to, packet, type, ack);
+    onSiblingPacket(to, packet, type);
     return;
   }
 }
@@ -416,6 +415,7 @@ void BaseChatMesh::onAckRecv(mesh::Packet* packet, uint32_t ack_crc) {
 void BaseChatMesh::handleReturnPathRetry(const ContactInfo& contact, const uint8_t* path, uint8_t path_len) {
   // NOTE: simplest impl is just to re-send a reciprocal return path to sender (DIRECTLY)
   //        override this method in various firmwares, if there's a better strategy
+  if (!allowReplyTo(contact)) return;
   mesh::Packet* rpath = createPathReturn(contact.id, contact.getSharedSecret(self_id), path, path_len, 0, NULL, 0);
   if (rpath) sendDirect(rpath, contact.out_path, contact.out_path_len, 3000);   // 3 second delay
 }

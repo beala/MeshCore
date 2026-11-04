@@ -205,13 +205,11 @@ private:
     uint8_t role = 0;       // CLONE_ROLE_*: 0 solo, 1 main, 2 backup
     uint32_t epoch = 0;     // newest takeover claim seen or made
     uint32_t tag = 0;       // random, tells this radio's claims apart (0 = not made yet)
-    uint16_t wait_ms = 0;   // how long a backup holds back a reply, 0 = default
   protected:
     void structure() override {
       def("role", role);
       def("epoch", epoch);
       def("tag", tag);
-      def("wait", wait_ms);
     }
   };
 public:

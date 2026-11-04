@@ -142,8 +142,8 @@ protected:
   uint8_t getExtraAckTransmitCount() const override;
   uint8_t getFloodRetries(const mesh::Packet* packet) override;
   uint32_t getFloodRetryWait(const mesh::Packet* packet) override;
-  void sendFloodReply(const ContactInfo& to, mesh::Packet* pkt, uint32_t delay_millis, const uint8_t* ack) override;
-  void onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type, const uint8_t* ack) override;
+  bool allowReplyTo(const ContactInfo& to) override;
+  void onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type) override;
   void onSelfDataRecv(mesh::Packet* packet, uint8_t type, const uint8_t* data, size_t len) override;
   bool filterRecvFloodPacket(mesh::Packet* packet) override;
   bool allowPacketForward(const mesh::Packet* packet) override;
@@ -260,6 +260,7 @@ private:
   bool handleCloneCommand(const char* command, char* reply);
   bool sendClaim();
   void saveCloneState();
+  void takeover(char* reply);
 
   CloneCoordinator _clone;
   bool _iter_console_pending;    // console contact still to send, at the end of the contacts list
@@ -267,6 +268,10 @@ private:
   uint32_t _console_ack;
   uint32_t _console_lastmod;
   char _console_cmd[MAX_FRAME_SIZE + 1];
+  unsigned long _console_due;    // when to confirm the pending command
+  bool _console_offer_pending;   // offer a takeover, because the user sent a message from a backup
+  uint32_t _console_last_ts;     // timestamp of the last console command, to spot the app resending it
+  bool _takeover_offered;        // the last console note offered a takeover, so "yes" accepts it
   char _sibling_name[32];        // contact another radio with our key last sent to
   unsigned long _sibling_heard;
 

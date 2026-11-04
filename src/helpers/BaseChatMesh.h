@@ -130,19 +130,13 @@ protected:
   virtual void sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis=0);
 
   /**
-   * \brief  Sends our flood reply (path + ACK, or a response) to a message or request that came in by
-   *         flood. Override to hold it back, e.g. when other radios share this identity.
-   * \param  ack  the 4 ACK bytes the reply carries, or NULL for a response
+   * \brief  Whether to answer this contact's message or request (ACK, path, response, CLI reply).
+   *         Override to stay quiet, e.g. on a backup radio that shares this identity.
    */
-  virtual void sendFloodReply(const ContactInfo& to, mesh::Packet* pkt, uint32_t delay_millis, const uint8_t* ack) {
-    sendFloodScoped(to, pkt, delay_millis);
-  }
+  virtual bool allowReplyTo(const ContactInfo& to) { return true; }
 
-  /**
-   * \brief  Heard another radio with our key send a packet to this contact.
-   * \param  ack  if it was a flood reply carrying an ACK, its first 4 bytes, else NULL
-   */
-  virtual void onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type, const uint8_t* ack) { }
+  /** \brief  Heard another radio with our key send a packet to this contact. */
+  virtual void onSiblingPacket(const ContactInfo& to, mesh::Packet* pkt, uint8_t type) { }
 
   // storage concepts, for sub-classes to override/implement
   virtual int  getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) { return 0; }  // not implemented
