@@ -354,7 +354,9 @@ void BaseChatMesh::onSiblingDatagram(mesh::Packet* packet, uint8_t type, uint8_t
   for (int j = 0; j < num; j++) {
     ContactInfo& to = contacts[matching_peer_indexes[j]];
     uint8_t data[MAX_PACKET_PAYLOAD];
-    int dlen = mesh::Utils::MACThenDecrypt(to.getSharedSecret(self_id), data, (uint8_t*) macAndData, len);
+    uint8_t ctx[3] = { type, dest_hash, self_id.pub_key[0] };   // the sender's hash is ours
+    bool was_v2;
+    int dlen = decryptPayload(to.getSharedSecret(self_id), data, macAndData, len, ctx, sizeof(ctx), was_v2);
     if (dlen <= 0) continue;
 
     const uint8_t* ack = NULL;

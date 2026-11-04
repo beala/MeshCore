@@ -352,7 +352,9 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
             uint8_t secret[PUB_KEY_SIZE];
             self_id.calcSharedSecret(secret, self_id);
             uint8_t data[MAX_PACKET_PAYLOAD];
-            int len = Utils::MACThenDecrypt(secret, data, macAndData, pkt->payload_len - i);
+            uint8_t ctx[3] = { pkt->getPayloadType(), dest_hash, src_hash };
+            bool was_v2;
+            int len = decryptPayload(secret, data, macAndData, pkt->payload_len - i, ctx, sizeof(ctx), was_v2);
             if (len > 0) {
               onSelfDataRecv(pkt, pkt->getPayloadType(), data, len);   // keeps flooding, for the other copies
               found = true;
