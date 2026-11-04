@@ -342,6 +342,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - `find beep <name>`: make it beep for 2 minutes
 - `find stop <name>`: stop it beeping
 - `find range <name>`: measure the distance to it (LR2021 radios only)
+- `get find.extended`, `set find.extended on|off`: use extended ranging for `find range` (off by default). The distance stays right while moving, and it adds a rough relative speed
 - `get find`: the answer to your last request
 
 **Parameters:**

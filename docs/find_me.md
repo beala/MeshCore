@@ -14,6 +14,8 @@ Only radios you've allowed can do this, and they can't do anything else. The req
 
 **Measure how far away it is.** If both radios have an LR2021 chip (for example the SenseCAP MeshTracker X1), run `find range <name>`. The radios measure the time a signal takes to get there and back, and `get find` shows the distance, for example `42 m (+/- 4 m, 30/32 answers, -97 dBm)`. Walk around and run it again: if the number goes down, you're getting closer.
 
+**Extended ranging (opt-in).** `set find.extended on` makes `find range` use the LR2021's extended mode. Each measurement takes two exchanges instead of one. That keeps the distance right when the radios are moving relative to each other, which can otherwise throw it off by tens of metres. It also reports the relative speed, but only roughly: in steps of about 20 m/s (70 km/h), so it can tell a car driving away from a parked one, not walking pace. Both radios need firmware with this feature.
+
 Limits:
 - **Experimental.** It hasn't been tested on real radios yet.
 - The radios must hear each other directly, not through a repeater.
@@ -24,7 +26,7 @@ Limits:
 
 ### Messages
 
-The finder sends a CLI command message (`TXT_TYPE_CLI_COMMAND`) to the target: `find me`, `find me stop`, or `find range`. It's encrypted with the pair's shared secret, like any direct message.
+The finder sends a CLI command message (`TXT_TYPE_CLI_COMMAND`) to the target: `find me`, `find me stop`, `find range`, or `find range ext`. It's encrypted with the pair's shared secret, like any direct message.
 
 The target handles it only if the finder is on its allow list (`set find.allow`, up to 8 entries, saved in the `find` section of `/prefs.json`; older builds used `/find_allow`, which is moved over on first boot) or has remote CLI access. It replies with a CLI data message starting `find: `, which the finder saves for `get find` and also passes to the app.
 
@@ -59,6 +61,21 @@ Because the ranging address is random and only travels inside the encrypted repl
 
 A determined attacker could still fake the distance: listen for the requests on the air, then answer faster or slower than the target would. Preventing that needs a distance-bounding protocol, which the LR2021's RTToF mode doesn't support. Treat the distance as a guide for finding your own radio, not as proof of where it is.
 
+### Extended mode
+
+With `set find.extended on`, the finder sends `find range ext` and both radios set the extended bit in SetRangingParams for that session. The target needs no setting of its own.
+
+Each extended exchange is two round trips, both started by the finder, about 100 ms in all (normal: about 50 ms), so about 26 exchanges fit in the 2.5 s instead of 32. GetRangingResult type 1 returns two results, Rng1 and Rng2.
+
+Why it helps: a frequency offset makes a LoRa receiver misjudge when a chirp arrives. A fixed offset between the two radios' crystals cancels over a round trip, because each radio sees it with the opposite sign. Doppler doesn't cancel, because both radios see the same shift. The chip corrects the arrival time from its frequency estimate, but only in steps of 1/8 of a LoRa bin (122 Hz at SF9 / 500 kHz), so the error comes in jumps of 512 raw units (37 m) per step. Extended mode's second exchange has the opposite error, so:
+
+- distance = (Rng1 + Rng2 − 1120) / 2
+- Rng1 − Rng2 + 1120 grows by about 16.5 raw units per Hz of Doppler on each leg. Positive means moving apart. Speed = Doppler × wavelength (0.33 m at 910 MHz).
+
+The 1120 is a fixed offset of extended mode: Rng2 − Rng1 at rest. It was 1110 to 1135 in both directions between two boards on the bench, and didn't change when TxRxDelay changed. Semtech's own driver never uses extended mode, so there's no reference value.
+
+Bench test (RAK3401 + NiceRF and a XIAO, both LR2021, on dummy loads). Doppler was emulated by moving the finder's receive frequency by δ during its receive windows (at TX_DONE), and back at RX_DONE. That's the same as δ/2 of Doppler on each leg, and a δ of 125 Hz is one step. Normal mode read 11 m, 48 m and 85 m for δ = 0, 60 and 175 Hz. Extended mode read 8 to 9 m for δ = 0, 80 and 200 Hz, with "moving apart at ~21 m/s" and "~41 m/s", and "closing" for negative δ. At rest it reads "not moving fast". Any speed under 10 m/s is reported that way, because the steps are 20 m/s.
+
 ### Accuracy
 
 On the bench, with the antenna ports on dummy loads, a single exchange at SF9 was good to about 4 m (σ), and the median of 200 was within a couple of metres. The fixed offset hasn't been calibrated for any board, and in the bench tests it moved with SF from −4 to +7 m. Multipath indoors adds more.
@@ -67,4 +84,5 @@ On the bench, with the antenna ports on dummy loads, a single exchange at SF9 wa
 
 - Hardware testing between two MeshTracker X1s, including whether the X1's RF switch follows the chip when the subordinate answers by itself (it did on the NiceRF bench board).
 - Calibrating TxRxDelay per board.
-- Extended mode (two exchanges that cancel Doppler), and the narrower bandwidths other regions would need.
+- The narrower bandwidths other regions would need. A higher SF or narrower bandwidth would also give extended mode finer speed steps (they scale with the LoRa bin width, BW / 2^SF).
+- Checking the extended-mode offset (1120) on other boards, and with real motion rather than an emulated Doppler shift.

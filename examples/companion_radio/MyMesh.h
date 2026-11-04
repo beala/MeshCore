@@ -305,8 +305,9 @@ private:
   unsigned long _range_armed_at = 0;  // target: answer ranging once our reply has gone out (0 = no)
   uint32_t _range_sent_mark = 0;
   unsigned long _range_last = 0;      // target: last ranging session, for rate limiting
+  bool _range_ext = false;            // this session uses extended ranging
   uint32_t _range_addr = 0;           // ranging address for this session, random, sent inside the encrypted reply
-  char _find_status[100];
+  char _find_status[140];
   unsigned long _find_status_at = 0;
 
   ContactInfo* findContactByName(const char* name);

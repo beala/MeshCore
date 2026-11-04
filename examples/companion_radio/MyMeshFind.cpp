@@ -1,6 +1,6 @@
 // 'find': make another companion beep, and measure the distance to it (docs/find_me.md)
 //
-// The finder sends a CLI command message ("find me", "find me stop", "find range") to the target,
+// The finder sends a CLI command message ("find me", "find me stop", "find range [ext]") to the target,
 // which handles it only if the finder is on its allow list (set find.allow), or has remote CLI
 // access. Messages are encrypted and authenticated with the pair's shared secret, and the target
 // remembers the newest request timestamp from each finder so an old request can't be replayed.
@@ -26,6 +26,7 @@
 #define RANGE_MANAGER_MILLIS  2500    // finder: stop sending requests after this long
 #define RANGE_EXCHANGES       32
 #define RANGE_EXCHANGE_MILLIS 100     // finder: give up on one exchange after this long
+#define RANGE_EXT_EXCHANGE_MILLIS 150 // same in extended mode (two exchanges, ~100 ms)
 #define RANGE_ARM_MILLIS      8000    // target: give up if the reply hasn't gone out by then
 #define RANGE_MIN_GAP_MILLIS  5000    // target: at most one ranging session per 5 s
 
@@ -104,7 +105,8 @@ bool MyMesh::rangingAvailable(float freq) {
 }
 
 bool MyMesh::isFindRequest(const char* text) {
-  return strcmp(text, "find me") == 0 || strncmp(text, "find me ", 8) == 0 || strcmp(text, "find range") == 0;
+  return strcmp(text, "find me") == 0 || strncmp(text, "find me ", 8) == 0 || strcmp(text, "find range") == 0 ||
+         strcmp(text, "find range ext") == 0;
 }
 
 // target: a find request from another companion
@@ -123,7 +125,7 @@ void MyMesh::handleFindRequest(const ContactInfo& from, uint32_t sender_timestam
     saveFindAllow();
   }
 
-  if (strcmp(text, "find range") == 0) {
+  if (strcmp(text, "find range") == 0 || strcmp(text, "find range ext") == 0) {
 #ifdef HAS_RANGING
     if (!rangingAvailable(_prefs.freq)) {
       strcpy(reply, "find: error: ranging needs 902-928 MHz");
@@ -132,6 +134,7 @@ void MyMesh::handleFindRequest(const ContactInfo& from, uint32_t sender_timestam
     } else {
       _range_armed_at = millis() | 1;
       _range_sent_mark = radio_driver.getPacketsSent();
+      _range_ext = text[10] != 0;   // the finder chose the mode
       // A fresh random ranging address each session, sent only inside the encrypted reply, so other
       // radios don't know which address to answer (to fake the distance) or to ask (to range us).
       do { getRNG()->random((uint8_t*)&_range_addr, sizeof(_range_addr)); } while (_range_addr == 0);
@@ -188,6 +191,20 @@ bool MyMesh::handleFindCommand(const char* command, char* reply) {
     return true;
   }
 
+  if (strcmp(command, "get find.extended") == 0) {
+    strcpy(reply, _prefs.find.ext ? "> on" : "> off");
+    return true;
+  }
+  if (memcmp(command, "set find.extended ", 18) == 0) {
+    const char* v = &command[18];
+    if (strcmp(v, "on") != 0 && strcmp(v, "off") != 0) {
+      strcpy(reply, "Error: use on or off");
+      return true;
+    }
+    _prefs.find.ext = v[1] == 'n';
+    strcpy(reply, saveFindAllow() ? "OK" : "Error: couldn't save");
+    return true;
+  }
   if (strcmp(command, "get find.allow") == 0) {
     if (_num_find_allow == 0) {
       strcpy(reply, "> nobody. Allow a contact with: set find.allow <name>");
@@ -254,7 +271,7 @@ bool MyMesh::handleFindCommand(const char* command, char* reply) {
   } else if (memcmp(command, "find stop ", 10) == 0) {
     msg = "find me stop"; name = &command[10];
   } else if (memcmp(command, "find range ", 11) == 0) {
-    msg = "find range"; name = &command[11];
+    msg = _prefs.find.ext ? "find range ext" : "find range"; name = &command[11];
     if (!rangingAvailable(_prefs.freq)) {
 #ifdef HAS_RANGING
       strcpy(reply, "Error: ranging needs 902-928 MHz");
@@ -282,6 +299,7 @@ bool MyMesh::handleFindCommand(const char* command, char* reply) {
   memcpy(_find_peer, c->id.pub_key, PUB_KEY_SIZE);
   _find_asked_at = millis() | 1;
   _find_asked_range = msg[5] == 'r';
+  if (_find_asked_range) _range_ext = _prefs.find.ext;
   setFindStatus("%s: asked, no answer yet", c->name);
   sprintf(reply, "OK, asked %s. See the answer with: get find", c->name);
   return true;
@@ -323,20 +341,26 @@ void MyMesh::findLoop() {
 void MyMesh::runRanging(bool manager, uint32_t addr) {
 #ifdef HAS_RANGING
   LR2021Ranging rng(radio_driver);
-  int16_t st = rng.begin(manager, addr);
+  int16_t st = rng.begin(manager, addr, _range_ext);
   if (st != RADIOLIB_ERR_NONE) {
     if (manager) setFindStatus("ranging failed to start (%d)", st);
   } else if (manager) {
-    int32_t raws[RANGE_EXCHANGES];
+    int32_t raws[RANGE_EXCHANGES], dops[RANGE_EXCHANGES];
     int rssis[RANGE_EXCHANGES];
     int n = 0, tries = 0;
     unsigned long start = millis();
     while (n < RANGE_EXCHANGES && millis() - start < RANGE_MANAGER_MILLIS) {
-      int32_t raw;
+      int32_t raw, raw2 = 0;
       int rssi;
       tries++;
-      if (rng.exchange(raw, rssi, RANGE_EXCHANGE_MILLIS)) {
-        raws[n] = raw;
+      if (rng.exchange(raw, rssi, _range_ext ? RANGE_EXT_EXCHANGE_MILLIS : RANGE_EXCHANGE_MILLIS, _range_ext ? &raw2 : NULL)) {
+        if (_range_ext) {
+          // average without the mode's fixed offset: a distance without the Doppler error
+          raws[n] = (raw + raw2 - LR2021Ranging::EXT_OFFSET) / 2;
+          dops[n] = raw - raw2 + LR2021Ranging::EXT_OFFSET;   // grows as the radios move apart
+        } else {
+          raws[n] = raw;
+        }
         rssis[n] = rssi;
         n++;
       }
@@ -350,10 +374,27 @@ void MyMesh::runRanging(bool manager, uint32_t addr) {
       for (int i = 1; i < n; i++) {
         for (int j = i; j > 0 && raws[j] < raws[j - 1]; j--) { int32_t t = raws[j]; raws[j] = raws[j - 1]; raws[j - 1] = t; }
         for (int j = i; j > 0 && rssis[j] < rssis[j - 1]; j--) { int t = rssis[j]; rssis[j] = rssis[j - 1]; rssis[j - 1] = t; }
+        if (_range_ext) {
+          for (int j = i; j > 0 && dops[j] < dops[j - 1]; j--) { int32_t t = dops[j]; dops[j] = dops[j - 1]; dops[j - 1] = t; }
+        }
       }
       float med = LR2021Ranging::rawToMeters(raws[n / 2]);
       float spread = LR2021Ranging::rawToMeters(raws[(3 * n) / 4] - raws[n / 4]) / 2;
-      setFindStatus("%s: %.0f m (+/- %.0f m, %d/%d answers, %d dBm)", name, med, spread, n, tries, rssis[n / 2]);
+      if (!_range_ext) {
+        setFindStatus("%s: %.0f m (+/- %.0f m, %d/%d answers, %d dBm)", name, med, spread, n, tries, rssis[n / 2]);
+      } else {
+        // relative speed from the Doppler shift. The chip resolves it in steps of ~20 m/s at
+        // SF9 / 500 kHz, so only report clear motion.
+        float speed = dops[n / 2] / LR2021Ranging::EXT_RAW_PER_HZ * (299.792458f / _prefs.freq);
+        char motion[40];
+        if (speed > -10 && speed < 10) {
+          strcpy(motion, "not moving fast");
+        } else {
+          sprintf(motion, "%s at ~%.0f m/s", speed > 0 ? "moving apart" : "closing", speed > 0 ? speed : -speed);
+        }
+        setFindStatus("%s: %.0f m (+/- %.0f m, %d/%d answers, %d dBm, extended: %s)", name, med, spread, n, tries,
+                      rssis[n / 2], motion);
+      }
     }
   } else {
     int done = rng.respond(RANGE_WINDOW_MILLIS);

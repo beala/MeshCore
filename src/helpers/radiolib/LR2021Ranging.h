@@ -17,6 +17,16 @@ public:
   static const uint32_t TX_RX_DELAY = 20305;      // Semtech's value for BW 500 kHz, SF9 (uncalibrated here)
   static const uint8_t RESPONSE_SYMBOLS = 15;
 
+  // Extended mode (SetRangingParams bit 7) runs two exchanges per request and returns two results.
+  // Doppler (relative speed) shifts them in opposite directions, so their average is a distance
+  // without the Doppler error, and their difference measures the speed. On the bench, at rest,
+  // Rng2 - Rng1 = 1110..1135 raw units in both directions between two boards, and didn't change with
+  // TxRxDelay, so it's a fixed offset of this mode and is removed here.
+  static const int32_t EXT_OFFSET = 1120;
+  // Rng1 - Rng2 changes by ~1030 raw units per 62.5 Hz of Doppler on each leg (bench, emulated by
+  // offsetting the manager's receive frequency); theory for SF9 / 500 kHz gives 16.8 per Hz.
+  static constexpr float EXT_RAW_PER_HZ = 16.5f;
+
   // a 500 kHz channel centred on freq must fit in 902-928 MHz
   static bool bandAllowed(float mhz) { return mhz >= 902.25f && mhz <= 927.75f; }
 
@@ -26,7 +36,8 @@ public:
   explicit LR2021Ranging(CustomLR2021Wrapper& w) : _w(&w), _r((CustomLR2021 *)w._radio) { }
 
   // Switch to RTToF. addr: the subordinate answers only requests for this address (all 4 bytes checked).
-  int16_t begin(bool manager, uint32_t addr) {
+  // extended: both radios must use the same mode.
+  int16_t begin(bool manager, uint32_t addr, bool extended = false) {
     int16_t st;
     uint8_t b[5];
     if ((st = standbyRC()) != RADIOLIB_ERR_NONE) return st;
@@ -41,8 +52,8 @@ public:
     if ((st = cmd(0x0115, b, 5)) != RADIOLIB_ERR_NONE) return st;   // SetDioIrqConfig
     be32(b, TX_RX_DELAY);
     if ((st = cmd(0x027B, b, 4)) != RADIOLIB_ERR_NONE) return st;   // SetRangingTxRxDelay
-    b[0] = RESPONSE_SYMBOLS;
-    if ((st = cmd(0x027C, b, 1)) != RADIOLIB_ERR_NONE) return st;   // SetRangingParams, normal mode
+    b[0] = (extended ? 0x80 : 0) | RESPONSE_SYMBOLS;
+    if ((st = cmd(0x027C, b, 1)) != RADIOLIB_ERR_NONE) return st;   // SetRangingParams
     be32(b, addr);
     if (manager) {
       st = cmd(0x0279, b, 4);                                        // SetRangingReqAddr
@@ -57,7 +68,8 @@ public:
   }
 
   // Manager: one exchange. Returns true with the raw result and RSSI if the subordinate answered.
-  bool exchange(int32_t& raw, int& rssi_dbm, uint32_t timeout_ms) {
+  // In extended mode pass raw2 to get the second result too (an extended exchange takes ~100 ms).
+  bool exchange(int32_t& raw, int& rssi_dbm, uint32_t timeout_ms, int32_t* raw2 = NULL) {
     uint8_t t[3] = { 0, 0, 0 };
     if (cmd(0x020D, t, 3) != RADIOLIB_ERR_NONE) return false;      // SetTx
     uint32_t start = millis(), f = 0;
@@ -69,11 +81,11 @@ public:
       standbyRC();
       return false;
     }
-    uint8_t type = 0, d[4] = { 0 };
-    if (read(0x027A, &type, 1, d, 4) != RADIOLIB_ERR_NONE) return false;   // GetRangingResult, raw
-    raw = (int32_t)((uint32_t)d[0] << 16 | (uint32_t)d[1] << 8 | d[2]);
-    if (raw & 0x800000) raw -= 0x1000000;
+    uint8_t type = raw2 ? 1 : 0, d[8] = { 0 };
+    if (read(0x027A, &type, 1, d, raw2 ? 8 : 4) != RADIOLIB_ERR_NONE) return false;   // GetRangingResult
+    raw = s24(d);
     rssi_dbm = -(d[3] >> 1);
+    if (raw2) *raw2 = s24(&d[4]);
     return true;
   }
 
@@ -113,6 +125,10 @@ private:
   CustomLR2021Wrapper* _w;
   CustomLR2021* _r;
 
+  static int32_t s24(const uint8_t* d) {
+    int32_t v = (int32_t)((uint32_t)d[0] << 16 | (uint32_t)d[1] << 8 | d[2]);
+    return (v & 0x800000) ? v - 0x1000000 : v;
+  }
   static void be32(uint8_t* b, uint32_t v) {
     b[0] = v >> 24; b[1] = v >> 16; b[2] = v >> 8; b[3] = v;
   }

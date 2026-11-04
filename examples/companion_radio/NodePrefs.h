@@ -218,11 +218,15 @@ private:
         char key[4] = { 'a', (char)('0' + i), 0 };
         def(key, (void *) rec, FIND_ALLOW_REC);
       }
+      def("ext", ext);
     }
   public:
+    uint8_t ext = 0;   // 'find range' uses the LR2021's extended ranging mode
     FindPrefs(NodePrefs* parent) : _parent(parent) { }
   };
-  FindPrefs find;
+public:
+  FindPrefs find;   // public so the find code can read and set find.ext
+private:
 
   DynamicConfigSerializer custom;
 
