@@ -249,8 +249,9 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
       int text_len = strlen((char *)&data[5]);
       uint8_t ack_hash[6];    // calc truncated hash of the message timestamp + text + sender pub_key, to prove to sender that we got it
       mesh::Utils::sha256(ack_hash, 4, data, 5 + text_len, from.id.pub_key, PUB_KEY_SIZE);
-      // NEW: append (potential) extended attempt byte (to make packethash unique)
-      ack_hash[4] = data[5 + text_len + 1];
+      // NEW: append (potential) extended attempt byte (to make packethash unique).
+      // It's only present on retries (text, NUL, attempt); otherwise use 0.
+      ack_hash[4] = (5 + text_len + 1 < (int)len) ? data[5 + text_len + 1] : 0;
       getRNG()->random(&ack_hash[5], 1);  // make 6th byte random
 
       if (packet->isRouteFlood()) {
@@ -294,6 +295,10 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
         }
       }
     } else if (flags == TXT_TYPE_SIGNED_PLAIN) {
+      if (len < 9) {   // timestamp, flags, 4-byte sender pub_key prefix
+        MESH_DEBUG_PRINTLN("onPeerDataRecv: dropping short signed message len=%d", (uint32_t)len);
+        return;
+      }
       if (sender_timestamp > from.sync_since) {  // make sure 'sync_since' is up-to-date
         from.sync_since = sender_timestamp;
       }

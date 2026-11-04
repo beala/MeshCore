@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "DataStore.h"
+#include <SHA256.h>
 
 #if defined(EXTRAFS) || defined(QSPIFLASH)
   #define MAX_BLOBRECS 100
@@ -363,6 +364,116 @@ void DataStore::saveChannels(DataStoreHost* host) {
     }
     file.close();
   }
+}
+
+// Encryption policies are written alternately to two files, so a failed or interrupted write
+// always leaves the previous version intact. Each file:
+//   "MCPT" | version(1) | seq(4, LE) | count(2, LE) | count * (id(8) | policy(1)) | SHA256(all before)[0..7]
+// The newest valid file (highest seq) wins. The caller compares seq with the one it last saved,
+// so a lost or rolled-back file can be detected instead of silently relaxing policies.
+static const char* CRYPTO_POL_FILES[2] = { "/crypto_pa", "/crypto_pb" };
+static const uint8_t CRYPTO_POL_MAGIC[4] = { 'M', 'C', 'P', 'T' };
+#define CRYPTO_POL_VERSION  1
+
+bool DataStore::readCryptoPolicyFile(const char* filename, CryptoPolicyTable* table, uint32_t& seq) {
+  File file = openRead(_getContactsChannelsFS(), filename);
+  if (!file) return false;
+
+  SHA256 sha;
+  uint8_t hdr[11];
+  bool ok = file.read(hdr, sizeof(hdr)) == sizeof(hdr)
+         && memcmp(hdr, CRYPTO_POL_MAGIC, 4) == 0 && hdr[4] == CRYPTO_POL_VERSION;
+  uint16_t count = 0;
+  if (ok) {
+    sha.update(hdr, sizeof(hdr));
+    memcpy(&seq, &hdr[5], 4);
+    count = hdr[9] | (hdr[10] << 8);
+    ok = count <= MAX_CRYPTO_POLICIES;
+  }
+  if (ok && table) table->clear();
+  for (int i = 0; ok && i < count; i++) {
+    uint8_t rec[9];
+    ok = file.read(rec, sizeof(rec)) == sizeof(rec);
+    if (ok) {
+      sha.update(rec, sizeof(rec));
+      if (table) ok = table->setById(rec, rec[8]);
+    }
+  }
+  if (ok) {
+    uint8_t expect[8], got[8];
+    sha.finalize(expect, sizeof(expect));
+    ok = file.read(got, sizeof(got)) == sizeof(got) && memcmp(expect, got, sizeof(got)) == 0;
+  }
+  file.close();
+  if (!ok && table) table->clear();
+  return ok;
+}
+
+bool DataStore::checkCryptoPolicyFile(const char* filename, uint32_t& seq) {
+  return readCryptoPolicyFile(filename, NULL, seq);
+}
+
+// returns false (and an empty table, seq 0) if no valid policy file exists
+bool DataStore::loadCryptoPolicies(CryptoPolicyTable& table, uint32_t& seq) {
+  table.clear();
+  seq = 0;
+  int best = -1;
+  uint32_t best_seq = 0;
+  for (int i = 0; i < 2; i++) {
+    uint32_t s;
+    if (checkCryptoPolicyFile(CRYPTO_POL_FILES[i], s) && (best < 0 || s > best_seq)) {
+      best = i;
+      best_seq = s;
+    }
+  }
+  if (best >= 0 && readCryptoPolicyFile(CRYPTO_POL_FILES[best], &table, seq)) return true;
+
+  // early experimental builds wrote a bare list of records to /crypto_pol
+  File file = openRead(_getContactsChannelsFS(), "/crypto_pol");
+  if (file) {
+    uint8_t rec[9];
+    while (file.read(rec, sizeof(rec)) == sizeof(rec)) {
+      if (!table.setById(rec, rec[8])) break;
+    }
+    file.close();
+    return table.count() > 0;
+  }
+  return false;
+}
+
+bool DataStore::saveCryptoPolicies(const CryptoPolicyTable& table, uint32_t seq) {
+  const char* filename = CRYPTO_POL_FILES[seq & 1];   // alternate, never overwriting the newest good copy
+  File file = openWrite(_getContactsChannelsFS(), filename);
+  if (!file) return false;
+
+  SHA256 sha;
+  uint8_t hdr[11];
+  memcpy(hdr, CRYPTO_POL_MAGIC, 4);
+  hdr[4] = CRYPTO_POL_VERSION;
+  memcpy(&hdr[5], &seq, 4);
+  uint16_t count = table.count();
+  hdr[9] = count & 0xFF;
+  hdr[10] = count >> 8;
+  bool ok = file.write(hdr, sizeof(hdr)) == sizeof(hdr);
+  sha.update(hdr, sizeof(hdr));
+  for (int i = 0; ok && i < count; i++) {
+    const CryptoPolicyTable::Entry& e = table.entry(i);
+    uint8_t rec[9];
+    memcpy(rec, e.id, 8);
+    rec[8] = e.policy;
+    ok = file.write(rec, sizeof(rec)) == sizeof(rec);
+    sha.update(rec, sizeof(rec));
+  }
+  uint8_t check[8];
+  sha.finalize(check, sizeof(check));
+  ok = ok && file.write(check, sizeof(check)) == sizeof(check);
+  file.close();
+
+  // read it back: only report success if the file on flash is valid and current
+  uint32_t got_seq;
+  ok = ok && checkCryptoPolicyFile(filename, got_seq) && got_seq == seq;
+  if (ok) removeFile(_getContactsChannelsFS(), "/crypto_pol");   // drop the old format
+  return ok;
 }
 
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
