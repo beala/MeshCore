@@ -21,7 +21,8 @@
 #define FIND_ALLOW_VERSION    1
 #define FIND_BEEP_SECS        120
 #define FIND_ANSWER_MILLIS    15000   // finder: how long to wait for an answer
-#define RANGE_WINDOW_MILLIS   3000    // target: answer ranging requests for this long
+#define RANGE_WINDOW_MILLIS   5000    // target: answer ranging requests for this long
+#define RANGE_START_MILLIS    3000    // finder: give up if still transmitting after this long
 #define RANGE_MANAGER_MILLIS  2500    // finder: stop sending requests after this long
 #define RANGE_EXCHANGES       32
 #define RANGE_EXCHANGE_MILLIS 100     // finder: give up on one exchange after this long
@@ -285,19 +286,21 @@ void MyMesh::findLoop() {
   }
 
 #ifdef HAS_RANGING
-  if (_range_go_at) {   // finder: start as soon as the radio is free
-    if (millis() - _range_go_at > 1000) {
-      _range_go_at = 0;
-      setFindStatus("ranging didn't start: radio busy");
-    } else if (radio_driver.isInRecvMode()) {
+  // Wait only for a transmit to finish. Any other radio state is fine: ranging puts the radio in
+  // standby first, and setParams() afterwards gets normal receive going again.
+  if (_range_go_at) {   // finder: start as soon as we're not transmitting
+    if (!isTransmitting()) {
       _range_go_at = 0;
       runRanging(true, _find_peer);
+    } else if (millis() - _range_go_at > RANGE_START_MILLIS) {
+      _range_go_at = 0;
+      setFindStatus("ranging didn't start: this radio was busy transmitting. Try again");
     }
   }
   if (_range_armed_at) {   // target: start once the "find: ranging" reply has been sent
     if (millis() - _range_armed_at > RANGE_ARM_MILLIS) {
       _range_armed_at = 0;
-    } else if (radio_driver.getPacketsSent() != _range_sent_mark && radio_driver.isInRecvMode()) {
+    } else if (radio_driver.getPacketsSent() != _range_sent_mark && !isTransmitting()) {
       _range_armed_at = 0;
       runRanging(false, self_id.pub_key);
       _range_last = millis();

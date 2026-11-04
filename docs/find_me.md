@@ -35,7 +35,7 @@ For each allowed finder, the target stores the newest request timestamp it has a
 This uses the LR2021's round-trip time-of-flight mode (RTToF). The command sequence follows Semtech's usp v1.2.1 radio layer and the bench tests in [beala/lr2021-re](https://github.com/beala/lr2021-re/blob/main/docs/ranging.md).
 
 1. The finder sends `find range`. The target replies `find: ranging` and waits until that reply has been transmitted.
-2. The target switches to RTToF subordinate and answers ranging requests for 3 seconds.
+2. The target switches to RTToF subordinate and answers ranging requests for 5 seconds.
 3. The finder hears the reply, switches to RTToF manager, and runs up to 32 exchanges in 2.5 seconds. Each exchange is given up after 100 ms.
 4. Both radios return to normal LoRa: standby, packet type LoRa, sync word, then the usual frequency, bandwidth, SF, CR, preamble and side-detector settings.
 
@@ -49,7 +49,7 @@ The reported distance is the median of the valid exchanges, at 150 / (4096 × 0.
 
 After every packet type change, the code applies the same DC-DC workaround as RadioLib's own `setPacketType()`: the DCDC_SWITCHER bits, DCDC_FREQ_LF, and setting the frequency again.
 
-Each radio is blocked for up to 3 seconds while ranging, and can't receive mesh traffic during that time. A target accepts at most one ranging session every 5 seconds.
+The target is blocked for 5 seconds and the finder for up to 2.5 seconds while ranging, and can't receive mesh traffic during that time. A target accepts at most one ranging session every 5 seconds.
 
 ### Accuracy
 
