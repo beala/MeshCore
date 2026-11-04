@@ -7,7 +7,9 @@
 #define USER_BTN_PRESSED LOW
 #endif
 
-#define AUTO_OFF_MILLIS      20000  // 20 seconds
+#ifndef AUTO_OFF_MILLIS
+  #define AUTO_OFF_MILLIS      20000  // 20 seconds
+#endif
 #define BOOT_SCREEN_MILLIS   4000   // 4 seconds
 
 #define POWEROFF_DELAY 3000
@@ -134,9 +136,11 @@ void UITask::loop() {
 
       _next_refresh = millis() + 1000;   // refresh every second
     }
+#if AUTO_OFF_MILLIS > 0
     if (millis() > _auto_off) {
       _display->turnOff();
     }
+#endif
   }
 
   if (_powering_off_at > 0) { // power off timer armed
