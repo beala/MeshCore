@@ -150,12 +150,13 @@ bool MyMesh::handleMeshtasticCommand(const char* command, char* reply) {
   }
   if (arg) {
     _prefs.mt.en = on ? 1 : 0;
-    savePrefs();
     applyMeshtastic();
     applyRadioPrefs();
     if (on && !_mt_active) {
+      _prefs.mt.en = 0;   // not saved as on: there's nothing to turn on
       strcpy(reply, "Error: this radio can't listen to Meshtastic (needs an LR2021)");
     } else {
+      savePrefs();
       strcpy(reply, on ? "OK - Meshtastic channel on. Reconnect the app to see it" : "OK - Meshtastic off");
     }
     return true;

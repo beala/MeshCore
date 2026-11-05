@@ -125,6 +125,10 @@ bool RadioLibWrapper::isIrqPending() const {
   return (state & STATE_INT_READY) != 0;
 }
 
+void RadioLibWrapper::markIrqPending() {
+  state |= STATE_INT_READY;
+}
+
 bool RadioLibWrapper::isInRecvMode() const {
   return (state & ~STATE_INT_READY) == STATE_RX;
 }

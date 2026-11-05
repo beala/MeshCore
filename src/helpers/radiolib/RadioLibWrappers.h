@@ -27,6 +27,7 @@ protected:
   void idle();
   void startRecv();
   bool isIrqPending() const;   // the radio raised its IRQ pin and recvRaw() hasn't handled it yet
+  void markIrqPending();       // as if the IRQ pin had been raised: the next recvRaw() reads the radio
   float packetScoreInt(float snr, int sf, int packet_len);
   virtual bool isReceivingPacket() =0;
   virtual bool lastRxHadCRC() { return true; }

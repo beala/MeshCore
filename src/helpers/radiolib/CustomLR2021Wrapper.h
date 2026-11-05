@@ -350,9 +350,9 @@ public:
       return true;
     }
     if (strcmp(command, "get radio.scan.restarts") == 0) {
-      sprintf(reply, "> %lu restarts: %lu lost hook, %lu parked without IRQ, %lu stuck in RX, %lu resume failed",
-              (unsigned long)_scan_restarts, (unsigned long)_scan_unhooked, (unsigned long)_scan_unparked,
-              (unsigned long)_scan_stuck, (unsigned long)_scan_resume_fail);
+      sprintf(reply, "> %lu restarts: %lu lost hook, %lu stuck, %lu resume failed; %lu packets read without IRQ",
+              (unsigned long)_scan_restarts, (unsigned long)_scan_unhooked, (unsigned long)_scan_stuck,
+              (unsigned long)_scan_resume_fail, (unsigned long)_scan_missed_irq);
       return true;
     }
     if (strcmp(command, "get radio.scan") == 0) {
@@ -408,8 +408,10 @@ public:
     float _scan_rssi = 0, _scan_snr = 0;
     uint32_t _scan_check_at = 0;
     uint32_t _scan_restarts = 0;
-    uint32_t _scan_unhooked = 0, _scan_unparked = 0, _scan_stuck = 0, _scan_resume_fail = 0;   // why
-    uint8_t _scan_parked_checks = 0, _scan_busy_checks = 0;
+    uint32_t _scan_unhooked = 0, _scan_stuck = 0, _scan_resume_fail = 0;   // why
+    uint32_t _scan_missed_irq = 0;   // packets read without their IRQ edge
+    uint8_t _scan_still_checks = 0;
+    uint32_t _scan_last_progress = 0;
 
     void pushSide(const uint8_t* bytes, int len, float rssi, float snr) {
       _side_heard++;
@@ -441,7 +443,7 @@ public:
     void checkScan() {
       CustomLR2021* r = (CustomLR2021 *)_radio;
       if (!r->isScanning() || !isInRecvMode() || isIrqPending()) {
-        _scan_parked_checks = _scan_busy_checks = 0;
+        _scan_still_checks = 0;
         return;
       }
       CustomLR2021::ScanStatus st;
@@ -451,12 +453,20 @@ public:
         idle();
         return;
       }
-      _scan_parked_checks = st.state == CustomLR2021::SCAN_PARK ? _scan_parked_checks + 1 : 0;
-      _scan_busy_checks = (st.state == CustomLR2021::SCAN_WAIT || st.state == CustomLR2021::SCAN_RX) ? _scan_busy_checks + 1 : 0;
-      if (_scan_parked_checks >= 2 || _scan_busy_checks >= 8) {   // no IRQ for a parked packet, or stuck in RX
+      // The chip counts CADs and packets as it goes. If they stand still, it's stuck: parked on a
+      // packet whose IRQ edge never reached us (about 1 in 1000), or somewhere else.
+      uint32_t progress = st.cads + st.packets;
+      bool moved = progress != _scan_last_progress;
+      _scan_last_progress = progress;
+      _scan_still_checks = moved ? 0 : _scan_still_checks + 1;
+      if (st.state == CustomLR2021::SCAN_PARK && _scan_still_checks >= 1) {   // waiting > 1 s: read it
+        _scan_missed_irq++;
+        _scan_still_checks = 0;
+        markIrqPending();
+      } else if (_scan_still_checks >= 12) {   // longer than any packet takes on the air
         _scan_restarts++;
-        if (_scan_parked_checks >= 2) _scan_unparked++; else _scan_stuck++;
-        _scan_parked_checks = _scan_busy_checks = 0;
+        _scan_stuck++;
+        _scan_still_checks = 0;
         idle();
       }
     }
