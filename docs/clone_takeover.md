@@ -17,7 +17,12 @@ It isn't a real node: messages to it never go on air. The radio runs what you se
 and replies in the same chat. It also uses this chat to tell you things, like another radio with
 your key being heard.
 
-Send `help` to see the commands. Other radio commands work there too, such as `get flood.retry`.
+Send `help` to see the commands. Every command from the app's command line works there too, such
+as `get flood.retry` or `uptime`. A reply too long for one message comes as several.
+
+A contact on the mesh whose name reads as "Radio console" (any case or spacing, emoji or invisible
+characters added, 0/1 for o/i, or lookalike letters such as a Cyrillic "о") shows in the app as
+"(fake) Radio console", so it can't pass for this contact. The real one is recognised by its key.
 Commands aren't case sensitive, so a capital letter added by your phone is fine.
 
 In a DM or channel, messages starting with `/` run commands for that chat, such as `/range` or

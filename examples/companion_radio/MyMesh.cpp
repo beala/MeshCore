@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include <helpers/ConsoleName.h>
 #include <AesSiv.h>
 #include <helpers/EntropyPool.h>
 
@@ -181,7 +182,12 @@ void MyMesh::writeContactRespFrame(uint8_t code, const ContactInfo &contact) {
   out_frame[i++] = contact.out_path_len;
   memcpy(&out_frame[i], contact.out_path, MAX_PATH_SIZE);
   i += MAX_PATH_SIZE;
-  StrHelper::strzcpy((char *)&out_frame[i], contact.name, 32);
+  if (!isConsoleKey(contact.id.pub_key) && ConsoleName::looksLikeConsole(contact.name)) {
+    // a node posing as the Radio console contact: show it as fake, so it can't be mistaken for it
+    ConsoleName::markFake((char *)&out_frame[i], 32, contact.name);
+  } else {
+    StrHelper::strzcpy((char *)&out_frame[i], contact.name, 32);
+  }
   i += 32;
   memcpy(&out_frame[i], &contact.last_advert_timestamp, 4);
   i += 4;
@@ -462,7 +468,7 @@ void MyMesh::checkConsole() {
   // command, which has no names in it)
   for (char* c = cmd; *c && (!console || *c != ' '); c++) *c = tolower(*c);
 
-  char reply[166];
+  char reply[256];   // more than handleCommand() needs, so the console's own texts have room
   reply[0] = 0;
   _find_started = false;
   if (!console) {
@@ -475,7 +481,7 @@ void MyMesh::checkConsole() {
                     "clone: status\n"
                     "clone off: answer as normal\n"
                     "In a chat, send /help for its commands\n"
-                    "Other CLI commands work too");
+                    "Every CLI command works here too, e.g. uptime");
     } else if (strcmp(cmd, "yes") == 0) {
       if (offered) takeover(reply);
       else strcpy(reply, "Nothing to confirm. Send \"help\".");
@@ -538,6 +544,31 @@ void MyMesh::queueChatCommand(const ChatRef& from, uint32_t ts, const char* text
 // Show a reply in a chat, as a message received there. In a DM or channel it starts with a gear,
 // so it doesn't read as something the contact wrote. It stays on this radio and phone.
 void MyMesh::postToChat(const ChatRef& to, const char* text) {
+  // A message holds about 150 bytes of text: send a longer reply as several, split at a line
+  // break or space where there is one
+  const int max_part = 140;
+  char part[max_part + 1];
+  while ((int) strlen(text) > max_part) {
+    int cut = max_part;
+    for (int k = max_part; k > max_part / 2; k--) {   // a line break if there's one, else a space
+      if (text[k] == '\n') { cut = k; break; }
+    }
+    if (cut == max_part) {
+      for (int k = max_part; k > max_part / 2; k--) {
+        if (text[k] == ' ') { cut = k; break; }
+      }
+    }
+    while (cut > 0 && (((uint8_t) text[cut]) & 0xC0) == 0x80) cut--;   // don't split a character
+    memcpy(part, text, cut);
+    part[cut] = 0;
+    postPart(to, part);
+    text += cut;
+    if (*text == '\n' || *text == ' ') text++;
+  }
+  postPart(to, text);
+}
+
+void MyMesh::postPart(const ChatRef& to, const char* text) {
   if (to.kind == CHAT_CONSOLE) {
     consoleNote(text);
     return;

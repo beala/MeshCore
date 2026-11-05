@@ -275,6 +275,7 @@ private:
   static int takeSlashCommand(char* text, int len);
   void queueChatCommand(const ChatRef& from, uint32_t ts, const char* text, int len);
   void postToChat(const ChatRef& to, const char* text);
+  void postPart(const ChatRef& to, const char* text);
   void handleSlashCommand(const ChatRef& from, char* cmd, char* reply);
 
   CloneCoordinator _clone;
