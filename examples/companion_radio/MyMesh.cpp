@@ -445,34 +445,232 @@ void MyMesh::checkConsole() {
   if (!millisHasNowPassed(_console_due)) return;
   _console_pending = false;
 
-  out_frame[0] = PUSH_CODE_SEND_CONFIRMED;   // "delivered"
-  memcpy(&out_frame[1], &_console_ack, 4);
-  uint32_t trip_time = 0;
-  memcpy(&out_frame[5], &trip_time, 4);
-  _serial->writeFrame(out_frame, 9);
+  if (_console_from.kind != CHAT_CHANNEL) {   // channel messages have no "delivered"
+    out_frame[0] = PUSH_CODE_SEND_CONFIRMED;
+    memcpy(&out_frame[1], &_console_ack, 4);
+    uint32_t trip_time = 0;
+    memcpy(&out_frame[5], &trip_time, 4);
+    _serial->writeFrame(out_frame, 9);
+  }
   if (_console_cmd[0] == 0) return;   // the app sent the last command again: already run
 
-  // phones capitalise the first letter, so match the command word in lower case
   char* cmd = _console_cmd;
   while (*cmd == ' ') cmd++;
-  for (char* c = cmd; *c && *c != ' '; c++) *c = tolower(*c);
+  bool console = _console_from.kind == CHAT_CONSOLE;
+  if (console && *cmd == '/') cmd++;   // "/help" works in the console too
+  // phones capitalise the first letter: match the command word in lower case (all of a '/'
+  // command, which has no names in it)
+  for (char* c = cmd; *c && (!console || *c != ' '); c++) *c = tolower(*c);
 
   char reply[166];
   reply[0] = 0;
-  bool offered = _takeover_offered;
-  _takeover_offered = false;
-  if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
-    strcpy(reply, "takeover: make this the main radio\n"
-                  "clone: status\n"
-                  "clone off: answer as normal\n"
-                  "Other CLI commands work too");
-  } else if (strcmp(cmd, "yes") == 0) {
-    if (offered) takeover(reply);
-    else strcpy(reply, "Nothing to confirm. Send \"help\".");
-  } else if (!handleCommand(cmd, 0, reply)) {
-    strcpy(reply, "Unknown command. Send \"help\".");
+  _find_started = false;
+  if (!console) {
+    handleSlashCommand(_console_from, cmd, reply);
+  } else {
+    bool offered = _takeover_offered;
+    _takeover_offered = false;
+    if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
+      strcpy(reply, "takeover: make this the main radio\n"
+                    "clone: status\n"
+                    "clone off: answer as normal\n"
+                    "In a chat, send /help for its commands\n"
+                    "Other CLI commands work too");
+    } else if (strcmp(cmd, "yes") == 0) {
+      if (offered) takeover(reply);
+      else strcpy(reply, "Nothing to confirm. Send \"help\".");
+    } else if (!handleCommand(cmd, 0, reply)) {
+      strcpy(reply, "Unknown command. Send \"help\".");
+    }
   }
-  consoleNote(reply);
+  if (_find_started) {   // a find request went out: its answer shows in this chat
+    _find_chat = _console_from;
+    ContactInfo* c = lookupContactByPubKey(_find_peer, PUB_KEY_SIZE);
+    sprintf(reply, "Asked %s, the answer will show here.", c ? c->name : "them");
+  }
+  if (reply[0]) postToChat(_console_from, reply);
+}
+
+// A message the user typed: -1 if it's a '/' command (a '/' then a letter), else its length,
+// with "//" at the start turned into "/" so text starting with '/' can still be sent
+int MyMesh::takeSlashCommand(char* text, int len) {
+  if (len >= 2 && text[0] == '/' && isalpha((unsigned char) text[1])) return -1;
+  if (len >= 2 && text[0] == '/' && text[1] == '/') {
+    memmove(text, &text[1], len - 1);
+    return len - 1;
+  }
+  return len;
+}
+
+// Take a command typed in a chat (the console, a DM or a channel): tell the app it's sent, and
+// checkConsole() runs it shortly after, replying in the same chat
+void MyMesh::queueChatCommand(const ChatRef& from, uint32_t ts, const char* text, int len) {
+  if (_console_pending) {
+    writeErrFrame(ERR_CODE_TABLE_FULL);   // still running the last one
+    return;
+  }
+  if (ts != 0 && ts == _console_last_ts) {
+    _console_cmd[0] = 0;   // the app is resending a command it sent: confirm it, but don't run it again
+  } else {
+    if (len < 0) len = 0;
+    if (len > (int) sizeof(_console_cmd) - 1) len = sizeof(_console_cmd) - 1;
+    memcpy(_console_cmd, text, len);
+    _console_cmd[len] = 0;
+  }
+  _console_last_ts = ts;
+  _console_from = from;
+  _console_pending = true;
+  _console_due = futureMillis(CONSOLE_CONFIRM_DELAY);
+
+  if (from.kind == CHAT_CHANNEL) {
+    writeOKFrame();
+    return;
+  }
+  do { getRNG()->random((uint8_t *) &_console_ack, 4); } while (_console_ack == 0);
+  out_frame[0] = RESP_CODE_SENT;
+  out_frame[1] = 0;   // direct
+  memcpy(&out_frame[2], &_console_ack, 4);
+  uint32_t est_timeout = 3000;
+  memcpy(&out_frame[6], &est_timeout, 4);
+  _serial->writeFrame(out_frame, 10);
+}
+
+// Show a reply in a chat, as a message received there. In a DM or channel it starts with a gear,
+// so it doesn't read as something the contact wrote. It stays on this radio and phone.
+void MyMesh::postToChat(const ChatRef& to, const char* text) {
+  if (to.kind == CHAT_CONSOLE) {
+    consoleNote(text);
+    return;
+  }
+  mesh::Packet pkt;   // stands in for a received packet: direct, no path
+  pkt.header = ROUTE_TYPE_DIRECT;
+  pkt.path_len = 0;
+  pkt._snr = 0;
+  uint32_t ts = getRTCClock()->getCurrentTimeUnique();
+  char msg[MAX_FRAME_SIZE + 1];
+  if (to.kind == CHAT_CONTACT) {
+    ContactInfo* c = lookupContactByPubKey(to.pub_key, PUB_KEY_SIZE);
+    if (c == NULL) return;
+    snprintf(msg, sizeof(msg), "\xE2\x9A\x99 %s", text);
+    queueMessage(*c, TXT_TYPE_PLAIN, &pkt, ts, NULL, 0, msg);
+  } else if (to.kind == CHAT_CHANNEL) {
+    snprintf(msg, sizeof(msg), "\xE2\x9A\x99 Radio: %s", text);   // channel texts are "sender: text"
+    int i = 0;
+    if (app_target_ver >= 3) {
+      out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV_V3;
+      out_frame[i++] = 0;   // SNR
+      out_frame[i++] = 0;
+      out_frame[i++] = 0;
+    } else {
+      out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+    }
+    out_frame[i++] = to.channel_idx;
+    out_frame[i++] = 0xFF;   // direct
+    out_frame[i++] = TXT_TYPE_PLAIN;
+    memcpy(&out_frame[i], &ts, 4);
+    i += 4;
+    int tlen = strlen(msg);
+    if (i + tlen > MAX_FRAME_SIZE) tlen = MAX_FRAME_SIZE - i;
+    memcpy(&out_frame[i], msg, tlen);
+    i += tlen;
+    addToOfflineQueue(out_frame, i);
+    if (_serial->isConnected()) {
+      uint8_t frame[1];
+      frame[0] = PUSH_CODE_MSG_WAITING;
+      _serial->writeFrame(frame, 1);
+    }
+  }
+}
+
+// A '/' command typed in a DM or channel, in lower case without the '/'. It applies to that chat.
+void MyMesh::handleSlashCommand(const ChatRef& from, char* cmd, char* reply) {
+  char* arg = strchr(cmd, ' ');
+  if (arg) {
+    *arg++ = 0;
+    while (*arg == ' ') arg++;
+    for (char* e = arg + strlen(arg); e > arg && e[-1] == ' '; ) *--e = 0;
+  } else {
+    arg = cmd + strlen(cmd);
+  }
+  bool help = strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0;
+  const char* unknown = "Unknown command. Send /help. To send text starting with /, type //";
+
+  if (from.kind == CHAT_CHANNEL) {
+#ifdef MAX_GROUP_CHANNELS
+    ChannelDetails ch;
+    if (!getChannel(from.channel_idx, ch)) {
+      strcpy(reply, "Error: channel not found");
+    } else if (help) {
+      strcpy(reply, "Commands here run on your radio, nothing is sent:\n"
+                    "/crypto: this channel's encryption\n"
+                    "/crypto legacy|v2|v2only: change it\n"
+                    "//text: send text starting with /");
+    } else if (strcmp(cmd, "crypto") == 0 && *arg == 0) {
+      sprintf(reply, "> %s: %s", ch.name, CryptoPolicyTable::name(getCryptoPolicy(ch.channel.secret)));
+    } else if (strcmp(cmd, "crypto") == 0) {
+      int p = CryptoPolicyTable::parse(arg);
+      if (p < 0) {
+        strcpy(reply, "Error: use /crypto legacy, v2 or v2only");
+      } else if (setCryptoPolicy(ch.channel.secret, p, reply)) {
+        sprintf(reply, "OK - %s: %s", ch.name, CryptoPolicyTable::name(p));
+      }
+    } else {
+      strcpy(reply, unknown);
+    }
+#else
+    strcpy(reply, unknown);
+#endif
+    return;
+  }
+
+  ContactInfo* c = lookupContactByPubKey(from.pub_key, PUB_KEY_SIZE);
+  if (c == NULL) {
+    strcpy(reply, "Error: contact not found");
+  } else if (help) {   // too long for one message
+    postToChat(from, "Commands here run on your radio, nothing is sent:\n"
+                     "/range: distance to them\n"
+                     "/beep, /beep stop: make their radio beep");
+    strcpy(reply, "/crypto: encryption with them\n"
+                  "/crypto legacy|v2|v2only: change it\n"
+                  "/path, /path reset: route to them\n"
+                  "//text: send text starting with /");
+  } else if (strcmp(cmd, "range") == 0 && *arg == 0) {
+    startFind(c, _prefs.find.ext ? "find range ext" : "find range", reply);
+  } else if (strcmp(cmd, "beep") == 0 && (*arg == 0 || strcmp(arg, "stop") == 0)) {
+    startFind(c, *arg ? "find me stop" : "find me", reply);
+  } else if (strcmp(cmd, "crypto") == 0 && *arg == 0) {
+    sprintf(reply, "> %s: %s", c->name, CryptoPolicyTable::name(getCryptoPolicy(c->getSharedSecret(self_id))));
+  } else if (strcmp(cmd, "crypto") == 0) {
+    int p = CryptoPolicyTable::parse(arg);
+    if (p < 0) {
+      strcpy(reply, "Error: use /crypto legacy, v2 or v2only");
+    } else if (setCryptoPolicy(c->getSharedSecret(self_id), p, reply)) {
+      sprintf(reply, "OK - %s: %s", c->name, CryptoPolicyTable::name(p));
+    }
+  } else if (strcmp(cmd, "path") == 0 && *arg == 0) {
+    if (c->out_path_len == OUT_PATH_UNKNOWN) {
+      sprintf(reply, "> No route to %s yet: messages go by flood", c->name);
+    } else {
+      int sz = (c->out_path_len >> 6) + 1, n = c->out_path_len & 63;
+      if (n == 0) {
+        sprintf(reply, "> Direct to %s, no repeaters", c->name);
+      } else {
+        int k = sprintf(reply, "> %d hop%s:", n, n == 1 ? "" : "s");
+        for (int h = 0; h < n && k < 150; h++) {
+          reply[k++] = h == 0 ? ' ' : ',';
+          mesh::Utils::toHex(&reply[k], &c->out_path[h * sz], sz);
+          k += sz * 2;
+        }
+        reply[k] = 0;
+      }
+    }
+  } else if (strcmp(cmd, "path") == 0 && strcmp(arg, "reset") == 0) {
+    c->out_path_len = OUT_PATH_UNKNOWN;
+    onContactPathUpdated(*c);   // tells the app, and saves the contacts
+    sprintf(reply, "OK - the next message to %s goes by flood and finds a new route", c->name);
+  } else {
+    strcpy(reply, unknown);
+  }
 }
 
 uint8_t MyMesh::getExtraAckTransmitCount() const {
@@ -731,7 +929,8 @@ void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t 
 
 void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp, const char *text) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
-  onFindReply(from, text);    // an answer to 'find beep/stop/range'?
+  // an answer to 'find beep/stop/range'? Already shown in the chat the request was typed in, so not again
+  if (onFindReply(from, text)) return;
   queueMessage(from, TXT_TYPE_CLI_DATA, pkt, sender_timestamp, NULL, 0, text);
 }
 
@@ -1119,6 +1318,10 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   _console_offer_pending = false;
   _takeover_offered = false;
   _sibling_name[0] = 0;
+  memset(&_console_from, 0, sizeof(_console_from));
+  _console_from.kind = CHAT_CONSOLE;
+  memset(&_find_chat, 0, sizeof(_find_chat));
+  _find_started = false;
   _sibling_heard = 0;
   _cli_rescue = false;
   cli_command[0] = 0;
@@ -1396,31 +1599,12 @@ void MyMesh::handleCmdFrame(size_t len) {
     _serial->writeFrame(out_frame, 1 + rlen);
   } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14 && isConsoleKey(&cmd_frame[7])) {
     // a message to the console contact: run it here, never send it
-    if (_console_pending) {
-      writeErrFrame(ERR_CODE_TABLE_FULL);   // still running the last one
-    } else {
-      uint32_t ts;
-      memcpy(&ts, &cmd_frame[3], 4);
-      if (ts != 0 && ts == _console_last_ts) {
-        _console_cmd[0] = 0;   // the app is resending a command it sent: confirm it, but don't run it again
-      } else {
-        int tlen = len - 13;
-        if (tlen > (int) sizeof(_console_cmd) - 1) tlen = sizeof(_console_cmd) - 1;
-        memcpy(_console_cmd, &cmd_frame[13], tlen);
-        _console_cmd[tlen] = 0;
-      }
-      _console_last_ts = ts;
-      do { getRNG()->random((uint8_t *) &_console_ack, 4); } while (_console_ack == 0);
-      _console_pending = true;   // checkConsole() confirms it and replies
-      _console_due = futureMillis(CONSOLE_CONFIRM_DELAY);
-
-      out_frame[0] = RESP_CODE_SENT;
-      out_frame[1] = 0;   // direct
-      memcpy(&out_frame[2], &_console_ack, 4);
-      uint32_t est_timeout = 3000;
-      memcpy(&out_frame[6], &est_timeout, 4);
-      _serial->writeFrame(out_frame, 10);
-    }
+    uint32_t ts;
+    memcpy(&ts, &cmd_frame[3], 4);
+    ChatRef from;
+    memset(&from, 0, sizeof(from));
+    from.kind = CHAT_CONSOLE;
+    queueChatCommand(from, ts, (const char*) &cmd_frame[13], len - 13);
   } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14) {
     int i = 1;
     uint8_t txt_type = cmd_frame[i++];
@@ -1436,6 +1620,19 @@ void MyMesh::handleCmdFrame(size_t len) {
       int tlen = len - i;
       uint32_t est_timeout;
       text[tlen] = 0; // ensure null
+      if (txt_type == TXT_TYPE_PLAIN) {
+        int n = takeSlashCommand(text, tlen);
+        if (n < 0) {   // a '/' command for this chat: run it here, don't send it
+          ChatRef from;
+          memset(&from, 0, sizeof(from));
+          from.kind = CHAT_CONTACT;
+          memcpy(from.pub_key, recipient->id.pub_key, PUB_KEY_SIZE);
+          queueChatCommand(from, msg_timestamp, &text[1], tlen - 1);
+          return;
+        }
+        tlen = n;
+        text[tlen] = 0;
+      }
       int result;
       uint32_t expected_ack;
       if (txt_type == TXT_TYPE_CLI_DATA || txt_type == TXT_TYPE_CLI_COMMAND) {
@@ -1486,7 +1683,15 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       ChannelDetails channel;
       bool success = getChannel(channel_idx, channel);
-      if (success && sendGroupMessage(msg_timestamp, channel.channel, _prefs.node_name, text, len - i)) {
+      int tlen = len - i;
+      if (success) tlen = takeSlashCommand((char*) text, tlen);
+      if (tlen < 0) {   // a '/' command for this channel: run it here, don't send it
+        ChatRef from;
+        memset(&from, 0, sizeof(from));
+        from.kind = CHAT_CHANNEL;
+        from.channel_idx = channel_idx;
+        queueChatCommand(from, msg_timestamp, &text[1], len - i - 1);
+      } else if (success && sendGroupMessage(msg_timestamp, channel.channel, _prefs.node_name, text, tlen)) {
         writeOKFrame();
       } else {
         writeErrFrame(ERR_CODE_NOT_FOUND); // bad channel_idx

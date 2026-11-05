@@ -36,6 +36,10 @@ void MyMesh::setFindStatus(const char* fmt, ...) {
   vsnprintf(_find_status, sizeof(_find_status), fmt, args);
   va_end(args);
   _find_status_at = millis();
+  if (_find_chat.kind != CHAT_NONE) {   // the request was typed in a chat: show the answer there too
+    postToChat(_find_chat, _find_status);
+    if (strstr(_find_status, "ranging...") == NULL) _find_chat.kind = CHAT_NONE;   // the final answer
+  }
 }
 
 ContactInfo* MyMesh::findContactByName(const char* name) {
@@ -162,10 +166,12 @@ void MyMesh::handleFindRequest(const ContactInfo& from, uint32_t sender_timestam
 }
 
 // finder: an answer from the target
-void MyMesh::onFindReply(const ContactInfo& from, const char* text) {
-  if (!_find_asked_at || memcmp(from.id.pub_key, _find_peer, PUB_KEY_SIZE) != 0) return;
-  if (strncmp(text, "find: ", 6) != 0) return;
+// \returns true if the answer was shown in the chat the request was typed in
+bool MyMesh::onFindReply(const ContactInfo& from, const char* text) {
+  if (!_find_asked_at || memcmp(from.id.pub_key, _find_peer, PUB_KEY_SIZE) != 0) return false;
+  if (strncmp(text, "find: ", 6) != 0) return false;
   _find_asked_at = 0;
+  bool shown = _find_chat.kind != CHAT_NONE;
   const char* r = &text[6];
   if (_find_asked_range && strncmp(r, "ranging", 7) == 0 && (r[7] == 0 || r[7] == ' ')) {
     if (r[7] == ' ') {
@@ -178,6 +184,7 @@ void MyMesh::onFindReply(const ContactInfo& from, const char* text) {
   } else {
     setFindStatus("%s: %s", from.name, &text[6]);
   }
+  return shown;
 }
 
 // local CLI: find beep|stop|range <name>, get find, get/set find.allow, set find.deny
@@ -272,14 +279,6 @@ bool MyMesh::handleFindCommand(const char* command, char* reply) {
     msg = "find me stop"; name = &command[10];
   } else if (memcmp(command, "find range ", 11) == 0) {
     msg = _prefs.find.ext ? "find range ext" : "find range"; name = &command[11];
-    if (!rangingAvailable(_prefs.freq)) {
-#ifdef HAS_RANGING
-      strcpy(reply, "Error: ranging needs 902-928 MHz");
-#else
-      strcpy(reply, "Error: this radio can't range (needs an LR2021)");
-#endif
-      return true;
-    }
   } else {
     return false;
   }
@@ -289,19 +288,36 @@ bool MyMesh::handleFindCommand(const char* command, char* reply) {
     strcpy(reply, "Error: contact not found");
     return true;
   }
+  startFind(c, msg, reply);
+  return true;
+}
+
+// finder: send a find request ("find me", "find me stop", "find range [ext]") to c.
+// \returns true if it went out, and the answer is then reported through setFindStatus().
+bool MyMesh::startFind(ContactInfo* c, const char* msg, char* reply) {
+  if (msg[5] == 'r' && !rangingAvailable(_prefs.freq)) {
+#ifdef HAS_RANGING
+    strcpy(reply, "Error: ranging needs 902-928 MHz");
+#else
+    strcpy(reply, "Error: this radio can't range (needs an LR2021)");
+#endif
+    return false;
+  }
   uint32_t est_timeout;
   uint32_t ts = getRTCClock()->getCurrentTimeUnique();
   int rc = sendCommandData(*c, ts, 0, TXT_TYPE_CLI_COMMAND, msg, est_timeout);
   if (rc == MSG_SEND_FAILED) {
     strcpy(reply, "Error: couldn't send");
-    return true;
+    return false;
   }
   memcpy(_find_peer, c->id.pub_key, PUB_KEY_SIZE);
   _find_asked_at = millis() | 1;
   _find_asked_range = msg[5] == 'r';
   if (_find_asked_range) _range_ext = _prefs.find.ext;
+  _find_chat.kind = CHAT_NONE;   // a new request: an older one's chat no longer gets results
   setFindStatus("%s: asked, no answer yet", c->name);
   sprintf(reply, "OK, asked %s. See the answer with: get find", c->name);
+  _find_started = true;
   return true;
 }
 

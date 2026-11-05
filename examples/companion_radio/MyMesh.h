@@ -262,6 +262,21 @@ private:
   void saveCloneState();
   void takeover(char* reply);
 
+  // '/' commands typed in a DM or channel: run here, never sent; the reply shows in the same chat
+  #define CHAT_NONE     0
+  #define CHAT_CONSOLE  1
+  #define CHAT_CONTACT  2
+  #define CHAT_CHANNEL  3
+  struct ChatRef {
+    uint8_t kind;
+    uint8_t pub_key[PUB_KEY_SIZE];   // CHAT_CONTACT
+    uint8_t channel_idx;             // CHAT_CHANNEL
+  };
+  static int takeSlashCommand(char* text, int len);
+  void queueChatCommand(const ChatRef& from, uint32_t ts, const char* text, int len);
+  void postToChat(const ChatRef& to, const char* text);
+  void handleSlashCommand(const ChatRef& from, char* cmd, char* reply);
+
   CloneCoordinator _clone;
   bool _iter_console_pending;    // console contact still to send, at the end of the contacts list
   bool _console_pending;         // a message to the console is waiting to run
@@ -272,6 +287,9 @@ private:
   bool _console_offer_pending;   // offer a takeover, because the user sent a message from a backup
   uint32_t _console_last_ts;     // timestamp of the last console command, to spot the app resending it
   bool _takeover_offered;        // the last console note offered a takeover, so "yes" accepts it
+  ChatRef _console_from;         // the chat the pending command was typed in
+  ChatRef _find_chat;            // finder: show find/range results in this chat (kind CHAT_NONE: don't)
+  bool _find_started;            // a find request was just sent
   char _sibling_name[32];        // contact another radio with our key last sent to
   unsigned long _sibling_heard;
 
@@ -364,7 +382,8 @@ private:
   static bool isFindRequest(const char* text);
   void handleFindRequest(const ContactInfo& from, uint32_t sender_timestamp, const char* text, char* reply);
   bool handleFindCommand(const char* command, char* reply);
-  void onFindReply(const ContactInfo& from, const char* text);
+  bool startFind(ContactInfo* c, const char* msg, char* reply);
+  bool onFindReply(const ContactInfo& from, const char* text);
   void findLoop();
   static bool rangingAvailable(float freq);
   void runRanging(bool manager, uint32_t addr);

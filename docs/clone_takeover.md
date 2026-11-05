@@ -20,6 +20,9 @@ your key being heard.
 Send `help` to see the commands. Other radio commands work there too, such as `get flood.retry`.
 Commands aren't case sensitive, so a capital letter added by your phone is fine.
 
+In a DM or channel, messages starting with `/` run commands for that chat, such as `/range` or
+`/crypto v2`: see [chat_commands.md](chat_commands.md).
+
 ## How it works
 
 1. When a radio hears another radio with the same key, its console posts:
