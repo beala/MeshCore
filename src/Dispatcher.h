@@ -104,6 +104,39 @@ public:
    * \returns  length of the next packet heard on the second network (0 = none), with its RSSI and SNR.
    */
   virtual int recvSide(uint8_t* bytes, int sz, float* rssi, float* snr) { return 0; }
+
+  /**
+   * \brief  Settings for a short FSK listen away from the mesh (eg. weather sensors).
+   */
+  struct FskListen {
+    float freq;          // MHz
+    float kbps;          // bit rate
+    float dev_khz;       // frequency deviation of the transmitter
+    float rxbw_khz;      // receiver bandwidth
+    uint8_t sync[4];     // sync word, first byte first
+    uint8_t sync_len;    // bytes
+    uint8_t pkt_len;     // fixed number of bytes received after the sync word
+  };
+  /**
+   * \brief  Some radios can step away from the mesh for a moment to receive FSK packets, then come
+   *         back. The listen starts as soon as the radio isn't busy with a mesh packet, and lasts
+   *         ms (or until stopFskListen()). Mesh transmits end it early. Packets heard go to recvFsk().
+   * \returns  false if this radio can't do it.
+   */
+  virtual bool startFskListen(const FskListen& cfg, uint32_t ms) { return false; }
+  virtual void stopFskListen() { }
+  /**
+   * \returns  0 = no listen pending, 1 = waiting for the radio, 2 = listening
+   */
+  virtual int fskListenState() const { return 0; }
+  /**
+   * \returns  how long the last listen actually ran, in ms (0 = it never started)
+   */
+  virtual uint32_t lastFskListenMillis() const { return 0; }
+  /**
+   * \returns  length of the next FSK packet received (0 = none), with its RSSI.
+   */
+  virtual int recvFsk(uint8_t* bytes, int sz, float* rssi) { return 0; }
 };
 
 /**

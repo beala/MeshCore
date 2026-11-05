@@ -368,6 +368,24 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - The radio also listens to a Meshtastic channel, and its texts show in the app as one more channel, "Meshtastic LongFast", after your own. Receive only: text typed there is not sent. See [Meshtastic channel](meshtastic_channel.md).
 - Settings are saved. Reconnect the app after `mt on` so it lists the new channel.
 
+#### Weather sensors (LR2021 only)
+**Usage:**
+- `wx on`, `wx off`
+- `wx` or `get wx`: the settings
+- `wx scan`: listen for sensors without a break for 85 s (the mesh isn't heard meanwhile)
+- `set wx.freq <MHz>` (default 915)
+- `set wx.units us|metric` (default `us`: °F, mph, inches)
+- `set wx.every <minutes>`: how often each sensor's readings are posted (default 30; 0 = only the first post and alerts)
+- `set wx.only <labels>` or `set wx.only all`: show and follow only these sensors, by the label in their posts (eg. `5a,ch2`)
+- `get wx.sensors`: the sensors heard, with packet count, interval, signal and when last heard
+- `get wx.stats`, `get radio.fsk`: packets, listens, and the share of time away from the mesh
+
+**Example reply:** `> WH65 5a x39 every 15s -108dBm 0s ago; WH31 ch2 x10 every 60s -107dBm 51s ago`
+
+**Notes:**
+- Ecowitt, Ambient Weather and other Fine Offset sensors show in the app as one more channel, "Weather", after your own (and after Meshtastic's). Receive only. See [Weather sensors](weather_sensors.md).
+- Settings are saved. Reconnect the app after `wx on` so it lists the new channel.
+
 ---
 
 ### Power

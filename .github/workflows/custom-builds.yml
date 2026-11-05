@@ -130,7 +130,7 @@ jobs:
         uses: ./.github/actions/setup-build-environment
 
       - name: Run tests
-        run: pio test -e native_asan -e native_kiss_modem -e native_crypto -e native_entropy -e native_cli -e native_meshtastic
+        run: pio test -e native_asan -e native_kiss_modem -e native_crypto -e native_entropy -e native_cli -e native_meshtastic -e native_wxsensor
 
       - name: Fuzz (a minute each)
         run: test/fuzz/run.sh 60

@@ -186,4 +186,76 @@ int16_t CustomLR2021::scanGetStatus(ScanStatus* st) {
   return state;
 }
 
+// ---- FSK listen ----
+
+static uint8_t gfskRxBwCode(float khz) {
+  static const struct { float khz; uint8_t code; } table[] = {
+    { 38.5f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_38_5 }, { 59.5f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_59_5 },
+    { 76.9f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_76_9 }, { 92.6f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_92_6 },
+    { 119.0f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_119_0 }, { 153.8f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_153_8 },
+    { 185.2f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_185_2 }, { 238.1f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_238_1 },
+    { 307.7f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_307_7 },
+  };
+  for (auto& t : table) {
+    if (khz <= t.khz + 0.05f) return t.code;   // the narrowest setting that is wide enough
+  }
+  return RADIOLIB_LR2021_GFSK_OOK_RX_BW_307_7;
+}
+
+int16_t CustomLR2021::fskStart(float fMHz, float kbps, float devKHz, float rxbwKHz,
+                               const uint8_t* sync, uint8_t syncLen, uint8_t pktLen) {
+  if (syncLen == 0 || syncLen > RADIOLIB_LR2021_GFSK_SYNC_WORD_LEN || pktLen == 0) return RADIOLIB_ERR_INVALID_SYNC_WORD;
+  int16_t state = standby();   // stops a scan or an earlier listen
+  if (state != RADIOLIB_ERR_NONE) return state;
+  _fsk_active = true;          // from here on, standby()/transmit/sleep put LoRa back
+  state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_GFSK);
+  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(fMHz * 1000000.0f + 0.5f));
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setGfskModulationParams((uint32_t)(kbps * 1000.0f + 0.5f), RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE,
+                                    gfskRxBwCode(rxbwKHz), (uint32_t)(devKHz * 1000.0f + 0.5f));
+  }
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setGfskPacketParams(32, 16, false, false, RADIOLIB_LR2021_GFSK_OOK_ADDR_FILT_DISABLED,
+                                RADIOLIB_LR2021_GFSK_OOK_PACKET_FORMAT_FIXED, pktLen, RADIOLIB_LR2021_GFSK_OOK_CRC_OFF, 0);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = setGfskSyncword(sync, syncLen, true);
+  if (state == RADIOLIB_ERR_NONE) state = setDioIrqConfig(irqDioNum, RADIOLIB_LR2021_IRQ_RX_DONE);
+  if (state == RADIOLIB_ERR_NONE) {
+    this->mod->setRfSwitchState(Module::MODE_RX);
+    state = fskRearm();
+  }
+  if (state != RADIOLIB_ERR_NONE) fskStopInternal();
+  return state;
+}
+
+int16_t CustomLR2021::fskRearm() {
+  int16_t state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
+  if (state == RADIOLIB_ERR_NONE) state = clearRxFifo();
+  if (state == RADIOLIB_ERR_NONE) state = setRx(RADIOLIB_LR2021_RX_TIMEOUT_INF);
+  return state;
+}
+
+int16_t CustomLR2021::fskRead(uint8_t* buf, uint8_t len, float* rssi) {
+  if (!_fsk_active) return RADIOLIB_ERR_WRONG_MODEM;
+  uint32_t irq = getIrqStatus();
+  if (!(irq & RADIOLIB_LR2021_IRQ_RX_DONE)) return RADIOLIB_ERR_RX_TIMEOUT;
+  float rssiSync = 0;
+  getGfskPacketStatus(NULL, NULL, &rssiSync, NULL, NULL, NULL);
+  if (rssi) *rssi = rssiSync;
+  return readRadioRxFifo(buf, len);
+}
+
+int16_t CustomLR2021::fskStopInternal() {
+  _fsk_active = false;
+  int16_t state = LR2021::standby();
+  // LoRa again, with RadioLib's cached MeshCore settings
+  if (state == RADIOLIB_ERR_NONE) state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_LORA);
+  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(freqMHz * 1000000.0f + 0.5f));
+  if (state == RADIOLIB_ERR_NONE) state = setSpreadingFactor(spreadingFactor);   // all modulation params
+  if (state == RADIOLIB_ERR_NONE) state = setPreambleLength(preambleLengthLoRa);  // all packet params
+  if (state == RADIOLIB_ERR_NONE) state = LR2021::setSyncWord(_sync_word);
+  clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
+  return state;
+}
+
 #endif

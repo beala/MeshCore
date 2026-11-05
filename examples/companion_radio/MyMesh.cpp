@@ -1507,6 +1507,7 @@ void MyMesh::begin() {
 
   applyMeshtastic();   // may load the on-chip scanner, which restarts the radio: settings come next
   applyRadioPrefs();
+  applyWeather();
   radio_driver.setTxLedEnabled(!_prefs.led_off);
   loadFindAllow();
 
@@ -1565,7 +1566,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     out_frame[i++] = RESP_CODE_DEVICE_INFO;
     out_frame[i++] = FIRMWARE_VER_CODE;
     out_frame[i++] = MAX_CONTACTS / 2;   // v3+
-    out_frame[i++] = MAX_GROUP_CHANNELS + (_mt_active ? 1 : 0); // v3+; the last one is Meshtastic's
+    out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; the last ones are Meshtastic's and Weather's
     memcpy(&out_frame[i], &_prefs.ble_pin, 4);
     i += 4;
     memset(&out_frame[i], 0, 12);
@@ -1717,13 +1718,14 @@ void MyMesh::handleCmdFrame(size_t len) {
 
     if (txt_type != TXT_TYPE_PLAIN) {
       writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
-    } else if (isMeshtasticChannel(channel_idx)) {   // receive only: nothing goes out on either network
+    } else if (isMeshtasticChannel(channel_idx) || isWeatherChannel(channel_idx)) {   // receive only
       writeOKFrame();
       ChatRef to;
       memset(&to, 0, sizeof(to));
       to.kind = CHAT_CHANNEL;
       to.channel_idx = channel_idx;
-      postToChat(to, "Not sent: the Meshtastic channel is receive-only");
+      postToChat(to, isWeatherChannel(channel_idx) ? "Not sent: the Weather channel is receive-only"
+                                                   : "Not sent: the Meshtastic channel is receive-only");
     } else {
       ChannelDetails channel;
       bool success = getChannel(channel_idx, channel);
@@ -2299,9 +2301,11 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_GET_CHANNEL && len >= 2) {
     uint8_t channel_idx = cmd_frame[1];
     ChannelDetails channel;
-    bool found = isMeshtasticChannel(channel_idx);
-    if (found) {
+    bool found = isMeshtasticChannel(channel_idx) || isWeatherChannel(channel_idx);
+    if (isMeshtasticChannel(channel_idx)) {
       getMeshtasticChannel(channel);
+    } else if (isWeatherChannel(channel_idx)) {
+      getWeatherChannel(channel);
     } else {
       found = getChannel(channel_idx, channel);
     }
@@ -2320,8 +2324,9 @@ void MyMesh::handleCmdFrame(size_t len) {
     }
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 32) {
     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD); // not supported (yet)
-  } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 16 && isMeshtasticChannel(cmd_frame[1])) {
-    writeErrFrame(ERR_CODE_ILLEGAL_ARG);   // set with 'set mt.*' instead
+  } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 16 &&
+             (isMeshtasticChannel(cmd_frame[1]) || isWeatherChannel(cmd_frame[1]))) {
+    writeErrFrame(ERR_CODE_ILLEGAL_ARG);   // set with 'set mt.*' / 'set wx.*' instead
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 16) {
     uint8_t channel_idx = cmd_frame[1];
     ChannelDetails channel;
@@ -2764,6 +2769,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
 
   if (handleCloneCommand(command, reply)) return true;
   if (handleMeshtasticCommand(command, reply)) return true;
+  if (handleWeatherCommand(command, reply)) return true;
 
   // hook for variant-specific CLI processing
   if (board.handleCommand(command, sender_timestamp, reply)) {
@@ -3502,6 +3508,7 @@ void MyMesh::loop() {
   BaseChatMesh::loop();
   findLoop();
   meshtasticLoop();
+  weatherLoop();
 
   if (_crypto_save_pending && (long)(millis() - _crypto_save_at) >= 0) {
     _crypto_save_pending = false;

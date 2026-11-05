@@ -6,6 +6,7 @@
 #   .pio/fuzz/fuzz_cli -dict=test/fuzz/cli.dict -max_len=600 -max_total_time=60 .pio/fuzz/corpus_cli
 #   .pio/fuzz/fuzz_mesh -max_len=1200 -max_total_time=60 .pio/fuzz/corpus_mesh
 #   .pio/fuzz/fuzz_meshtastic -max_len=1200 -max_total_time=60 .pio/fuzz/corpus_meshtastic
+#   .pio/fuzz/fuzz_wxsensor -max_len=400 -max_total_time=60 .pio/fuzz/corpus_wxsensor
 set -e
 cd "$(dirname "$0")/../.."
 CRYPTO=.pio/libdeps/native_cli/Crypto
@@ -49,3 +50,9 @@ clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-reco
   $CRYPTO/AES128.cpp $CRYPTO/AES256.cpp $CRYPTO/AESCommon.cpp $CRYPTO/BlockCipher.cpp $CRYPTO/Crypto.cpp \
   -o .pio/fuzz/fuzz_meshtastic
 echo "built .pio/fuzz/fuzz_meshtastic"
+
+# weather sensor decoding and listen scheduling
+clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+  -I src test/fuzz/fuzz_wxsensor.cpp src/helpers/weather/FineOffset.cpp src/helpers/weather/SensorTracker.cpp \
+  -o .pio/fuzz/fuzz_wxsensor
+echo "built .pio/fuzz/fuzz_wxsensor"

@@ -29,6 +29,7 @@
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/BaseSerialInterface.h>
 #include <helpers/meshtastic/MeshtasticRx.h>
+#include <helpers/weather/SensorTracker.h>
 #include <helpers/IdentityStore.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
@@ -407,6 +408,23 @@ private:
   const char* meshtasticChannelName() const;
   void showMeshtasticText(const meshtastic::Message& m, float snr);
   void pushChannelText(uint8_t channel_idx, uint32_t ts, int8_t snr_x4, uint8_t path_len, const char* text, int len);
+
+  // Weather sensors heard in short FSK listens between mesh packets, shown as one more receive-only
+  // channel after Meshtastic's (MyMeshWeather.cpp, docs/weather_sensors.md)
+  wxsensor::Tracker _wx;
+  bool _wx_active = false;
+  bool _wx_win_open = false;         // a listen was asked of the radio for _wx_win
+  bool _wx_win_got = false;          // the sensor it was for was heard
+  wxsensor::Window _wx_win;
+  uint32_t _wx_heard = 0, _wx_bad = 0, _wx_shown = 0, _wx_windows = 0, _wx_listen_ms = 0, _wx_since = 0;
+  void applyWeather();
+  void weatherLoop();
+  bool handleWeatherCommand(const char* command, char* reply);
+  bool isWeatherChannel(int idx) const;
+  void getWeatherChannel(ChannelDetails& ch);
+  int virtualChannelCount() const { return (_mt_active ? 1 : 0) + (_wx_active ? 1 : 0); }
+  bool weatherShown(const wxsensor::Reading& r) const;
+  void showWeather(const char* text, int8_t snr_x4);
 };
 
 extern MyMesh the_mesh;

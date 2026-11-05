@@ -229,10 +229,18 @@ public:
     }
     RadioLibWrapper::onSendFinished();
     _radio->setPreambleLength(preambleLengthForSF(getSpreadingFactor())); // overcomes weird issues with small and big pkts
+    if (_fsk_side_pending) {   // the transmit ended an FSK listen
+      _fsk_side_pending = false;
+      applySideDetectorConfig();
+    }
   }
 
   int recvRaw(uint8_t* bytes, int sz) override {
     CustomLR2021* r = (CustomLR2021 *)_radio;
+    if (_fsk_state != FSK_IDLE) {   // the radio is away (or about to go) on an FSK listen
+      fskTick();
+      if (_fsk_state == FSK_LISTENING) return 0;
+    }
     bool scan_pkt = r->isScanning() && isIrqPending();
     int len = RadioLibWrapper::recvRaw(bytes, sz);
     _scan_cached = false;
@@ -318,7 +326,41 @@ public:
     return len;
   }
 
+  // ---- FSK listen (weather sensors) ----
+  bool startFskListen(const FskListen& cfg, uint32_t ms) override {
+    if (cfg.pkt_len == 0 || cfg.pkt_len > FSK_MAX_LEN || cfg.sync_len == 0 || cfg.sync_len > 4) return false;
+    if (_fsk_state == FSK_LISTENING) endFskListen();
+    _fsk_cfg = cfg;
+    _fsk_end = millis() + ms;
+    _fsk_ran = 0;
+    _fsk_state = FSK_WAITING;
+    return true;
+  }
+
+  void stopFskListen() override {
+    if (_fsk_state == FSK_LISTENING) endFskListen();
+    _fsk_state = FSK_IDLE;
+  }
+
+  int fskListenState() const override { return _fsk_state; }
+  uint32_t lastFskListenMillis() const override { return _fsk_ran; }
+
+  int recvFsk(uint8_t* bytes, int sz, float* rssi) override {
+    if (_fsk_count == 0) return 0;
+    const FskPacket& p = _fsk_q[_fsk_head];
+    int len = p.len < sz ? p.len : sz;
+    memcpy(bytes, p.data, len);
+    if (rssi) *rssi = p.rssi;
+    _fsk_head = (_fsk_head + 1) % FSK_QUEUE;
+    _fsk_count--;
+    return len;
+  }
+
   void loop() override {
+    if (_fsk_state != FSK_IDLE) {
+      fskTick();
+      if (_fsk_state == FSK_LISTENING) return;   // no noise floor sampling or scan checks meanwhile
+    }
     if (isSideListening()) {
       // no noise floor sampling while the radio hops between networks
       if (millis() - _scan_check_at >= 1000) {
@@ -359,6 +401,12 @@ public:
       formatScan(reply);
       return true;
     }
+    if (strcmp(command, "get radio.fsk") == 0) {
+      sprintf(reply, "> FSK listens %lu (%lu ms, %lu cut short by a transmit, %lu failed to start), %lu packets, %lu dropped",
+              (unsigned long)_fsk_listens, (unsigned long)_fsk_total_ms, (unsigned long)_fsk_cut,
+              (unsigned long)_fsk_fail, (unsigned long)_fsk_packets, (unsigned long)_fsk_dropped);
+      return true;
+    }
     return false;
   }
 
@@ -394,6 +442,92 @@ public:
   }
 
   protected:
+    enum { FSK_IDLE = 0, FSK_WAITING = 1, FSK_LISTENING = 2 };
+    static const int FSK_MAX_LEN = 32;
+    static const int FSK_QUEUE = 4;
+    struct FskPacket {
+      uint8_t len;
+      int16_t rssi;
+      uint8_t data[FSK_MAX_LEN];
+    };
+    FskListen _fsk_cfg;
+    uint8_t _fsk_state = FSK_IDLE;
+    uint32_t _fsk_end = 0, _fsk_started = 0, _fsk_ran = 0;
+    FskPacket _fsk_q[FSK_QUEUE];
+    uint8_t _fsk_head = 0, _fsk_count = 0;
+    uint32_t _fsk_listens = 0, _fsk_total_ms = 0, _fsk_cut = 0, _fsk_fail = 0, _fsk_packets = 0, _fsk_dropped = 0;
+
+    // Runs the FSK listen: starts it when the radio is free, reads packets, ends it on time.
+    void fskTick() {
+      CustomLR2021* r = (CustomLR2021 *)_radio;
+      uint32_t now = millis();
+      if (_fsk_state == FSK_WAITING) {
+        if ((int32_t)(_fsk_end - now) <= 20) {   // never got the radio: too late now
+          _fsk_state = FSK_IDLE;
+          _fsk_ran = 0;
+          return;
+        }
+        // don't step away from a mesh packet on its way in, or before the last one has been read
+        if (!isInRecvMode() || isIrqPending() || r->isReceiving()) return;
+        int16_t st = r->fskStart(_fsk_cfg.freq, _fsk_cfg.kbps, _fsk_cfg.dev_khz, _fsk_cfg.rxbw_khz,
+                                 _fsk_cfg.sync, _fsk_cfg.sync_len, _fsk_cfg.pkt_len);
+        if (st != RADIOLIB_ERR_NONE) {
+          MESH_DEBUG_PRINTLN("LR2021: FSK listen failed to start (%d)", st);
+          _fsk_fail++;
+          _fsk_state = FSK_IDLE;
+          _fsk_ran = 0;
+          idle();   // LoRa receive again on the next recvRaw()
+          return;
+        }
+        clearIrqPending();
+        _fsk_state = FSK_LISTENING;
+        _fsk_started = now;
+        _fsk_listens++;
+        return;
+      }
+      if (_fsk_state != FSK_LISTENING) return;
+      if (!r->isFskActive()) {   // a transmit (or a reset) took the radio back: leave it alone
+        _fsk_cut++;
+        finishFsk(now, false);
+        _fsk_side_pending = true;   // side detectors again once the transmit is over
+        return;
+      }
+      if (isIrqPending()) {
+        clearIrqPending();
+        FskPacket p;
+        float rssi = 0;
+        p.len = _fsk_cfg.pkt_len;
+        if (r->fskRead(p.data, p.len, &rssi) == RADIOLIB_ERR_NONE) {
+          p.rssi = (int16_t)rssi;
+          _fsk_packets++;
+          if (_fsk_count == FSK_QUEUE) {   // full: drop the oldest
+            _fsk_head = (_fsk_head + 1) % FSK_QUEUE;
+            _fsk_count--;
+            _fsk_dropped++;
+          }
+          _fsk_q[(_fsk_head + _fsk_count) % FSK_QUEUE] = p;
+          _fsk_count++;
+        }
+        r->fskRearm();
+      }
+      if ((int32_t)(now - _fsk_end) >= 0) endFskListen();
+    }
+
+    void endFskListen() {
+      ((CustomLR2021 *)_radio)->fskStop();
+      finishFsk(millis(), true);
+    }
+
+    void finishFsk(uint32_t now, bool restart) {
+      _fsk_ran = now - _fsk_started;
+      if (_fsk_ran == 0) _fsk_ran = 1;
+      _fsk_total_ms += _fsk_ran;
+      _fsk_state = FSK_IDLE;
+      clearIrqPending();
+      if (restart) applySideDetectorConfig();   // back in LoRa: side detectors again, then receive (via idle())
+    }
+    bool _fsk_side_pending = false;
+
     struct SidePacket {
       uint8_t len;
       int8_t snr_x4;

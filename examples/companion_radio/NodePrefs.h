@@ -232,10 +232,29 @@ private:
       def("klen", key_len);
     }
   };
+  // Weather sensors (Ecowitt/Ambient/Fine Offset FSK) heard in short breaks from the mesh; their
+  // readings show in the app as an extra, receive-only channel
+  class WeatherPrefs : public ConfigSerializer {
+  public:
+    uint8_t en = 0;
+    float freq = 915.0f;          // MHz
+    uint8_t metric = 0;           // 0 = °F, mph, inches; 1 = °C, m/s, mm
+    uint16_t every = 30;          // minutes between posts of a sensor's readings (0 = only changes and alerts)
+    char only[40] = "";           // comma-separated sensor labels to show and follow (as in the posts); empty = all
+  protected:
+    void structure() override {
+      def("en", en);
+      def("freq", freq);
+      def("metric", metric);
+      def("every", every);
+      def("only", only, sizeof(only));
+    }
+  };
 public:
   FloodRetryPrefs flood_retry;
   ClonePrefs clone;
   MeshtasticPrefs mt;
+  WeatherPrefs wx;
 private:
 
   class CompanionPrefs : public ConfigSerializer {
@@ -338,6 +357,7 @@ protected:
     def("custom", custom);
     def("find", find);
     def("mt", mt);
+    def("wx", wx);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif

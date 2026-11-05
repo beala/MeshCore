@@ -3,6 +3,10 @@
 //   loratx <hex>   -> "  -> OK <n> bytes"
 //   hold off       receive with the current settings, one "RXSTAT len=.. st=.. data=<hex>" line per packet
 //   hold on        stop receiving
+//   cw <MHz> <ms>          unmodulated carrier (raw frequency word: works below RadioLib's 150 MHz floor)
+//   cwid <MHz> <wpm> <text> Morse-keyed carrier, e.g. a callsign ID on a ham band
+//   fsktx <MHz> <dev kHz> <hex>  one packet as a Fine Offset weather sensor sends it: FSK 17.24 kbit/s,
+//                          preamble 0xAA.., sync word 0x2DD4, then the bytes (no CRC or whitening added)
 // Build and flash: cd tools/heltec_v4_tx && pio run -t upload
 #include <Arduino.h>
 #include <SPI.h>
@@ -26,6 +30,36 @@ static bool apply() {
   if (st == RADIOLIB_ERR_NONE) st = radio.setDio2AsRfSwitch(true);
   if (st == RADIOLIB_ERR_NONE) st = radio.setCurrentLimit(140);
   return st == RADIOLIB_ERR_NONE;
+}
+
+static uint32_t frf(float f) { return (uint32_t)((double)f * 1e6 * 33554432.0 / 32e6 + 0.5); }
+
+static void keyed(float f, uint32_t ms) {
+  radio.transmitDirect(frf(f));
+  delay(ms);
+  radio.standby();
+}
+
+static const char* morse(char c) {
+  static const char* L[] = {".-","-...","-.-.","-..",".","..-.","--.","....","..",".---","-.-",".-..","--",
+                            "-.","---",".--.","--.-",".-.","...","-","..-","...-",".--","-..-","-.--","--.."};
+  static const char* D[] = {"-----",".----","..---","...--","....-",".....","-....","--...","---..","----."};
+  if (c >= 'a' && c <= 'z') c -= 32;
+  if (c >= 'A' && c <= 'Z') return L[c - 'A'];
+  if (c >= '0' && c <= '9') return D[c - '0'];
+  if (c == '/') return "-..-.";
+  return NULL;
+}
+
+static void cwid(float f, int wpm, const char* text) {
+  uint32_t dot = 1200 / (wpm > 0 ? wpm : 20);
+  for (const char* p = text; *p; p++) {
+    if (*p == ' ') { delay(dot * 4); continue; }
+    const char* m = morse(*p);
+    if (!m) continue;
+    for (; *m; m++) { keyed(f, *m == '.' ? dot : dot * 3); delay(dot); }
+    delay(dot * 2);
+  }
 }
 
 static int hexval(char c) {
@@ -71,6 +105,47 @@ static void handle(char* cmd) {
     if (listening) { radio.setPacketReceivedAction(onRx); radio.startReceive(); }
     if (st == RADIOLIB_ERR_NONE) Serial.printf("  -> OK %u bytes\r\n", (unsigned)n);
     else Serial.printf("  -> ERR %d\r\n", st);
+  } else if (!strncmp(cmd, "fsktx ", 6)) {
+    float f, dev; int off = 0;
+    static uint8_t buf[64];
+    size_t n = 0;
+    if (sscanf(cmd + 6, "%f %f %n", &f, &dev, &off) >= 2 && off) {
+      for (const char* p = cmd + 6 + off; p[0] && p[1] && n < sizeof(buf); p += 2) {
+        int h = hexval(p[0]), l = hexval(p[1]);
+        if (h < 0 || l < 0) break;
+        buf[n++] = (uint8_t)(h << 4 | l);
+      }
+    }
+    if (n == 0) { Serial.println("  -> ERR args"); return; }
+    listening = false;
+    int st = radio.beginFSK(f, 17.24, dev, 156.2, dbm, 40, 1.8);
+    uint8_t sync[] = { 0x2D, 0xD4 };
+    if (st == RADIOLIB_ERR_NONE) st = radio.setDio2AsRfSwitch(true);
+    if (st == RADIOLIB_ERR_NONE) st = radio.setSyncWord(sync, 2);
+    if (st == RADIOLIB_ERR_NONE) st = radio.setCRC(0);
+    if (st == RADIOLIB_ERR_NONE) st = radio.setWhitening(false);
+    if (st == RADIOLIB_ERR_NONE) st = radio.setDataShaping(RADIOLIB_SHAPING_NONE);
+    if (st == RADIOLIB_ERR_NONE) st = radio.fixedPacketLengthMode(n);
+    if (st == RADIOLIB_ERR_NONE) st = radio.transmit(buf, n);
+    apply();   // back to LoRa
+    if (st == RADIOLIB_ERR_NONE) Serial.printf("  -> OK %u bytes\r\n", (unsigned)n);
+    else Serial.printf("  -> ERR %d\r\n", st);
+  } else if (!strncmp(cmd, "cwid ", 5)) {
+    float f; int wpm, off = 0;
+    if (sscanf(cmd + 5, "%f %d %n", &f, &wpm, &off) >= 2 && off) {
+      radio.setOutputPower(dbm);
+      cwid(f, wpm, cmd + 5 + off);
+      apply();
+      Serial.println("  -> OK");
+    } else Serial.println("  -> ERR args");
+  } else if (!strncmp(cmd, "cw ", 3)) {
+    float f; unsigned ms;
+    if (sscanf(cmd + 3, "%f %u", &f, &ms) == 2) {
+      radio.setOutputPower(dbm);
+      keyed(f, ms);
+      apply();
+      Serial.println("  -> OK");
+    } else Serial.println("  -> ERR args");
   } else if (cmd[0]) {
     Serial.println("  -> ERR unknown");
   }

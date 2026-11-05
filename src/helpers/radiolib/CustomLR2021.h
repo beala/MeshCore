@@ -44,6 +44,9 @@ private:
   SPIClass* _spi = NULL;
 
   int16_t loadScanBlob();
+
+  bool _fsk_active = false;     // in GFSK for an FSK listen; LoRa comes back with fskStop()
+  int16_t fskStopInternal();
   int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);
   static bool bwCode(float bw, uint8_t* code);
 
@@ -136,6 +139,7 @@ private:
       if (spi) _spi = spi;
       _scan_running = false;
       _scan_loaded = false;
+      _fsk_active = false;
       
   #ifdef LR2021_TCXO_VOLTAGE
       float tcxo = LR2021_TCXO_VOLTAGE;
@@ -230,6 +234,7 @@ private:
     // Semtech's own driver loads the patch, so the load is hooked in here.
     using LR2021::standby;
     int16_t standby() override {
+      if (_fsk_active) fskStopInternal();
       if (_scan_running) scanStop();
       int16_t state = LR2021::standby();
       if (_pram_pending && state == RADIOLIB_ERR_NONE) {
@@ -248,6 +253,7 @@ private:
     // the chip may be tuned to the other network or in the middle of a CAD: stop the scan, which
     // puts MeshCore's settings back, before anything is staged.
     int16_t stageMode(RadioModeType_t mode, RadioModeConfig_t* cfg) override {
+      if (_fsk_active) fskStopInternal();   // a transmit ends an FSK listen
       if (_scan_running) {
         scanStop();
         LR2021::standby();
@@ -257,6 +263,7 @@ private:
 
     using LR2021::sleep;
     int16_t sleep() override {
+      if (_fsk_active) fskStopInternal();
       if (_scan_running) scanStop();
       return LR2021::sleep();
     }
@@ -294,6 +301,17 @@ private:
     int16_t scanGetStatus(ScanStatus* st);
 
     float getFreqMHz() const { return freqMHz; }
+
+    // ---- FSK listen (weather sensors) ----
+    // Leaves LoRa (and the scan) for GFSK receive with these settings, continuous, RxDone on the IRQ
+    // pin. Packets are fixed length, with no CRC or whitening: the caller checks them.
+    int16_t fskStart(float freqMHz, float kbps, float devKHz, float rxbwKHz,
+                     const uint8_t* sync, uint8_t syncLen, uint8_t pktLen);
+    int16_t fskRearm();                                    // receive again after a packet
+    int16_t fskRead(uint8_t* buf, uint8_t len, float* rssi);
+    // Back to LoRa with MeshCore's settings, in standby. The caller starts receive again.
+    int16_t fskStop() { return _fsk_active ? fskStopInternal() : RADIOLIB_ERR_NONE; }
+    bool isFskActive() const { return _fsk_active; }
 
     int16_t setRxBoostedGainMode(uint8_t level) {
       int16_t state = LR2021::setRxBoostedGainMode(level);
@@ -367,6 +385,7 @@ private:
     // then restore what sleep loses. Warm sleep keeps RAM (command settings) but not
     // registers (datasheet 23.6), so register-based settings must be written again.
     int16_t resetAGC() {
+      if (_fsk_active) fskStopInternal();
       if (_scan_running) scanStop();
       sleep(true, 0);
       int16_t state = standby(RADIOLIB_LR2021_STANDBY_RC, true);  // NOP pulls NSS low to wake
