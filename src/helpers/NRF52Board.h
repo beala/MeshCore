@@ -6,6 +6,9 @@
 
 #if defined(NRF52_PLATFORM)
 
+// Stored in GPREGRET2 when a stack canary finds a buffer overrun (-fstack-protector), before rebooting
+#define CRASH_REASON_STACK_SMASH      0x53  // 'S'
+
 #ifdef NRF52_POWER_MANAGEMENT
 // Shutdown Reason Codes (stored in GPREGRET before SYSTEMOFF)
 #define SHUTDOWN_REASON_NONE          0x00
@@ -64,6 +67,7 @@ public:
    *          (not the button, the reset pin, or a reboot).
    */
   bool wokeFromCharger() const;
+  const char* getLastCrash() const override;
 
   void attachDynamicPrefs(KeyValueStore* prefs) { }  // no-op
 

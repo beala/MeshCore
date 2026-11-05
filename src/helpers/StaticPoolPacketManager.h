@@ -10,6 +10,9 @@ class PacketQueue {
 
 public:
   PacketQueue(int max_entries);
+  ~PacketQueue();
+  PacketQueue(const PacketQueue&) = delete;
+  PacketQueue& operator=(const PacketQueue&) = delete;
   mesh::Packet* get(uint32_t now);
   bool add(mesh::Packet* packet, uint8_t priority, uint32_t scheduled_for);
   int count() const { return _num; }
@@ -26,6 +29,7 @@ class StaticPoolPacketManager : public mesh::PacketManager {
 
 public:
   StaticPoolPacketManager(int pool_size);
+  ~StaticPoolPacketManager();   // radios never destroy it; tests and fuzzers do
 
   mesh::Packet* allocNew() override;
   void free(mesh::Packet* packet) override;

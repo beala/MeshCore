@@ -8,6 +8,9 @@
   #define FILESYSTEM  Adafruit_LittleFS
 
   using namespace Adafruit_LittleFS_Namespace;
+#else
+  #include <FS.h>   // host tests: an in-memory fs::FS (test/cli_mocks)
+  #define FILESYSTEM  fs::FS
 #endif
 #include <Identity.h>
 

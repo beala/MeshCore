@@ -4,6 +4,7 @@
 
 #include <bluefruit.h>
 #include <nrf_soc.h>
+#include <nrf_nvic.h>
 
 #ifdef USE_CC310_HW_CRYPTO
 #include <Adafruit_nRFCrypto.h>
@@ -44,6 +45,40 @@ static void __attribute__((constructor(101))) nrf52_boot_resetreas_capture() {
   // the register keeps old bits until cleared (pwrmgtInit() clears it when power management is on)
   NRF_POWER->RESETREAS = 0xFFFFFFFF;
 #endif
+}
+
+// Stack canaries (-fstack-protector-strong, set in nrf52_base): a function that wrote past the end of
+// one of its local buffers calls __stack_chk_fail() when it returns. Note it and reboot, instead of
+// running on with a broken stack (which froze radios). The next run reports it in "uptime".
+static bool stack_smashed_last_run = false;
+static void __attribute__((constructor(101))) nrf52_crash_capture() {
+  stack_smashed_last_run = NRF_POWER->GPREGRET2 == CRASH_REASON_STACK_SMASH;
+#ifndef NRF52_POWER_MANAGEMENT
+  if (stack_smashed_last_run) NRF_POWER->GPREGRET2 = 0;   // else pwrmgtInit() clears it
+#endif
+}
+
+extern "C" {
+// a fixed "terminator" canary: zero, newline and 0xFF bytes stop most string copies. Enough to catch
+// overruns, which is all this is for.
+uintptr_t __stack_chk_guard = 0x000a0dffu;
+
+__attribute__((noreturn)) void __stack_chk_fail(void) {
+  uint8_t sd_enabled = 0;
+  sd_softdevice_is_enabled(&sd_enabled);
+  if (sd_enabled) {   // the SoftDevice owns the POWER registers while it runs
+    sd_power_gpregret_clr(1, 0xFF);
+    sd_power_gpregret_set(1, CRASH_REASON_STACK_SMASH);
+    sd_nvic_SystemReset();
+  }
+  NRF_POWER->GPREGRET2 = CRASH_REASON_STACK_SMASH;
+  NVIC_SystemReset();
+  while (true) { }
+}
+}
+
+const char* NRF52Board::getLastCrash() const {
+  return stack_smashed_last_run ? "stack overwrite" : NULL;
 }
 
 bool NRF52Board::wokeFromCharger() const {
@@ -134,6 +169,7 @@ const char* NRF52Board::getShutdownReasonString(uint8_t reason) {
     case SHUTDOWN_REASON_LOW_VOLTAGE:  return "Low Voltage";
     case SHUTDOWN_REASON_USER:         return "User Request";
     case SHUTDOWN_REASON_BOOT_PROTECT: return "Boot Protection";
+    case CRASH_REASON_STACK_SMASH:     return "Stack overwrite";
   }
   return "Unknown";
 }

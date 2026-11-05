@@ -114,6 +114,37 @@ jobs:
             echo EOF
           } >> $GITHUB_OUTPUT
 
+  # Host tests and fuzzers under AddressSanitizer + UBSan; a failure stops the release
+  test:
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Clone Repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup Build Environment
+        uses: ./.github/actions/setup-build-environment
+
+      - name: Run tests
+        run: pio test -e native_asan -e native_kiss_modem -e native_crypto -e native_entropy -e native_cli
+
+      - name: Fuzz (a minute each)
+        run: test/fuzz/run.sh 60
+
+      - name: Keep fuzz findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: |
+            .pio/fuzz/findings
+            .pio/fuzz/*.log
+          if-no-files-found: ignore
+
   # One job per firmware, all in parallel
   build:
     needs: prepare
@@ -144,7 +175,7 @@ jobs:
           path: out
 
   release:
-    needs: [prepare, build]
+    needs: [prepare, test, build]
     runs-on: ubuntu-latest
     steps:
 

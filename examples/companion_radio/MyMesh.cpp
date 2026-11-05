@@ -3025,8 +3025,10 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     if (secs >= 3600) n += sprintf(&reply[n], "%luh ", (secs / 3600) % 24);
     n += sprintf(&reply[n], "%lum %lus", (secs / 60) % 60, secs % 60);
     if (board.isPwrMgtInitialised()) {   // why it last started, where the board can tell
-      sprintf(&reply[n], ", started by: %s", board.getResetReasonString(board.getResetReason()));
+      n += sprintf(&reply[n], ", started by: %s", board.getResetReasonString(board.getResetReason()));
     }
+    const char* crash = board.getLastCrash();
+    if (crash) sprintf(&reply[n], ". The run before crashed: %s", crash);
     return true;
   }
 

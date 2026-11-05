@@ -90,6 +90,8 @@ public:
   virtual const char* getResetReasonString(uint32_t reason) { return "Not available"; }
   virtual uint8_t getShutdownReason() const { return 0; }
   virtual const char* getShutdownReasonString(uint8_t reason) { return "Not available"; }
+  /** \brief  why the previous run crashed (e.g. "stack overwrite"), or NULL if it didn't or the board can't tell */
+  virtual const char* getLastCrash() const { return NULL; }
 
   virtual bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) { return false; }
 

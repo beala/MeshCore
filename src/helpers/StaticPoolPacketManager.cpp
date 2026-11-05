@@ -8,6 +8,12 @@ PacketQueue::PacketQueue(int max_entries) {
   _num = 0;
 }
 
+PacketQueue::~PacketQueue() {
+  delete[] _table;
+  delete[] _pri_table;
+  delete[] _schedule_table;
+}
+
 int PacketQueue::countBefore(uint32_t now) const {
   if (now == 0xFFFFFFFF) return _num;  // sentinel: count all entries regardless of schedule
 
@@ -72,6 +78,14 @@ StaticPoolPacketManager::StaticPoolPacketManager(int pool_size): unused(pool_siz
   // load up our unusued Packet pool
   for (int i = 0; i < pool_size; i++) {
     unused.add(new mesh::Packet(), 0, 0);
+  }
+}
+
+StaticPoolPacketManager::~StaticPoolPacketManager() {
+  // packets still handed out are the holder's to free; LeakSanitizer reports any that never come back
+  PacketQueue* queues[] = { &unused, &send_queue, &rx_queue };
+  for (PacketQueue* q : queues) {
+    while (q->count() > 0) delete q->removeByIdx(0);
   }
 }
 

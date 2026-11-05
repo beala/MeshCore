@@ -170,6 +170,14 @@ public:
     return esp_reset_reason();
   }
 
+  const char* getLastCrash() const override {
+    switch (esp_reset_reason()) {
+      case ESP_RST_PANIC: return "panic (exception or stack overrun)";
+      case ESP_RST_INT_WDT: case ESP_RST_TASK_WDT: case ESP_RST_WDT: return "hung (watchdog)";
+      default: return NULL;
+    }
+  }
+
   // https://docs.espressif.com/projects/esp-idf/en/v4.4.7/esp32/api-reference/system/system.html
   const char* getResetReasonString(uint32_t reason) {
     switch (reason) {
