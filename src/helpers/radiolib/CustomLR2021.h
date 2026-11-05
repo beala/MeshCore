@@ -46,6 +46,11 @@ private:
   int16_t loadScanBlob();
 
   bool _fsk_active = false;     // in GFSK for an FSK listen; LoRa comes back with fskStop()
+  // Front-end calibration covering an FSK listen frequency. The chip keeps calibrations for up to 3
+  // frequencies; RadioLib only ever calibrates the mesh's. Without one, a listen a few MHz away hears nothing.
+  float _cal_fsk_mhz = 0, _cal_mesh_mhz = 0;
+  int16_t calibrateFor(float fskMHz);
+  struct { uint32_t packets, len_err, preambles, sync_ok, sync_fail; } _fsk_stats_raw = {};
   int16_t fskStopInternal();
   int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);
   static bool bwCode(float bw, uint8_t* code);
@@ -140,6 +145,7 @@ private:
       _scan_running = false;
       _scan_loaded = false;
       _fsk_active = false;
+      _cal_fsk_mhz = 0;
       
   #ifdef LR2021_TCXO_VOLTAGE
       float tcxo = LR2021_TCXO_VOLTAGE;
@@ -302,11 +308,27 @@ private:
 
     float getFreqMHz() const { return freqMHz; }
 
+    // RadioLib calibrates the front end for the new frequency only, replacing the FSK listen's
+    using LR2021::setFrequency;
+    int16_t setFrequency(float freq) override {
+      _cal_fsk_mhz = 0;
+      return LR2021::setFrequency(freq);
+    }
+
     // ---- FSK listen (weather sensors) ----
     // Leaves LoRa (and the scan) for GFSK receive with these settings, continuous, RxDone on the IRQ
     // pin. Packets are fixed length, with no CRC or whitening: the caller checks them.
+    // syncBits: 0 = syncLen * 8, else the sync word is the last syncBits bits of sync[]
     int16_t fskStart(float freqMHz, float kbps, float devKHz, float rxbwKHz,
-                     const uint8_t* sync, uint8_t syncLen, uint8_t pktLen);
+                     const uint8_t* sync, uint8_t syncLen, uint8_t pktLen, uint8_t syncBits = 0, bool noPreamble = false,
+                     uint8_t preDetBits = 0);
+    // receiver counts over all FSK listens (GetGfskRxStats, read as each listen ends)
+    struct FskStats { uint32_t packets, len_err, preambles, sync_ok, sync_fail; };
+    FskStats fskStats() const {
+      FskStats f = { _fsk_stats_raw.packets, _fsk_stats_raw.len_err, _fsk_stats_raw.preambles,
+                     _fsk_stats_raw.sync_ok, _fsk_stats_raw.sync_fail };
+      return f;
+    }
     int16_t fskRearm();                                    // receive again after a packet
     int16_t fskRead(uint8_t* buf, uint8_t len, float* rssi);
     // Back to LoRa with MeshCore's settings, in standby. The caller starts receive again.
@@ -385,6 +407,7 @@ private:
     // then restore what sleep loses. Warm sleep keeps RAM (command settings) but not
     // registers (datasheet 23.6), so register-based settings must be written again.
     int16_t resetAGC() {
+      _cal_fsk_mhz = 0;   // the calibration below covers the mesh frequency only
       if (_fsk_active) fskStopInternal();
       if (_scan_running) scanStop();
       sleep(true, 0);

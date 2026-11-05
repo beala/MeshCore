@@ -30,6 +30,7 @@
 #include <helpers/BaseSerialInterface.h>
 #include <helpers/meshtastic/MeshtasticRx.h>
 #include <helpers/weather/SensorTracker.h>
+#include <helpers/aircraft/Uat.h>
 #include <helpers/IdentityStore.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
@@ -425,7 +426,29 @@ private:
   bool handleWeatherCommand(const char* command, char* reply);
   bool isWeatherChannel(int idx) const;
   void getWeatherChannel(ChannelDetails& ch);
-  int virtualChannelCount() const { return (_mt_active ? 1 : 0) + (_wx_active ? 1 : 0); }
+  int virtualChannelCount() const { return (_mt_active ? 1 : 0) + (_wx_active ? 1 : 0) + (_air_active ? 1 : 0); }
+
+  // Aircraft heard on 978 MHz (UAT), shown as one more receive-only channel after Weather's
+  // (MyMeshAircraft.cpp, docs/aircraft.md)
+  struct Plane {
+    uint32_t address;
+    char callsign[9];
+    uat::Report last;
+    uint32_t heard_at, posted_at, count;
+    int16_t rssi;
+    bool posted;
+  };
+  static const int MAX_PLANES = 16;
+  Plane _planes[MAX_PLANES];
+  int _n_planes = 0;
+  bool _air_active = false, _air_forever = false, _air_listening = false;
+  uint8_t _fsk_owner = 0;            // whose FSK listen the radio's queued packets came from: 1 weather, 2 aircraft
+  uint32_t _air_next = 0, _air_heard = 0, _air_bad = 0, _air_fixed = 0, _air_shown = 0, _air_listen_ms = 0, _air_since = 0;
+  void applyAircraft();
+  void aircraftLoop();
+  bool handleAircraftCommand(const char* command, char* reply);
+  bool isAircraftChannel(int idx) const;
+  void describePlane(const Plane& p, char* out, size_t n);
   bool weatherShown(const wxsensor::Reading& r) const;
   void showWeather(const char* text, int8_t snr_x4);
   mesh::Radio::FskListen weatherListen(uint8_t proto) const;

@@ -56,3 +56,8 @@ clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-reco
   -I src test/fuzz/fuzz_wxsensor.cpp src/helpers/weather/FineOffset.cpp src/helpers/weather/LaCrosse.cpp src/helpers/weather/SensorTracker.cpp \
   -o .pio/fuzz/fuzz_wxsensor
 echo "built .pio/fuzz/fuzz_wxsensor"
+
+# UAT aircraft messages
+clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+  -I src test/fuzz/fuzz_uat.cpp src/helpers/aircraft/Uat.cpp -o .pio/fuzz/fuzz_uat
+echo "built .pio/fuzz/fuzz_uat"

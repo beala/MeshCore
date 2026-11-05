@@ -388,6 +388,18 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - Ecowitt, Ambient Weather, other Fine Offset and La Crosse View sensors show in the app as one more channel, "Weather", after your own (and after Meshtastic's). Receive only. See [Weather sensors](weather_sensors.md).
 - Settings are saved. Reconnect the app after `wx on` so it lists the new channel.
 
+#### Aircraft on 978 MHz (LR2021 only)
+**Usage:**
+- `air on`, `air off`
+- `air scan on`, `air scan off`: listen all the time, with a console note for each new aircraft (not saved)
+- `set air.every <minutes>` (default 10), `set air.range <miles>` (default 0 = any), `set air.duty <percent>` (default 10)
+- `air` or `get air`, `get air.planes`, `get air.stats`
+
+**Example reply:** `> N501EL a63e16 6,200 ft, 2.1 mi SW, 88 kt heading 214 (6s)`
+
+**Notes:**
+- Aircraft reporting on UAT (978 MHz) show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
+
 ---
 
 ### Power

@@ -252,11 +252,29 @@ private:
       def("kinds", kinds);
     }
   };
+  // Aircraft heard on 978 MHz (UAT) in short breaks from the mesh, shown as an extra channel
+  class AircraftPrefs : public ConfigSerializer {
+  public:
+    uint8_t en = 0;
+    uint16_t every = 10;          // minutes between posts about the same aircraft (0 = first sighting only)
+    uint16_t range = 0;           // miles; only aircraft closer than this (0 = all)
+    uint8_t duty = 10;            // % of the time spent listening when not scanning all the time
+    float freq = 978.0f;          // MHz (978 for UAT; other values are for bench tests)
+  protected:
+    void structure() override {
+      def("en", en);
+      def("every", every);
+      def("range", range);
+      def("duty", duty);
+      def("freq", freq);
+    }
+  };
 public:
   FloodRetryPrefs flood_retry;
   ClonePrefs clone;
   MeshtasticPrefs mt;
   WeatherPrefs wx;
+  AircraftPrefs air;
 private:
 
   class CompanionPrefs : public ConfigSerializer {
@@ -360,6 +378,7 @@ protected:
     def("find", find);
     def("mt", mt);
     def("wx", wx);
+    def("air", air);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif

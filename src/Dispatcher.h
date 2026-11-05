@@ -113,9 +113,12 @@ public:
     float kbps;          // bit rate
     float dev_khz;       // frequency deviation of the transmitter
     float rxbw_khz;      // receiver bandwidth
-    uint8_t sync[4];     // sync word, first byte first
+    uint8_t sync[8];     // sync word, first byte first
     uint8_t sync_len;    // bytes
     uint8_t pkt_len;     // fixed number of bytes received after the sync word
+    uint8_t sync_bits;   // 0 = sync_len * 8; else the sync word is its last sync_bits bits (eg. 36 for UAT)
+    bool no_preamble;    // the transmitter sends no 0101.. preamble: search for the sync word directly
+    uint8_t pre_det_bits;  // preamble bits to detect (0 = 16, or none with no_preamble); for experiments
   };
   /**
    * \brief  Some radios can step away from the mesh for a moment to receive FSK packets, then come

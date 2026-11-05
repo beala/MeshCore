@@ -328,7 +328,7 @@ public:
 
   // ---- FSK listen (weather sensors) ----
   bool startFskListen(const FskListen& cfg, uint32_t ms) override {
-    if (cfg.pkt_len == 0 || cfg.pkt_len > FSK_MAX_LEN || cfg.sync_len == 0 || cfg.sync_len > 4) return false;
+    if (cfg.pkt_len == 0 || cfg.pkt_len > FSK_MAX_LEN || cfg.sync_len == 0 || cfg.sync_len > 8) return false;
     if (_fsk_state == FSK_LISTENING) endFskListen();
     _fsk_cfg = cfg;
     _fsk_end = millis() + ms;
@@ -401,6 +401,13 @@ public:
       formatScan(reply);
       return true;
     }
+    if (strcmp(command, "get radio.fsk.rx") == 0) {
+      CustomLR2021::FskStats f = ((CustomLR2021 *)_radio)->fskStats();
+      sprintf(reply, "> receiver: %lu packets, %lu length errors, %lu preambles, %lu sync ok, %lu sync fail",
+              (unsigned long)f.packets, (unsigned long)f.len_err, (unsigned long)f.preambles,
+              (unsigned long)f.sync_ok, (unsigned long)f.sync_fail);
+      return true;
+    }
     if (strcmp(command, "get radio.fsk") == 0) {
       sprintf(reply, "> FSK listens %lu (%lu ms, %lu cut short by a transmit, %lu failed to start), %lu packets, %lu dropped",
               (unsigned long)_fsk_listens, (unsigned long)_fsk_total_ms, (unsigned long)_fsk_cut,
@@ -443,7 +450,7 @@ public:
 
   protected:
     enum { FSK_IDLE = 0, FSK_WAITING = 1, FSK_LISTENING = 2 };
-    static const int FSK_MAX_LEN = 32;
+    static const int FSK_MAX_LEN = 48;   // the longest: a UAT long message
     static const int FSK_QUEUE = 4;
     struct FskPacket {
       uint8_t len;
@@ -470,7 +477,8 @@ public:
         // don't step away from a mesh packet on its way in, or before the last one has been read
         if (!isInRecvMode() || isIrqPending() || r->isReceiving()) return;
         int16_t st = r->fskStart(_fsk_cfg.freq, _fsk_cfg.kbps, _fsk_cfg.dev_khz, _fsk_cfg.rxbw_khz,
-                                 _fsk_cfg.sync, _fsk_cfg.sync_len, _fsk_cfg.pkt_len);
+                                 _fsk_cfg.sync, _fsk_cfg.sync_len, _fsk_cfg.pkt_len, _fsk_cfg.sync_bits,
+                                 _fsk_cfg.no_preamble, _fsk_cfg.pre_det_bits);
         if (st != RADIOLIB_ERR_NONE) {
           MESH_DEBUG_PRINTLN("LR2021: FSK listen failed to start (%d)", st);
           _fsk_fail++;

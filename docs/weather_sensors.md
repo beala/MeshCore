@@ -57,7 +57,11 @@ Mesh traffic comes first. A listen doesn't start while a mesh packet is coming i
 be read, and a mesh transmit ends a listen at once. The time a listen misses isn't held against
 the sensor.
 
-On the chip, a listen is a switch of packet type from LoRa to GFSK with raw commands (17.24 kbit/s,
+On the chip, a listen is a switch of packet type from LoRa to GFSK with raw commands. Its
+frequency is set after the modulation parameters: RadioLib's DC-DC workaround in
+`setPacketType()`/`setGfskModulationParams()` retunes to the mesh frequency, so a listen set up
+the other way round sits on the mesh's frequency. (Before that was fixed, only a radio whose mesh
+was on the sensors' frequency could hear them.) (17.24 kbit/s,
 153.8 kHz receiver bandwidth, sync word 0x2DD4, 32 bytes fixed length, no CRC), and back to LoRa
 with RadioLib's cached MeshCore settings. No reset, so the Meshtastic scanner blob stays loaded.
 

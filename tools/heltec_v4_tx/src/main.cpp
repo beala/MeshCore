@@ -110,7 +110,8 @@ static void handle(char* cmd) {
   } else if (!strncmp(cmd, "fsktx ", 6) || !strncmp(cmd, "fskraw ", 7)) {
     bool raw = cmd[3] == 'r';
     float f, kbps = 17.24f, dev; int off = 0;
-    static uint8_t buf[64], sync[8] = { 0x2D, 0xD4 };
+    static uint8_t buf[64];
+    uint8_t sync[8] = { 0x2D, 0xD4 };   // fsktx: Fine Offset's sync word, every time
     size_t n = 0, slen = 2;
     const char* p = NULL;
     if (raw) {
