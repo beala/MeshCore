@@ -2776,6 +2776,14 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     return true;
   }
 
+#ifdef CRASH_TEST   // test builds only: check the crash reporting
+  if (strcmp(command, "crashtest fault") == 0) {
+    *(volatile uint32_t*) 0xFFFFFFF0 = 1;   // a write to no memory: bus fault, then hard fault
+  }
+  if (strcmp(command, "crashtest hang") == 0) {
+    while (true) { }
+  }
+#endif
   if (strcmp(command, "reboot") == 0) {
     board.reboot(); // doesn't return
     return true;

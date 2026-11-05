@@ -77,8 +77,122 @@ __attribute__((noreturn)) void __stack_chk_fail(void) {
 }
 }
 
+// Hard faults and hangs. Both used to freeze a radio for good: the default fault handler spins
+// forever, so the board neither runs nor reboots, and USB goes with it. Instead, note where the CPU
+// was in RAM that startup doesn't clear (.noinit), reboot, and report it in the next "uptime".
+// Turn the PC into a source line with: arm-none-eabi-addr2line -e firmware.elf 0x<pc>
+#define CRASH_MAGIC      0x43525348u   // "CRSH"
+#define CRASH_HARD_FAULT 1
+#define CRASH_HUNG       2
+struct CrashRecord {
+  uint32_t magic, kind, pc, lr, cfsr;
+  char task[8];
+};
+static CrashRecord crash_rec __attribute__((noinit));   // survives the reset
+static CrashRecord last_crash;                          // what the run before left
+static void __attribute__((constructor(101))) nrf52_fault_capture() {
+  if (crash_rec.magic == CRASH_MAGIC) last_crash = crash_rec;
+  crash_rec.magic = 0;
+}
+
+extern "C" {
+#include <FreeRTOS.h>
+#include <task.h>
+
+static void recordCrash(uint32_t kind, const uint32_t* frame) {
+  crash_rec.kind = kind;
+  crash_rec.pc = frame[6];   // the stacked exception frame: r0-r3, r12, lr, pc, xpsr
+  crash_rec.lr = frame[5];
+  crash_rec.cfsr = SCB->CFSR;
+  memset(crash_rec.task, 0, sizeof(crash_rec.task));
+  if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+    const char* name = pcTaskGetName(NULL);
+    for (int i = 0; name && name[i] && i < (int)sizeof(crash_rec.task) - 1; i++) crash_rec.task[i] = name[i];
+  }
+  crash_rec.magic = CRASH_MAGIC;
+  NVIC_SystemReset();   // no SoftDevice calls here: an SVC from a fault handler locks up the CPU
+}
+
+__attribute__((used)) void nrf52_on_hard_fault(const uint32_t* frame) {
+  recordCrash(CRASH_HARD_FAULT, frame);
+}
+
+// Pick the stack the exception frame is on (bit 2 of EXC_RETURN) and pass it on
+__attribute__((naked)) void HardFault_Handler(void) {
+  __asm volatile(
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "b nrf52_on_hard_fault \n");
+}
+
+// Hang detector: RTC2 ticks once a second at a priority above everything but the SoftDevice's.
+// NRF52Board::loop() resets the count; if the main loop hasn't come round in HANG_SECS, the CPU is
+// stuck somewhere (a spin, a deadlock, an interrupt that never returns): note where and reboot.
+// It isn't the hardware watchdog because that can't be stopped, and would also run (and reset)
+// during a firmware upload through the bootloader.
+#define HANG_SECS 30
+static volatile uint32_t hang_secs = 0;
+static bool hang_armed = false;
+
+__attribute__((used)) void nrf52_on_rtc2(const uint32_t* frame) {
+  NRF_RTC2->EVENTS_COMPARE[0] = 0;
+  NRF_RTC2->CC[0] = (NRF_RTC2->COUNTER + 8) & 0xFFFFFF;   // 8 Hz ticks: one second
+  if (++hang_secs >= HANG_SECS) recordCrash(CRASH_HUNG, frame);
+}
+
+__attribute__((naked)) void RTC2_IRQHandler(void) {
+  __asm volatile(
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "b nrf52_on_rtc2 \n");
+}
+}
+
+static void startHangDetector() {
+  NRF_RTC2->TASKS_STOP = 1;
+  NRF_RTC2->PRESCALER = 4095;   // 32768 / 4096 = 8 Hz
+  NRF_RTC2->TASKS_CLEAR = 1;
+  NRF_RTC2->CC[0] = 8;
+  NRF_RTC2->EVENTS_COMPARE[0] = 0;
+  NRF_RTC2->EVTENSET = RTC_EVTEN_COMPARE0_Msk;
+  NRF_RTC2->INTENSET = RTC_INTENSET_COMPARE0_Msk;
+  uint8_t sd_enabled = 0;
+  sd_softdevice_is_enabled(&sd_enabled);
+  if (sd_enabled) {
+    sd_nvic_SetPriority(RTC2_IRQn, 2);   // 0, 1 and 4 belong to the SoftDevice
+    sd_nvic_ClearPendingIRQ(RTC2_IRQn);
+    sd_nvic_EnableIRQ(RTC2_IRQn);
+  } else {
+    NVIC_SetPriority(RTC2_IRQn, 2);
+    NVIC_ClearPendingIRQ(RTC2_IRQn);
+    NVIC_EnableIRQ(RTC2_IRQn);
+  }
+  NRF_RTC2->TASKS_START = 1;
+}
+
+void NRF52Board::loop() {
+  hang_secs = 0;
+  if (!hang_armed) {   // armed by the first main loop, so long setup work never counts as a hang
+    hang_armed = true;
+    startHangDetector();
+  }
+}
+
 const char* NRF52Board::getLastCrash() const {
-  return stack_smashed_last_run ? "stack overwrite" : NULL;
+  static char text[96];
+  if (last_crash.magic == CRASH_MAGIC) {
+    snprintf(text, sizeof(text), "%s at 0x%08lx (lr 0x%08lx, cfsr 0x%08lx, task %s)",
+             last_crash.kind == CRASH_HUNG ? "hung" : "hard fault", (unsigned long)last_crash.pc,
+             (unsigned long)last_crash.lr, (unsigned long)last_crash.cfsr, last_crash.task[0] ? last_crash.task : "-");
+    return text;
+  }
+  if (stack_smashed_last_run) return "stack overwrite";
+  if (boot_resetreas & POWER_RESETREAS_LOCKUP_Msk) return "CPU lockup (a fault while handling a fault)";
+  return NULL;
 }
 
 bool NRF52Board::wokeFromCharger() const {

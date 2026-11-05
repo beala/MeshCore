@@ -68,6 +68,8 @@ public:
    */
   bool wokeFromCharger() const;
   const char* getLastCrash() const override;
+  // Resets the hang detector (see NRF52Board.cpp); boards that override loop() call this too
+  void loop() override;
 
   void attachDynamicPrefs(KeyValueStore* prefs) { }  // no-op
 
