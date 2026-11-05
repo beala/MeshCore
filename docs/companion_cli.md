@@ -353,6 +353,18 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ### Power
 
+#### How long the radio has been running
+**Usage:**
+- `uptime` (or `get uptime`)
+
+**Example reply:** `> up 2d 3h 14m 5s`
+
+**Notes:**
+- Counted from the last start or restart. Boards with power management (`NRF52_POWER_MANAGEMENT`) also say what started them, for example `, started by: Wake from VBUS`.
+- Also works in the Radio console contact.
+
+---
+
 #### Stay off when a charger is plugged in (nRF52 boards)
 **Usage:**
 - `get charger.wake`

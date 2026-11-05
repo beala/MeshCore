@@ -2987,6 +2987,18 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 #endif
 
+  if (strcmp(command, "uptime") == 0 || strcmp(command, "get uptime") == 0) {
+    unsigned long secs = _ms->getMillis() / 1000;
+    int n = sprintf(reply, "> up ");
+    if (secs >= 86400) n += sprintf(&reply[n], "%lud ", secs / 86400);
+    if (secs >= 3600) n += sprintf(&reply[n], "%luh ", (secs / 3600) % 24);
+    n += sprintf(&reply[n], "%lum %lus", (secs / 60) % 60, secs % 60);
+    if (board.isPwrMgtInitialised()) {   // why it last started, where the board can tell
+      sprintf(&reply[n], ", started by: %s", board.getResetReasonString(board.getResetReason()));
+    }
+    return true;
+  }
+
 #ifdef NRF52_PLATFORM
   if (strcmp(command, "get charger.wake") == 0) {
     sprintf(reply, "> %s", _prefs.charger_wake ? "on" : "off");
