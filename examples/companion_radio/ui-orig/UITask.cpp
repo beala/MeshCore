@@ -153,7 +153,7 @@ void UITask::onMessageRecv(mesh::Packet *pkt, const ContactInfo &from, uint8_t t
   if (path_len == 0xFF) {
     sprintf(_origin, "(F) %s", from.name);
   } else {
-    sprintf(_origin, "(%d) %s", (uint32_t) path_len, from.name);
+    sprintf(_origin, "(%d) %s", (int) path_len, from.name);
   }
   StrHelper::strncpy(_msg, text, sizeof(_msg));
 
@@ -180,7 +180,7 @@ void UITask::onChannelMessageRecv(mesh::Packet *pkt, ChannelDetails& channel_det
   if (path_len == 0xFF) {
     sprintf(_origin, "(F) %s", channel_details.name);
   } else {
-    sprintf(_origin, "(%d) %s", (uint32_t) path_len, channel_details.name);
+    sprintf(_origin, "(%d) %s", (int) path_len, channel_details.name);
   }
   StrHelper::strncpy(_msg, text, sizeof(_msg));
 
@@ -306,7 +306,7 @@ void UITask::renderCurrScreen() {
       _display->setColor(UIColor::warning_txt);
       _display->setTextSize(2);
       _display->setCursor(0, 43);
-      sprintf(tmp, "Pin:%d", the_mesh.getBLEPin());
+      sprintf(tmp, "Pin:%lu", (unsigned long)the_mesh.getBLEPin());
       _display->print(tmp);
       _display->setColor(UIColor::primary_txt);
     } else {

@@ -3,16 +3,6 @@
 #include <Mesh.h>
 #include "MyMesh.h"
 
-// Believe it or not, this std C function is busted on some platforms!
-static uint32_t _atoi(const char* sp) {
-  uint32_t n = 0;
-  while (*sp && *sp >= '0' && *sp <= '9') {
-    n *= 10;
-    n += (*sp++ - '0');
-  }
-  return n;
-}
-
 // interface manager
 #include <helpers/MultiSerialInterface.h>
 MultiSerialInterface interface_manager;
@@ -88,11 +78,17 @@ MultiSerialInterface interface_manager;
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   #include <InternalFileSystem.h>
   #if defined(QSPIFLASH)
+    #pragma GCC diagnostic push   // the library hides CustomLFS::begin() (-Woverloaded-virtual)
+    #pragma GCC diagnostic ignored "-Woverloaded-virtual"
     #include <CustomLFS_QSPIFlash.h>
+    #pragma GCC diagnostic pop
     DataStore store(InternalFS, QSPIFlash, rtc_clock);
   #else
     #if defined(EXTRAFS)
+      #pragma GCC diagnostic push   // the library hides CustomLFS::begin() (-Woverloaded-virtual)
+      #pragma GCC diagnostic ignored "-Woverloaded-virtual"
       #include <CustomLFS.h>
+      #pragma GCC diagnostic pop
       CustomLFS ExtraFS(0xD4000, 0x19000, 128);
       DataStore store(InternalFS, ExtraFS, rtc_clock);
     #else

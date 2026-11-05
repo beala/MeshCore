@@ -583,7 +583,7 @@ void ST7735Display::endFrame() {
   // blit the canvas buffer to LCD
   set_CS(LOW);
   _spi->beginTransaction(_spiSettings);
-  uint16_t x, y;
+  uint16_t y;
   uint16_t* pixels = (uint16_t *) ((TFT_eSprite *) sprite)->getPointer();
   for (y = 0; y < 80; y++, pixels += 160) {
     setAddrWindow(0, y, 160, 1);

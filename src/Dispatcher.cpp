@@ -91,7 +91,7 @@ void Dispatcher::loop() {
 
       updateTxBudget();
 
-      if (t > tx_budget_ms) {
+      if (t > (long) tx_budget_ms) {
         tx_budget_ms = 0;
       } else {
         tx_budget_ms -= t;

@@ -226,7 +226,7 @@ protected:
   void onPacketHeard(Packet* packet) override;
 
   Mesh(Radio& radio, MillisecondClock& ms, RNG& rng, RTCClock& rtc, PacketManager& mgr, MeshTables& tables)
-    : Dispatcher(radio, ms, mgr), _rng(&rng), _rtc(&rtc), _tables(&tables)
+    : Dispatcher(radio, ms, mgr), _rtc(&rtc), _rng(&rng), _tables(&tables)
   {
   }
 

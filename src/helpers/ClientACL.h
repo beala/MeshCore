@@ -52,7 +52,7 @@ class ClientACL {
 
 public:
   ClientACL() { 
-    memset(clients, 0, sizeof(clients));
+    memset((void*) clients, 0, sizeof(clients));
     num_clients = 0;
   }
   void load(FILESYSTEM* _fs, const mesh::LocalIdentity& self_id);

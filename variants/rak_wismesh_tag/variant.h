@@ -111,11 +111,15 @@ extern const int SCK;
 #define PIN_GPS_RX              (PIN_SERIAL1_TX)
 #define PIN_GPS_TX              (PIN_SERIAL1_RX)
 #define PIN_GPS_PPS             (17)
-#define PIN_GPS_EN              (34)
+#ifndef PIN_GPS_EN   // platformio.ini sets it too
+  #define PIN_GPS_EN  (34)
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // OTHER PINS
 #define PIN_AREF                (2)
 #define PIN_NFC1                (9)
 #define PIN_NFC2                (10)
-#define PIN_BUZZER              (21)
+#ifndef PIN_BUZZER   // platformio.ini sets it too
+  #define PIN_BUZZER  (21)
+#endif

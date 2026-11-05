@@ -27,7 +27,7 @@ void ClientACL::load(FILESYSTEM* fs, const mesh::LocalIdentity& self_id) {
         uint8_t pub_key[32];
         uint8_t unused[2];
 
-        memset(&c, 0, sizeof(c));
+        memset((void*) &c, 0, sizeof(c));
 
         bool success = (file.read(pub_key, 32) == 32);
         success = success && (file.read((uint8_t *) &c.permissions, 1) == 1);
@@ -82,7 +82,7 @@ bool ClientACL::clear() {
   if (_fs->exists("/s_contacts")) {
     _fs->remove("/s_contacts");
   }
-  memset(clients, 0, sizeof(clients));
+  memset((void*) clients, 0, sizeof(clients));
   num_clients = 0;
   return true;
 }
@@ -111,7 +111,7 @@ ClientInfo* ClientACL::putClient(const mesh::Identity& id, uint8_t init_perms) {
   } else {
     c = oldest;  // evict least active contact
   }
-  memset(c, 0, sizeof(*c));
+  memset((void*) c, 0, sizeof(*c));
   c->permissions = init_perms;
   c->id = id;
   c->out_path_len = OUT_PATH_UNKNOWN;

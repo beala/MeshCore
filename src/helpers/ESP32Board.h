@@ -21,7 +21,10 @@ class ESP32Board : public mesh::MainBoard {
 protected:
   uint8_t startup_reason;
   bool inhibit_sleep = false;
-  static inline portMUX_TYPE sleepMux = portMUX_INITIALIZER_UNLOCKED;
+  static portMUX_TYPE* sleepMux() {   // one lock for all boards (inline variables need C++17)
+    static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+    return &mux;
+  }
 
 public:
   void begin() {
@@ -89,11 +92,11 @@ public:
     }
 
     // Disable CPU interrupt servicing
-    portENTER_CRITICAL(&sleepMux);
+    portENTER_CRITICAL(sleepMux());
 
     // Skip sleep if there is a LoRa packet
     if (gpio_get_level(wakeupPin) == HIGH) {
-      portEXIT_CRITICAL(&sleepMux);
+      portEXIT_CRITICAL(sleepMux());
       delay(1);
       return;
     }
@@ -110,7 +113,7 @@ public:
     gpio_set_intr_type(wakeupPin, GPIO_INTR_POSEDGE);
 
     // Enable CPU interrupt servicing
-    portEXIT_CRITICAL(&sleepMux);
+    portEXIT_CRITICAL(sleepMux());
   }
 
   uint8_t getStartupReason() const override { return startup_reason; }

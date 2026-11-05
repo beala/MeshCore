@@ -274,7 +274,7 @@ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t
     uint8_t res2 = payload[2];
     if (res1 == 0 && res2 == 0) {
       uint8_t ofs = 4;
-      for (int i = 0; i < acl.getNumClients() && ofs + 7 <= sizeof(reply_data) - 4; i++) {
+      for (int i = 0; i < acl.getNumClients() && ofs + 7 <= (int) sizeof(reply_data) - 4; i++) {
         auto c = acl.getClientByIdx(i);
         if (c->permissions == 0) continue;  // skip deleted entries
         memcpy(&reply_data[ofs], c->id.pub_key, 6); ofs += 6;  // just 6-byte pub_key prefix
@@ -354,7 +354,7 @@ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t
 
         // stop if we can't fit another entry in results
         int entry_size = pubkey_prefix_length + 4 + 1;
-        if(results_offset + entry_size > sizeof(results_buffer)){
+        if(results_offset + entry_size > (int) sizeof(results_buffer)){
           MESH_DEBUG_PRINTLN("REQ_TYPE_GET_NEIGHBOURS no more entries can fit in results buffer");
           break;
         }
@@ -894,11 +894,11 @@ void MyMesh::sendNodeDiscoverReq() {
 MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondClock &ms, mesh::RNG &rng,
                mesh::RTCClock &rtc, mesh::MeshTables &tables)
     : mesh::Mesh(radio, ms, rng, rtc, *new StaticPoolPacketManager(32), tables),
-      region_map(key_store), temp_map(key_store),
       _cli(board, rtc, sensors, region_map, acl, &_prefs, this),
-      telemetry(MAX_PACKET_PAYLOAD - 4),
+      region_map(key_store), temp_map(key_store),
       discover_limiter(4, 120),  // max 4 every 2 minutes
-      anon_limiter(4, 180)   // max 4 every 3 minutes
+      anon_limiter(4, 180),  // max 4 every 3 minutes
+      telemetry(MAX_PACKET_PAYLOAD - 4)
 #if defined(WITH_RS232_BRIDGE)
       , bridge(&_prefs, WITH_RS232_BRIDGE, _mgr, &rtc)
 #endif
@@ -916,7 +916,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   recv_pkt_region = NULL;
 
 #if MAX_NEIGHBOURS
-  memset(neighbours, 0, sizeof(neighbours));
+  memset((void*) neighbours, 0, sizeof(neighbours));
 #endif
 
   // defaults
@@ -1154,7 +1154,7 @@ void MyMesh::formatNeighborsReply(char *reply) {
 
     // add next neighbour
     uint32_t secs_ago = getRTCClock()->getCurrentTime() - neighbour->heard_timestamp;
-    sprintf(dp, "%s:%d:%d", hex, secs_ago, neighbour->snr);
+    sprintf(dp, "%s:%lu:%d", hex, (unsigned long)secs_ago, neighbour->snr);
     while (*dp)
       dp++; // find end of string
   }

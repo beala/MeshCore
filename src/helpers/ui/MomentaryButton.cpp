@@ -39,7 +39,7 @@ void MomentaryButton::begin() {
 }
 
 bool  MomentaryButton::isPressed() const {
-  int btn = _threshold > 0 ? (analogRead(_pin) < _threshold) : digitalRead(_pin);
+  int btn = _threshold > 0 ? ((int) analogRead(_pin) < _threshold) : digitalRead(_pin);
   return isPressed(btn);
 }
 
@@ -66,14 +66,14 @@ int MomentaryButton::check(bool repeat_click) {
   if (_pin < 0) return BUTTON_EVENT_NONE;
 
   int event = BUTTON_EVENT_NONE;
-  int btn = _threshold > 0 ? (analogRead(_pin) < _threshold) : digitalRead(_pin);
+  int btn = _threshold > 0 ? ((int) analogRead(_pin) < _threshold) : digitalRead(_pin);
   if (btn != prev) {
     if (isPressed(btn)) {
       down_at = millis();
     } else {
       // button UP
       if (_long_millis > 0) {
-        if (down_at > 0 && (unsigned long)(millis() - down_at) < _long_millis) {  // only a CLICK if still within the long_press millis
+        if (down_at > 0 && (unsigned long)(millis() - down_at) < (unsigned long) _long_millis) {  // only a CLICK if still within the long_press millis
             _click_count++;
             _last_click_time = millis();
             _pending_click = true;
@@ -97,7 +97,7 @@ int MomentaryButton::check(bool repeat_click) {
     cancel = 0;
   }
 
-  if (_long_millis > 0 && down_at > 0 && (unsigned long)(millis() - down_at) >= _long_millis) {
+  if (_long_millis > 0 && down_at > 0 && (unsigned long)(millis() - down_at) >= (unsigned long) _long_millis) {
     if (_pending_click) {
       // long press during multi-click detection - cancel pending clicks
       cancelClick();
@@ -116,7 +116,7 @@ int MomentaryButton::check(bool repeat_click) {
     }
   }
 
-  if (_pending_click && (millis() - _last_click_time) >= _multi_click_window) {
+  if (_pending_click && (millis() - _last_click_time) >= (unsigned long) _multi_click_window) {
     if (down_at > 0) {
       // still pressed - wait for button release before processing clicks
       return event;

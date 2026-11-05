@@ -150,7 +150,7 @@ protected:
   uint16_t _err_flags;
 
   Dispatcher(Radio& radio, MillisecondClock& ms, PacketManager& mgr)
-    : _radio(&radio), _ms(&ms), _mgr(&mgr)
+    : _mgr(&mgr), _radio(&radio), _ms(&ms)
   {
     outbound = NULL;
     total_air_time = rx_air_time = 0;

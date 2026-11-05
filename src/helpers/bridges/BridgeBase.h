@@ -73,7 +73,7 @@ protected:
    * @param rtc RTCClock for timestamping debug messages
    */
   BridgeBase(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc)
-      : _prefs(prefs), _mgr(mgr), _rtc(rtc) {}
+      : _mgr(mgr), _rtc(rtc), _prefs(prefs) {}
 
   /**
    * @brief Gets formatted date/time string for logging

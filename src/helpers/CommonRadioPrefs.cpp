@@ -21,11 +21,11 @@ bool looksLikeANumber(const char* s) {
 
 bool CommonRadioPrefs::getByKey(const char* key, char* value, size_t max_len) {
   if (strcmp(key, "fem_rxgain") == 0) {
-    snprintf(value, max_len, "%d", (uint32_t)getFEMRxGain());
+    snprintf(value, max_len, "%d", (int) getFEMRxGain());
     return true;
   }
   if (strcmp(key, "fem_txgain") == 0) {
-    snprintf(value, max_len, "%d", (uint32_t)getFEMTxGain());
+    snprintf(value, max_len, "%d", (int) getFEMTxGain());
     return true;
   }
   return false;
@@ -49,7 +49,7 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
     char freq[16], bw[16];
     strcpy(freq, StrHelper::ftoa(getFreq()));
     strcpy(bw, StrHelper::ftoa3(getBandwidth()));
-    sprintf(reply, "> %s,%s,%d,%d", freq, bw, (uint32_t)getSpreadFactor(), (uint32_t)getCodingRate());
+    sprintf(reply, "> %s,%s,%d,%d", freq, bw, (int) getSpreadFactor(), (int) getCodingRate());
     return true;
   }
   if (memcmp(command, "set radio ", 10) == 0) {
@@ -116,7 +116,7 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
   }
 
   if (strcmp(command, "get int.thresh") == 0) {
-    sprintf(reply, "> %d", (uint32_t) getIntThresh());
+    sprintf(reply, "> %d", (int) getIntThresh());
     return true;
   }
   if (memcmp(command, "set int.thresh ", 15) == 0) {
@@ -151,7 +151,7 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
   }
 
   if (memcmp(command, "get tx", 6) == 0 && (command[6] == 0 || command[6] == ' ')) {
-    sprintf(reply, "> %d", (int32_t) getTxPower());
+    sprintf(reply, "> %d", (int) getTxPower());
     return true;
   }
   if (memcmp(command, "set tx ", 7) == 0) {
@@ -177,19 +177,19 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
   }
 
   if (strcmp(command, "get agc.reset.interval") == 0) {
-    sprintf(reply, "> %d", (uint32_t) getAgcResetInt());
+    sprintf(reply, "> %d", (int) getAgcResetInt());
     return true;
   }
   if (memcmp(command, "set agc.reset.interval ", 23) == 0) {
     int secs = atoi(&command[23]);
     secs = constrain(secs, 0, 255 * 4);
     setAgcResetInt((uint16_t) secs);
-    sprintf(reply, "OK - interval rounded to %d", (uint32_t) getAgcResetInt());
+    sprintf(reply, "OK - interval rounded to %d", (int) getAgcResetInt());
     return true;
   }
 
   if (strcmp(command, "get path.hash.mode") == 0) {
-    sprintf(reply, "> %d", (uint32_t)getHashMode());
+    sprintf(reply, "> %d", (int) getHashMode());
     return true;
   }
   if (memcmp(command, "set path.hash.mode ", 19) == 0) {
@@ -205,7 +205,7 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
   }
 
   if (strcmp(command, "get multi.acks") == 0) {
-    sprintf(reply, "> %d", (uint32_t) getMultiAcks());
+    sprintf(reply, "> %d", (int) getMultiAcks());
     return true;
   }
   if (memcmp(command, "set multi.acks ", 15) == 0) {

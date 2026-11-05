@@ -166,7 +166,9 @@ static const uint8_t AREF = PIN_AREF;
 //
 // The external PA / LNA / antenna switches are driven by LR2021 DIO5..DIO8 in
 // RF-switch mode (see target.cpp), so TX/RX switching is done by the radio itself.
-#define USE_LR2021
+#ifndef USE_LR2021   // platformio.ini sets it too
+  #define USE_LR2021
+#endif
 #define LR2021_CS (26)
 #define LR2021_IRQ (10)
 #define LR2021_BUSY (9)

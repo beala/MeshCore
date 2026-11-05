@@ -28,7 +28,7 @@ class StdRNG : public mesh::RNG {
 public:
   void begin(long seed) { randomSeed(seed); }
   void random(uint8_t* dest, size_t sz) override {
-    for (int i = 0; i < sz; i++) {
+    for (size_t i = 0; i < sz; i++) {
       dest[i] = (::random(0, 256) & 0xFF);
     }
   }

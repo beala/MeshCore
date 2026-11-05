@@ -240,7 +240,7 @@ protected:
   }
 
 public:
-  NodePrefs() : ConfigSerializer(), bridge(this), gps(this), radio(this), power(this), repeat(this), room(this), custom(&radio) {
+  NodePrefs() : ConfigSerializer(), radio(this), bridge(this), gps(this), power(this), repeat(this), room(this), custom(&radio) {
     node_name[0] = 0;
     password[0] = 0;
     guest_password[0] = 0;
@@ -330,7 +330,7 @@ class CommonCLI {
 
 public:
   CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors, RegionMap& region_map, ClientACL& acl, NodePrefs* prefs, CommonCLICallbacks* callbacks)
-      : _board(&board), _rtc(&rtc), _sensors(&sensors), _region_map(&region_map), _acl(&acl), _prefs(prefs), _callbacks(callbacks) { }
+      : _rtc(&rtc), _prefs(prefs), _callbacks(callbacks), _board(&board), _sensors(&sensors), _region_map(&region_map), _acl(&acl) { }
 
   void loadPrefs(FILESYSTEM* _fs);
   bool savePrefs(FILESYSTEM* _fs);

@@ -16,7 +16,9 @@ static RTC_RX8130CE rtc_8130;
 static bool rtc_8130_success = false;
 
 #define DS3231_ADDRESS   0x68
-#define RV3028_ADDRESS   0x52
+#ifndef RV3028_ADDRESS     // the Melopero library defines it too
+  #define RV3028_ADDRESS 0x52
+#endif
 #define PCF8563_ADDRESS  0x51
 #define RX8130CE_ADDRESS 0x32
 

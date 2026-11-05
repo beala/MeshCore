@@ -1,20 +1,19 @@
 name: Custom Builds
 
-# Releases firmware from beala/main, this fork's own main line. Each run first merges new upstream
-# dev commits into beala/main (when they merge cleanly), then builds the boards below and publishes
-# a release if beala/main changed since the last one.
+# Releases firmware from beala/main, this fork's own main line: each push builds the boards below and
+# publishes a release if beala/main changed since the last one.
 #
 # Features: commit them to beala/main (or merge a short-lived branch into it) and push; the push
 # starts a run. Upstream PRs: cut a branch from upstream/dev and cherry-pick the feature onto it.
-# If upstream dev stops merging cleanly, this run fails; merge it by hand and push:
-#   git fetch upstream dev && git merge upstream/dev
+# Upstream dev is merged by hand, not here: builds fail on any compiler warning, so new upstream code
+# has to be fixed up first. To take it in (meshcore-dev/MeshCore is the remote "origin" in the
+# usual checkout):
+#   git fetch origin dev && git merge origin/dev   # fix conflicts and warnings, build TARGETS, push
 
 permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: '17,47 * * * *'  # check upstream every 30 minutes; runs with nothing new stop early
   push:
     branches: [beala/main]
   workflow_dispatch:
@@ -60,29 +59,13 @@ jobs:
         with:
           ref: beala/main
           fetch-depth: 0
-          # GITHUB_TOKEN cannot push commits that change workflow files. If an upstream merge changes
-          # one and the push is refused, add a personal access token as the INTEGRATION_PUSH_TOKEN secret.
-          token: ${{ secrets.INTEGRATION_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Merge upstream dev
+      - name: Fetch upstream dev
+        # only for the release notes, which say how much of upstream is in this build
         id: rebuild
         run: |
           git remote add upstream https://github.com/meshcore-dev/MeshCore.git
           git fetch --no-tags upstream dev
-          if git merge-base --is-ancestor upstream/dev HEAD; then
-            echo "beala/main already has upstream dev"
-          elif git merge -q --no-ff --no-edit -m "Merge upstream dev into beala/main" upstream/dev; then
-            git push origin HEAD:beala/main
-          else
-            git merge --abort
-            echo "::error::upstream dev doesn't merge cleanly into beala/main. Merge it by hand: git fetch upstream dev && git merge upstream/dev, fix, push."
-            exit 1
-          fi
           echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Check for existing release
@@ -116,7 +99,7 @@ jobs:
           echo "date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
           {
             echo 'notes<<EOF'
-            echo "Firmware built from [beala/main](https://github.com/${GITHUB_REPOSITORY}/tree/beala/main) at $(git rev-parse --short HEAD), which includes upstream \`dev\` up to $(git rev-parse --short upstream/dev)."
+            echo "Firmware built from [beala/main](https://github.com/${GITHUB_REPOSITORY}/tree/beala/main) at $(git rev-parse --short HEAD), which includes upstream \`dev\` up to $(git rev-parse --short $(git merge-base upstream/dev HEAD)) ($(git rev-list --count HEAD..upstream/dev) newer upstream commits not merged)."
             PREV=$(gh release list --repo ${{ github.repository }} --limit 50 --json tagName,createdAt \
               -q '[.[] | select(.tagName | startswith("beala-"))] | sort_by(.createdAt) | reverse | .[0].tagName')
             if [ -n "$PREV" ] && git rev-parse -q --verify "$PREV^{commit}" >/dev/null \

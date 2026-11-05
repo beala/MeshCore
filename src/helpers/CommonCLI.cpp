@@ -586,7 +586,7 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "owner.info ", 11) == 0) {
     config += 11;
     char *dp = _prefs->owner_info;
-    while (*config && dp - _prefs->owner_info < sizeof(_prefs->owner_info)-1) {
+    while (*config && dp - _prefs->owner_info < (int) sizeof(_prefs->owner_info)-1) {
       *dp++ = (*config == '|') ? '\n' : *config;    // translate '|' to newline chars
       config++;
     }
@@ -712,9 +712,9 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   if (memcmp(config, "allow.read.only", 15) == 0) {
     sprintf(reply, "> %s", _prefs->allow_read_only ? "on" : "off");
   } else if (memcmp(config, "flood.advert.interval", 21) == 0) {
-    sprintf(reply, "> %d", ((uint32_t) _prefs->flood_advert_interval));
+    sprintf(reply, "> %d", ((int) _prefs->flood_advert_interval));
   } else if (memcmp(config, "advert.interval", 15) == 0) {
-    sprintf(reply, "> %d", ((uint32_t) _prefs->advert_interval) * 2);
+    sprintf(reply, "> %d", ((int) _prefs->advert_interval) * 2);
   } else if (memcmp(config, "guest.password", 14) == 0) {
     sprintf(reply, "> %s", _prefs->guest_password);
   } else if (sender_timestamp == 0 && memcmp(config, "prv.key", 7) == 0) {  // from serial command line only
@@ -731,11 +731,11 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "lon", 3) == 0) {
     sprintf(reply, "> %s", StrHelper::ftoa(_prefs->node_lon));
   } else if (memcmp(config, "flood.max.advert", 16) == 0) {
-    sprintf(reply, "> %d", (uint32_t)_prefs->flood_max_advert);
+    sprintf(reply, "> %d", (int) _prefs->flood_max_advert);
   } else if (memcmp(config, "flood.max.unscoped", 18) == 0) {
-    sprintf(reply, "> %d", (uint32_t)_prefs->flood_max_unscoped);
+    sprintf(reply, "> %d", (int) _prefs->flood_max_unscoped);
   } else if (memcmp(config, "flood.max", 9) == 0) {
-    sprintf(reply, "> %d", (uint32_t)_prefs->flood_max);
+    sprintf(reply, "> %d", (int) _prefs->flood_max);
   } else if (memcmp(config, "owner.info", 10) == 0) {
     auto start = reply;
     *reply++ = '>';
@@ -775,17 +775,17 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "bridge.enabled", 14) == 0) {
     sprintf(reply, "> %s", _prefs->bridge_enabled ? "on" : "off");
   } else if (memcmp(config, "bridge.delay", 12) == 0) {
-    sprintf(reply, "> %d", (uint32_t)_prefs->bridge_delay);
+    sprintf(reply, "> %d", (int) _prefs->bridge_delay);
   } else if (memcmp(config, "bridge.source", 13) == 0) {
     sprintf(reply, "> %s", _prefs->bridge_pkt_src ? "logRx" : "logTx");
 #endif
 #ifdef WITH_RS232_BRIDGE
   } else if (memcmp(config, "bridge.baud", 11) == 0) {
-    sprintf(reply, "> %d", (uint32_t)_prefs->bridge_baud);
+    sprintf(reply, "> %d", (int) _prefs->bridge_baud);
 #endif
 #ifdef WITH_ESPNOW_BRIDGE
   } else if (memcmp(config, "bridge.channel", 14) == 0) {
-    sprintf(reply, "> %d", (uint32_t)_prefs->bridge_channel);
+    sprintf(reply, "> %d", (int) _prefs->bridge_channel);
   } else if (memcmp(config, "bridge.secret", 13) == 0) {
     sprintf(reply, "> %s", _prefs->bridge_secret);
 #endif

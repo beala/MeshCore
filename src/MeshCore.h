@@ -31,8 +31,10 @@
   #define MESH_DEBUG_PRINT(F, ...) Serial.printf("DEBUG: " F, ##__VA_ARGS__)
   #define MESH_DEBUG_PRINTLN(F, ...) Serial.printf("DEBUG: " F "\n", ##__VA_ARGS__)
 #else
-  #define MESH_DEBUG_PRINT(...) {}
-  #define MESH_DEBUG_PRINTLN(...) {}
+  // Off: the arguments are never evaluated, but a variable kept only for a debug print still counts as used
+  template<typename... T> inline void mesh_debug_unused(const T&...) { }
+  #define MESH_DEBUG_PRINT(...) do { if (0) mesh_debug_unused(__VA_ARGS__); } while (0)
+  #define MESH_DEBUG_PRINTLN(...) do { if (0) mesh_debug_unused(__VA_ARGS__); } while (0)
 #endif
 
 #if BRIDGE_DEBUG && ARDUINO

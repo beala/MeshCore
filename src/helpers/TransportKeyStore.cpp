@@ -18,7 +18,7 @@ uint16_t TransportKey::calcTransportCode(const mesh::Packet* packet) const {
 }
 
 bool TransportKey::isNull() const {
-  for (int i = 0; i < sizeof(key); i++) {
+  for (size_t i = 0; i < sizeof(key); i++) {
     if (key[i]) return false;
   }
   return true;  // key is all zeroes

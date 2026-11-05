@@ -106,7 +106,7 @@ ContactInfo* BaseChatMesh::allocateContactSlot(bool transient_only) {
 }
 
 void BaseChatMesh::populateContactFromAdvert(ContactInfo& ci, const mesh::Identity& id, const AdvertDataParser& parser, uint32_t timestamp) {
-  memset(&ci, 0, sizeof(ci));
+  memset((void*) &ci, 0, sizeof(ci));
   ci.id = id;
   ci.out_path_len = OUT_PATH_UNKNOWN;
   StrHelper::strncpy(ci.name, parser.getName(), sizeof(ci.name));
@@ -150,7 +150,7 @@ void BaseChatMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, 
   }
 
   if (from && from->type == ADV_TYPE_NONE) {   // already in contacts, but from a temporary ANON_REQ ?
-    memset(from, 0, sizeof(*from));  // clear the anon/temp slot
+    memset((void*) from, 0, sizeof(*from));  // clear the anon/temp slot
     from = NULL;  // do normal 'add' flow
   }
 
@@ -1004,7 +1004,7 @@ int BaseChatMesh::findChannelIdx(const mesh::GroupChannel& ch) {
 #endif
 
 bool BaseChatMesh::getContactByIdx(uint32_t idx, ContactInfo& contact) {
-  if (idx >= num_contacts) return false;
+  if (idx >= (uint32_t) num_contacts) return false;
 
   contact = contacts[idx];
   return true;

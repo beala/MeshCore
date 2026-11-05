@@ -46,7 +46,7 @@ public:
     const char *dash = strchr(ver, '-');
 
     int len = dash ? dash - ver : strlen(ver);
-    if (len >= sizeof(_version_info)) len = sizeof(_version_info) - 1;
+    if (len >= (int) sizeof(_version_info)) len = sizeof(_version_info) - 1;
     memcpy(_version_info, ver, len);
     _version_info[len] = 0;
 
@@ -181,7 +181,7 @@ class HomeScreen : public UIScreen {
   int sensors_nb = 0;
   bool sensors_scroll = false;
   int sensors_scroll_offset = 0;
-  int next_sensors_refresh = 0;
+  unsigned long next_sensors_refresh = 0;
 
   void refresh_sensors() {
     if (millis() > next_sensors_refresh) {
@@ -318,7 +318,7 @@ public:
           display.drawTextCentered(display.width() / 2, 43, "< Connected >");
       } else if (the_mesh.getBLEPin() != 0) { // BT pin
         display.setColor(UIColor::warning_txt);
-        sprintf(tmp, "Pin:%d", the_mesh.getBLEPin());
+        sprintf(tmp, "Pin:%lu", (unsigned long)the_mesh.getBLEPin());
         if (_node_prefs->ui_show_clock) {
           display.setTextSize(1);
           display.drawTextCentered(display.width() / 2, 110, tmp);
@@ -416,7 +416,7 @@ public:
         display.setColor(UIColor::secondary_txt);
         display.drawTextLeftAlign(0, y, "sat");
         display.setColor(UIColor::primary_txt);
-        sprintf(buf, "%d", nmea->satellitesCount());
+        sprintf(buf, "%d", (int) nmea->satellitesCount());
         display.drawTextRightAlign(display.width()-1, y, buf);
         y = y + 12;
         display.setColor(UIColor::secondary_txt);
@@ -519,7 +519,7 @@ public:
         if ((a->name[0] == 0) || !_node_prefs->ui_nd_name) {
           mesh::Utils::toHex(name, a->pubkey_prefix, 4);
         } else {
-          strncpy(name, a->name, 32);
+          StrHelper::strncpy(name, a->name, sizeof(name));
         }
         char filtered_name[sizeof(name)];
         char snr_s[12];
@@ -660,7 +660,7 @@ public:
     if (path_len == 0xFF) {
       sprintf(p->origin, "(D) %s:", from_name);
     } else {
-      sprintf(p->origin, "(%d) %s:", (uint32_t) path_len, from_name);
+      sprintf(p->origin, "(%d) %s:", (int) path_len, from_name);
     }
     StrHelper::strncpy(p->msg, msg, sizeof(p->msg));
   }
@@ -763,7 +763,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
 }
 
 void UITask::showAlert(const char* text, int duration_millis) {
-  strcpy(_alert, text);
+  StrHelper::strncpy(_alert, text, sizeof(_alert));
   _alert_expiry = millis() + duration_millis;
 }
 

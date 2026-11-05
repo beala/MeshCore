@@ -202,7 +202,7 @@ void MyMesh::writeContactRespFrame(uint8_t code, const ContactInfo &contact) {
 
 void MyMesh::updateContactFromFrame(ContactInfo &contact, uint32_t& last_mod, const uint8_t *frame, int len) {
   int i = 0;
-  uint8_t code = frame[i++]; // eg. CMD_ADD_UPDATE_CONTACT
+  i++; // skip the command code, eg. CMD_ADD_UPDATE_CONTACT
   memcpy(contact.id.pub_key, &frame[i], PUB_KEY_SIZE);
   i += PUB_KEY_SIZE;
   contact.type = frame[i++];
@@ -390,7 +390,7 @@ bool MyMesh::handleCloneCommand(const char* command, char* reply) {
     static const char* roles[] = { "normal", "main", "backup" };
     int n = snprintf(reply, 160, "Role: %s.", roles[_clone.role()]);
     if (_clone.isBackup()) {
-      n += snprintf(&reply[n], 160 - n, " Messages left unanswered: %u.", _clone.silenced());
+      n += snprintf(&reply[n], 160 - n, " Messages left unanswered: %u.", (unsigned)_clone.silenced());
     }
     if (_sibling_heard) {
       snprintf(&reply[n], 160 - n, " Other radio heard %lu min ago, to %s.",
@@ -409,7 +409,7 @@ bool MyMesh::handleCloneCommand(const char* command, char* reply) {
 #define CONSOLE_CONFIRM_DELAY  300   // ms: give the app time to note the ACK code before it's confirmed
 
 void MyMesh::fillConsoleContact(ContactInfo& c) {
-  memset(&c, 0, sizeof(c));
+  memset((void*) &c, 0, sizeof(c));
   // stable, and can't be a real node: a hash of our own key
   mesh::Utils::sha256(c.id.pub_key, PUB_KEY_SIZE, (const uint8_t *) CONSOLE_NAME, strlen(CONSOLE_NAME),
                       self_id.pub_key, PUB_KEY_SIZE);
@@ -878,7 +878,7 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
   }
   memcpy(&out_frame[i], from.id.pub_key, 6);
   i += 6; // just 6-byte prefix
-  uint8_t path_len = out_frame[i++] = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
+  out_frame[i++] = pkt->isRouteFlood() ? pkt->path_len : 0xFF;   // path length
   out_frame[i++] = txt_type;
   memcpy(&out_frame[i], &sender_timestamp, 4);
   i += 4;
@@ -1005,7 +1005,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
 
   uint8_t channel_idx = findChannelIdx(channel);
   out_frame[i++] = channel_idx;
-  uint8_t path_len = out_frame[i++] = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
+  out_frame[i++] = pkt->isRouteFlood() ? pkt->path_len : 0xFF;   // path length
 
   out_frame[i++] = TXT_TYPE_PLAIN;
   memcpy(&out_frame[i], &timestamp, 4);
@@ -1246,7 +1246,7 @@ bool MyMesh::onContactPathRecv(ContactInfo& contact, uint8_t* in_path, uint8_t i
 }
 
 void MyMesh::onControlDataRecv(mesh::Packet *packet) {
-  if (packet->payload_len + 4 > sizeof(out_frame)) {
+  if (packet->payload_len + 4 > (int) sizeof(out_frame)) {
     MESH_DEBUG_PRINTLN("onControlDataRecv(), payload_len too long: %d", packet->payload_len);
     return;
   }
@@ -1268,7 +1268,7 @@ void MyMesh::onControlDataRecv(mesh::Packet *packet) {
 }
 
 void MyMesh::onRawDataRecv(mesh::Packet *packet) {
-  if (packet->payload_len + 4 > sizeof(out_frame)) {
+  if (packet->payload_len + 4 > (int) sizeof(out_frame)) {
     MESH_DEBUG_PRINTLN("onRawDataRecv(), payload_len too long: %d", packet->payload_len);
     return;
   }
@@ -1293,7 +1293,7 @@ void MyMesh::onRawDataRecv(mesh::Packet *packet) {
 void MyMesh::onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code, uint8_t flags,
                          const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) {
   uint8_t path_sz = flags & 0x03;  // NEW v1.11+
-  if (12 + path_len + (path_len >> path_sz) + 1 > sizeof(out_frame)) {
+  if (12 + path_len + (path_len >> path_sz) + 1 > (int) sizeof(out_frame)) {
     MESH_DEBUG_PRINTLN("onTraceRecv(), path_len is too long: %d", (uint32_t)path_len);
     return;
   }
@@ -1337,7 +1337,7 @@ void MyMesh::onSendTimeout() {}
 
 MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store)
     : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables),
-      _serial(NULL), telemetry(MAX_PACKET_PAYLOAD - 4), _store(&store), _listener(NULL), _iter(0) {
+      _store(&store), _serial(NULL), _listener(NULL), _iter(0), telemetry(MAX_PACKET_PAYLOAD - 4) {
   _iter_started = false;
   _iter_console_pending = false;
   _console_pending = false;
@@ -1539,7 +1539,7 @@ static FreqRange repeat_freq_ranges[] = {
 };
 
 bool MyMesh::isValidClientRepeatFreq(uint32_t f) const {
-  for (int i = 0; i < sizeof(repeat_freq_ranges)/sizeof(repeat_freq_ranges[0]); i++) {
+  for (size_t i = 0; i < sizeof(repeat_freq_ranges)/sizeof(repeat_freq_ranges[0]); i++) {
     auto r = &repeat_freq_ranges[i];
     if (f >= r->lower_freq && f <= r->upper_freq) return true;
   }
@@ -1792,7 +1792,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     }
   } else if (cmd_frame[0] == CMD_SET_ADVERT_NAME && len >= 2) {
     int nlen = len - 1;
-    if (nlen > sizeof(_prefs.node_name) - 1) nlen = sizeof(_prefs.node_name) - 1; // max len
+    if (nlen > (int) sizeof(_prefs.node_name) - 1) nlen = sizeof(_prefs.node_name) - 1; // max len
     memcpy(_prefs.node_name, &cmd_frame[1], nlen);
     _prefs.node_name[nlen] = 0; // null terminator
     savePrefs();
@@ -1966,7 +1966,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     uint8_t sf = cmd_frame[i++];
     uint8_t cr = cmd_frame[i++];
     uint8_t repeat = 0;  // default - false
-    if (len > i) {
+    if ((int) len > i) {
       repeat = cmd_frame[i++];   // FIRMWARE_VER_CODE  9+
     }
 
@@ -2094,7 +2094,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     if (path_len >= 0 && mesh::Packet::isValidPathLen(path_len)) {
       uint8_t path[MAX_PATH_SIZE];
       i += mesh::Packet::writePath(path, &cmd_frame[i], path_len);
-      if (i + 4 > len) {  // min payload 4 bytes
+      if (i + 4 > (int) len) {  // min payload 4 bytes
         writeErrFrame(ERR_CODE_ILLEGAL_ARG);
       } else {
         auto pkt = createRawData(&cmd_frame[i], len - i);
@@ -2135,7 +2135,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     ContactInfo *recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
     ContactInfo anon;
     if (recipient == NULL) { // FIRMWARE_VER_CODE 13+,  allow non-contact requests
-      memset(&anon, 0, sizeof(anon));
+      memset((void*) &anon, 0, sizeof(anon));
       memcpy(anon.id.pub_key, pub_key, PUB_KEY_SIZE);
       anon.out_path_len = 0;   // default to zero-hop direct
       anon.type = ADV_TYPE_NONE;  // unknown
@@ -2571,7 +2571,7 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_GET_ALLOWED_REPEAT_FREQ) {
     int i = 0;
     out_frame[i++] = RESP_ALLOWED_REPEAT_FREQ;
-    for (int k = 0; k < sizeof(repeat_freq_ranges)/sizeof(repeat_freq_ranges[0]) && i + 8 < sizeof(out_frame); k++) {
+    for (size_t k = 0; k < sizeof(repeat_freq_ranges)/sizeof(repeat_freq_ranges[0]) && i + 8 < (int) sizeof(out_frame); k++) {
       auto r = &repeat_freq_ranges[k];
       memcpy(&out_frame[i], &r->lower_freq, 4); i += 4;
       memcpy(&out_frame[i], &r->upper_freq, 4); i += 4;
@@ -3070,7 +3070,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (memcmp(command, "set pin ", 8) == 0) {
     _prefs.ble_pin = atoi(&command[8]);
     savePrefs();
-    sprintf(reply, "> pin is now %06d", _prefs.ble_pin);
+    sprintf(reply, "> pin is now %06lu", (unsigned long)_prefs.ble_pin);
     return true;
   }
 
@@ -3162,14 +3162,14 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (memcmp(command, "set ui.auto_off_delay", 21) == 0) {
     _prefs.ui_auto_off_delay = atoi(&command[21]);
     savePrefs();
-    sprintf(reply, "> now %d seconds", _prefs.ui_auto_off_delay);
+    sprintf(reply, "> now %lu seconds", (unsigned long)_prefs.ui_auto_off_delay);
     return true;
   }
   if (memcmp(command, "set ui.backlight_delay", 22) == 0) {
     _prefs.ui_backlight_delay = atoi(&command[22]);
     savePrefs();
     if (_prefs.ui_backlight_delay >= 0)    
-      sprintf(reply, "> now %d seconds", _prefs.ui_backlight_delay);
+      sprintf(reply, "> now %ld seconds", (long)_prefs.ui_backlight_delay);
     else if (_prefs.ui_backlight_delay == -1)
       sprintf(reply, "> now always on (-1)");
     else
@@ -3217,12 +3217,12 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     return true;
   }
   if (memcmp(command, "get ui.auto_off_delay", 21) == 0) {
-    sprintf(reply, "> %d seconds", _prefs.ui_auto_off_delay);
+    sprintf(reply, "> %lu seconds", (unsigned long)_prefs.ui_auto_off_delay);
     return true;
   }
   if (memcmp(command, "get ui.backlight_delay", 22) == 0) {
     if (_prefs.ui_backlight_delay >= 0)    
-      sprintf(reply, "> %d seconds", _prefs.ui_backlight_delay);
+      sprintf(reply, "> %ld seconds", (long)_prefs.ui_backlight_delay);
     else if (_prefs.ui_backlight_delay == -1)
       sprintf(reply, "> always on (-1)");
     else
@@ -3267,7 +3267,7 @@ void MyMesh::checkCLIRescueCmd() {
     cli_command[0] = 0;
     len = 0;
   }
-  while (Serial.available() && len < sizeof(cli_command)-1) {
+  while (Serial.available() && len < (int) sizeof(cli_command)-1) {
     char c = Serial.read();
     if (c != '\n') {
       cli_command[len++] = c;

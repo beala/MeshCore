@@ -154,8 +154,8 @@ bool RTC_RX8130CE::writeRAM(uint8_t address, uint8_t value) {
 }
 
 size_t RTC_RX8130CE::writeRAM(uint8_t address, uint8_t *value, size_t len) {
-    uint8_t buf[len + 1];
-    
+    uint8_t buf[1 + 4];   // the register address, then up to 4 bytes of RAM
+
     if (address > 3) {
         return 0;
     }
@@ -166,7 +166,7 @@ size_t RTC_RX8130CE::writeRAM(uint8_t address, uint8_t *value, size_t len) {
 
     buf[0] = 0x20 + address;
 
-    for (int i = 1; i <= len + 1; i++) {
+    for (size_t i = 1; i <= len; i++) {   // buf holds the address and len bytes
        buf[i] = value[i - 1];
     }
 

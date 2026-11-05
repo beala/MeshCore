@@ -6,6 +6,7 @@
 
 // built-ins
 #define  PIN_VBAT_READ    5
+#undef ADC_MULTIPLIER   // replaces the one in variant.h
 #define  ADC_MULTIPLIER   (3 * 1.73 * 1.187 * 1000)
 
 #define PIN_3V3_EN (34)

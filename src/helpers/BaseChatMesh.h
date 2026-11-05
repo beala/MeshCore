@@ -89,13 +89,13 @@ protected:
   #endif
     txt_send_timeout = 0;
     _pendingLoopback = NULL;
-    memset(connections, 0, sizeof(connections));
+    memset((void*) connections, 0, sizeof(connections));
   }
 
   void bootstrapRTCfromContacts();
 
   void resetContacts() {
-    memset(contacts, 0, sizeof(contacts[0])*MAX_ANON_CONTACTS);   // set all to have type = ADV_TYPE_NONE(0)
+    memset((void*) contacts, 0, sizeof(contacts[0])*MAX_ANON_CONTACTS);   // set all to have type = ADV_TYPE_NONE(0)
     num_contacts = MAX_ANON_CONTACTS;  // seed the first contacts for anon requests
   }
   void populateContactFromAdvert(ContactInfo& ci, const mesh::Identity& id, const AdvertDataParser& parser, uint32_t timestamp);

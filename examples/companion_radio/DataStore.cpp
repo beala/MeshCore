@@ -71,9 +71,15 @@ void DataStore::begin() {
   #include <LittleFS.h>
 #elif defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   #if defined(QSPIFLASH)
+    #pragma GCC diagnostic push   // the library hides CustomLFS::begin() (-Woverloaded-virtual)
+    #pragma GCC diagnostic ignored "-Woverloaded-virtual"
     #include <CustomLFS_QSPIFlash.h>
+    #pragma GCC diagnostic pop
   #elif defined(EXTRAFS)
+    #pragma GCC diagnostic push   // the library hides CustomLFS::begin() (-Woverloaded-virtual)
+    #pragma GCC diagnostic ignored "-Woverloaded-virtual"
     #include <CustomLFS.h>
+    #pragma GCC diagnostic pop
   #else 
     #include <InternalFileSystem.h>
   #endif

@@ -31,7 +31,7 @@ private:
 
 protected:
   uint8_t startup_reason;
-  char *ota_name;
+  const char *ota_name;
 
 #ifdef NRF52_POWER_MANAGEMENT
   void pwrmgtInit();
@@ -47,7 +47,7 @@ protected:
 #endif
 
 public:
-  NRF52Board(char *otaname) : ota_name(otaname) {}
+  NRF52Board(const char *otaname) : ota_name(otaname) {}
   virtual void begin();
   virtual uint8_t getStartupReason() const override { return startup_reason; }
   virtual float getMCUTemperature() override;

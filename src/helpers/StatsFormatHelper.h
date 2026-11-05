@@ -10,11 +10,11 @@ public:
                              uint16_t err_flags,
                              mesh::PacketManager* mgr) {
     sprintf(reply, 
-      "{\"battery_mv\":%u,\"uptime_secs\":%u,\"errors\":%u,\"queue_len\":%u}",
-      board.getBattMilliVolts(),
-      ms.getMillis() / 1000,
-      err_flags,
-      mgr->getOutboundTotal()
+      "{\"battery_mv\":%u,\"uptime_secs\":%lu,\"errors\":%u,\"queue_len\":%d}",
+      (unsigned)board.getBattMilliVolts(),
+      (unsigned long)(ms.getMillis() / 1000),
+      (unsigned)err_flags,
+      (int)mgr->getOutboundTotal()
     );
   }
 
@@ -25,12 +25,12 @@ public:
                               uint32_t total_air_time_ms,
                               uint32_t total_rx_air_time_ms) {
     int n = sprintf(reply, 
-      "{\"noise_floor\":%d,\"last_rssi\":%d,\"last_snr\":%.2f,\"tx_air_secs\":%u,\"rx_air_secs\":%u",
+      "{\"noise_floor\":%d,\"last_rssi\":%d,\"last_snr\":%.2f,\"tx_air_secs\":%lu,\"rx_air_secs\":%lu",
       (int16_t)radio->getNoiseFloor(),
       (int16_t)driver.getLastRSSI(),
       driver.getLastSNR(),
-      total_air_time_ms / 1000,
-      total_rx_air_time_ms / 1000
+      (unsigned long)(total_air_time_ms / 1000),
+      (unsigned long)(total_rx_air_time_ms / 1000)
     );
     // only radios that report it (currently LR2021) add the gain step
     int gain = driver.getLastGainStep();
@@ -46,14 +46,14 @@ public:
                                uint32_t n_recv_flood,
                                uint32_t n_recv_direct) {
     sprintf(reply, 
-      "{\"recv\":%u,\"sent\":%u,\"flood_tx\":%u,\"direct_tx\":%u,\"flood_rx\":%u,\"direct_rx\":%u,\"recv_errors\":%u}",
-      driver.getPacketsRecv(),
-      driver.getPacketsSent(),
-      n_sent_flood,
-      n_sent_direct,
-      n_recv_flood,
-      n_recv_direct,
-      driver.getPacketsRecvErrors()
+      "{\"recv\":%lu,\"sent\":%lu,\"flood_tx\":%lu,\"direct_tx\":%lu,\"flood_rx\":%lu,\"direct_rx\":%lu,\"recv_errors\":%lu}",
+      (unsigned long)driver.getPacketsRecv(),
+      (unsigned long)driver.getPacketsSent(),
+      (unsigned long)n_sent_flood,
+      (unsigned long)n_sent_direct,
+      (unsigned long)n_recv_flood,
+      (unsigned long)n_recv_direct,
+      (unsigned long)driver.getPacketsRecvErrors()
     );
   }
 };

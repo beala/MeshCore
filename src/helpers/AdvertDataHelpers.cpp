@@ -86,17 +86,17 @@ void AdvertTimeHelper::formatRelativeTimeDiff(char dest[], int32_t seconds_from_
   }
 
   if (seconds_from_now < 60) {
-    sprintf(dest, "%d secs %s", seconds_from_now, suffix);
+    sprintf(dest, "%ld secs %s", (long)seconds_from_now, suffix);
   } else {
     int32_t mins = seconds_from_now / 60;
     if (mins < 60) {
-      sprintf(dest, "%d mins %s", mins, suffix);
+      sprintf(dest, "%ld mins %s", (long)mins, suffix);
     } else {
       int32_t hours = mins / 60;
       if (hours < 24) {
-        sprintf(dest, "%d hours %s", hours, suffix);
+        sprintf(dest, "%ld hours %s", (long)hours, suffix);
       } else {
-        sprintf(dest, "%d days %s", hours / 24, suffix);
+        sprintf(dest, "%ld days %s", (long)(hours / 24), suffix);
       }
     }
   }

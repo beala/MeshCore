@@ -23,16 +23,17 @@ inline bool handleFloodRetryCommand(const char* command, uint8_t& count, uint16_
   changed = false;
   if (strcmp(command, "get flood.retry") == 0) {
     if (wait_ms) {
-      sprintf(reply, "> %u, wait %u ms", (uint32_t)count, (uint32_t)wait_ms);
+      sprintf(reply, "> %u, wait %u ms", (unsigned)count, (unsigned)wait_ms);
     } else {
-      sprintf(reply, "> %u, wait auto", (uint32_t)count);
+      sprintf(reply, "> %u, wait auto", (unsigned)count);
     }
     return true;
   }
   if (strcmp(command, "get flood.retry.stats") == 0) {
     const mesh::FloodRetry::Stats& s = retry.getStats();
-    sprintf(reply, "> watched %u, echoed %u (%u after a resend), resends %u, no echo %u, skipped %u",
-            s.tracked, s.echoed, s.echoed_after, s.retries, s.gave_up, s.skipped);
+    sprintf(reply, "> watched %lu, echoed %lu (%lu after a resend), resends %lu, no echo %lu, skipped %lu",
+            (unsigned long)s.tracked, (unsigned long)s.echoed, (unsigned long)s.echoed_after,
+            (unsigned long)s.retries, (unsigned long)s.gave_up, (unsigned long)s.skipped);
     return true;
   }
   if (memcmp(command, "set flood.retry.wait ", 21) == 0) {

@@ -94,10 +94,6 @@ bool RAK12035_SoilMoisture::begin(uint8_t addr)
         return false;
 }
 
-    uint16_t _dry_cal = 200;
-    uint16_t _wet_cal = 600;
-    uint8_t _version = 0;
-    uint8_t _addr;                   // The I2C address to be used (passed in parameter)
 
 /*------------------------------------------------------------------------------------------
  * Set Calibration values -  This is done with custom a firmware version
@@ -415,7 +411,6 @@ bool RAK12035_SoilMoisture::getEvent(uint8_t *humidity, uint16_t *temp)
 
 bool RAK12035_SoilMoisture::sensor_on()
 {
-    uint8_t data;
  // This has been commented out due to a pin name conflict with the Heltec v3
  // This will need to be resolved if this function is to be utilized in the future
 
@@ -424,13 +419,12 @@ bool RAK12035_SoilMoisture::sensor_on()
 	digitalWrite(WB_IO2, HIGH);     //Turn on Sensor Power
 
     pinMode(WB_IO4, OUTPUT);        //Set IO4 Pin to Output (connected to *reset on sensor)
-	digitalWrite(WB_IO4, LOW);      //*reset - Reset the Sensor
+	digitalWrite(WB_IO4, LOW);      // reset - Reset the Sensor
 	delay(1);                       //Wait for the minimum *reset, 1mS is longer than required minimum
     digitalWrite(WB_IO4, HIGH);     //Deassert Reset
 
     delay(10);                     // Wait for the sensor code to complete initialization
 */
-	uint8_t v = 0;
     uint32_t timeout = millis();
 	while ((!query_sensor()))                    //Wait for sensor to respond to I2C commands, 
 	{                                            //indicating it is ready
@@ -442,6 +436,7 @@ bool RAK12035_SoilMoisture::sensor_on()
 			delay(10);                           //delay 10mS
         }
     }
+    return true;
 }
 
 bool RAK12035_SoilMoisture::reset()

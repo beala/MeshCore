@@ -24,10 +24,10 @@ class AdvertDataBuilder {
   uint16_t _extra1 = 0;
   uint16_t _extra2 = 0;
 public:
-  AdvertDataBuilder(uint8_t adv_type) : _type(adv_type), _name(NULL), _has_loc(false) { }
-  AdvertDataBuilder(uint8_t adv_type, const char* name) : _type(adv_type), _name(name), _has_loc(false) { }
+  AdvertDataBuilder(uint8_t adv_type) : _type(adv_type), _has_loc(false), _name(NULL) { }
+  AdvertDataBuilder(uint8_t adv_type, const char* name) : _type(adv_type), _has_loc(false), _name(name) { }
   AdvertDataBuilder(uint8_t adv_type, const char* name, double lat, double lon) : 
-      _type(adv_type), _name(name), _has_loc(true), _lat(lat * 1E6), _lon(lon * 1E6)  { }
+      _type(adv_type), _has_loc(true), _name(name), _lat(lat * 1E6), _lon(lon * 1E6)  { }
 
   void setFeat1(uint16_t extra) { _extra1 = extra; }
   void setFeat2(uint16_t extra) { _extra2 = extra; }

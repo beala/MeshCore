@@ -4,7 +4,7 @@
 
 #include "Dispatcher.cpp"
 #include "Mesh.cpp"
-#include "helpers/AdvertDataHelpers.cpp"
+// AdvertDataHelpers.cpp is in the native build_src_filter
 #include "helpers/BaseChatMesh.cpp"
 
 void StrHelper::strncpy(char* dest, const char* src, size_t buf_sz) {
