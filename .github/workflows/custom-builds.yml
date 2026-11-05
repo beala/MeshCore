@@ -195,15 +195,15 @@ jobs:
               done
 
       - name: Update the flasher
-        # Starts the flasher deploy in beala/beala.github.io now, instead of waiting for its
-        # 15-minute schedule (GitHub runs schedules best-effort and often skips them).
-        # Needs a FLASHER_DISPATCH_TOKEN secret: a fine-grained token for beala/beala.github.io
-        # with "Actions: Read and write". Without it this step just says so and does nothing.
+        # Starts the fluxcore.party deploy (beala/fluxcore-site) now, instead of waiting for its
+        # 15-minute schedule (GitHub runs schedules best-effort and often skips them for hours).
+        # Needs a FLUXCORE_SITE_TOKEN secret: a fine-grained token for beala/fluxcore-site with
+        # "Actions: Read and write". Without it this step just says so and does nothing.
         env:
-          GH_TOKEN: ${{ secrets.FLASHER_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.FLUXCORE_SITE_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "No FLASHER_DISPATCH_TOKEN secret: the flasher will pick this release up on its schedule"
+            echo "No FLUXCORE_SITE_TOKEN secret: the flasher will pick this release up on its schedule"
             exit 0
           fi
-          gh workflow run flasher.yml --repo beala/beala.github.io --ref master
+          gh workflow run flasher.yml --repo beala/fluxcore-site --ref main
