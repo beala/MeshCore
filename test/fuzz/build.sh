@@ -53,6 +53,6 @@ echo "built .pio/fuzz/fuzz_meshtastic"
 
 # weather sensor decoding and listen scheduling
 clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
-  -I src test/fuzz/fuzz_wxsensor.cpp src/helpers/weather/FineOffset.cpp src/helpers/weather/SensorTracker.cpp \
+  -I src test/fuzz/fuzz_wxsensor.cpp src/helpers/weather/FineOffset.cpp src/helpers/weather/LaCrosse.cpp src/helpers/weather/SensorTracker.cpp \
   -o .pio/fuzz/fuzz_wxsensor
 echo "built .pio/fuzz/fuzz_wxsensor"

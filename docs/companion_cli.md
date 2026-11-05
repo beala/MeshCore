@@ -372,7 +372,9 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Usage:**
 - `wx on`, `wx off`
 - `wx` or `get wx`: the settings
-- `wx scan`: listen for sensors without a break for 85 s (the mesh isn't heard meanwhile)
+- `wx scan`: listen for sensors without a break for 85 s per brand (the mesh isn't heard meanwhile), then list them in the console
+- `wx scan on`, `wx scan off`: listen all the time, with a console note for each new sensor (eg. while driving around; not saved)
+- `set wx.kind ecowitt|lacrosse|both` (default both)
 - `set wx.freq <MHz>` (default 915)
 - `set wx.units us|metric` (default `us`: °F, mph, inches)
 - `set wx.every <minutes>`: how often each sensor's readings are posted (default 30; 0 = only the first post and alerts)
@@ -383,7 +385,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Example reply:** `> WH65 5a x39 every 15s -108dBm 0s ago; WH31 ch2 x10 every 60s -107dBm 51s ago`
 
 **Notes:**
-- Ecowitt, Ambient Weather and other Fine Offset sensors show in the app as one more channel, "Weather", after your own (and after Meshtastic's). Receive only. See [Weather sensors](weather_sensors.md).
+- Ecowitt, Ambient Weather, other Fine Offset and La Crosse View sensors show in the app as one more channel, "Weather", after your own (and after Meshtastic's). Receive only. See [Weather sensors](weather_sensors.md).
 - Settings are saved. Reconnect the app after `wx on` so it lists the new channel.
 
 ---

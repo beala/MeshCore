@@ -1,6 +1,7 @@
 // Weather sensor decoding and the listen scheduler (src/helpers/weather) on arbitrary input.
-// Mode byte 0: the input is a received packet (decode, then format into buffers of every size).
-// Mode byte 1: the input is a script of tracker events: time steps, packets from a few sensors,
+// Mode byte bit 0 clear: the input is a received packet (bit 1: La Crosse, else Fine Offset): decode,
+//              then format into buffers of every size.
+// Mode byte bit 0 set: the input is a script of tracker events: time steps, packets from a few sensors,
 //              windows ending heard/not heard/not run. Checks the windows it asks for stay sane.
 #include <stdint.h>
 #include <stddef.h>
@@ -11,9 +12,10 @@
 
 using namespace wxsensor;
 
-static void fuzzDecode(const uint8_t* d, size_t n) {
+static void fuzzDecode(uint8_t proto, const uint8_t* d, size_t n) {
   Reading r;
-  if (!decode(d, (int)n, &r)) return;
+  if (!decodeAs(proto, d, (int)n, &r)) return;
+  if (protocolOf(r.model) != proto) abort();
   char buf[200];
   for (size_t size = 0; size <= sizeof(buf); size += 7) {
     int w = format(r, size & 1, size ? buf : NULL, size);
@@ -30,6 +32,7 @@ static void fuzzTracker(const uint8_t* d, size_t n) {
   if (n >= 4) { memcpy(&now, d, 4); d += 4; n -= 4; }
   t.reset(now);
   t.setSeed(now | 1);
+  t.setProtocols((uint8_t)(now >> 8) & 3);
   t.scanFor(now, 1000 + (now & 0xFFFF));
   Window w = {};
   bool open = false;
@@ -66,6 +69,6 @@ static void fuzzTracker(const uint8_t* d, size_t n) {
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size < 1) return 0;
   if (data[0] & 1) fuzzTracker(data + 1, size - 1);
-  else fuzzDecode(data + 1, size - 1);
+  else fuzzDecode((data[0] >> 1) & 1, data + 1, size - 1);
   return 0;
 }

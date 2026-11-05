@@ -7,7 +7,12 @@ namespace wxsensor {
 
 static const char* const NAMES[MODEL_COUNT] = {
   "?", "WH65", "WH31", "WH40", "WH57", "WS80", "WS85", "WS90", "WN34", "WH45", "WH51",
+  "LTV-TH", "LTV-WSDTH", "LTV-W1", "LTV-R1",
 };
+
+uint8_t protocolOf(uint8_t model) {
+  return model >= LTV_TH && model < MODEL_COUNT ? PROTO_LACROSSE : PROTO_FINEOFFSET;
+}
 
 const char* modelName(uint8_t model) {
   return model < MODEL_COUNT ? NAMES[model] : "?";

@@ -24,8 +24,21 @@ enum Model : uint8_t {
   WN34,    // probe thermometer (soil/water); WN38 globe thermometer
   WH45,    // air quality: PM2.5, PM10, CO2, temperature, humidity
   WH51,    // soil moisture
+  // La Crosse Technology View (915 MHz FSK, LaCrosse.cpp)
+  LTV_TH,     // LTV-TH2, TH2i, TH3: temperature, humidity
+  LTV_WSDTH,  // LTV-WSDTH01 Breeze Pro: temperature, humidity, wind, direction
+  LTV_W1,     // LTV-W1, W2: wind
+  LTV_R1,     // LTV-R1: rain
   MODEL_COUNT
 };
+
+// Radio formats: each needs its own listen settings
+enum Protocol : uint8_t {
+  PROTO_FINEOFFSET = 0,   // 17.24 kbit/s, sync 0x2DD4
+  PROTO_LACROSSE = 1,     // 9.6 kbit/s, sync 0xD2AA2DD4
+  PROTO_COUNT
+};
+uint8_t protocolOf(uint8_t model);
 
 const char* modelName(uint8_t model);
 
@@ -71,6 +84,13 @@ bool checkPacket(const uint8_t* b, int len);
 // hold more bytes than the packet (the radio receives a fixed length). Returns false for unknown
 // families, bad checks or too few bytes.
 bool decode(const uint8_t* buf, int len, Reading* out);
+
+// Decodes a La Crosse View packet (the bytes after the 0xD2AA2DD4 sync word)
+bool decodeLaCrosse(const uint8_t* buf, int len, Reading* out);
+// Either format
+inline bool decodeAs(uint8_t proto, const uint8_t* buf, int len, Reading* out) {
+  return proto == PROTO_LACROSSE ? decodeLaCrosse(buf, len, out) : decode(buf, len, out);
+}
 
 // A key that identifies one sensor across packets: model and ID (and channel for WH31)
 uint32_t sensorKey(const Reading& r);

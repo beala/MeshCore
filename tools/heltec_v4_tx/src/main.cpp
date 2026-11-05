@@ -7,6 +7,8 @@
 //   cwid <MHz> <wpm> <text> Morse-keyed carrier, e.g. a callsign ID on a ham band
 //   fsktx <MHz> <dev kHz> <hex>  one packet as a Fine Offset weather sensor sends it: FSK 17.24 kbit/s,
 //                          preamble 0xAA.., sync word 0x2DD4, then the bytes (no CRC or whitening added)
+//   fskraw <MHz> <kbps> <dev kHz> <sync hex> <hex>  the same with any bit rate and sync word (1-8 bytes),
+//                          eg. La Crosse View: fskraw 915 9.6 35 d2aa2dd4 <11 bytes>
 // Build and flash: cd tools/heltec_v4_tx && pio run -t upload
 #include <Arduino.h>
 #include <SPI.h>
@@ -105,23 +107,36 @@ static void handle(char* cmd) {
     if (listening) { radio.setPacketReceivedAction(onRx); radio.startReceive(); }
     if (st == RADIOLIB_ERR_NONE) Serial.printf("  -> OK %u bytes\r\n", (unsigned)n);
     else Serial.printf("  -> ERR %d\r\n", st);
-  } else if (!strncmp(cmd, "fsktx ", 6)) {
-    float f, dev; int off = 0;
-    static uint8_t buf[64];
-    size_t n = 0;
-    if (sscanf(cmd + 6, "%f %f %n", &f, &dev, &off) >= 2 && off) {
-      for (const char* p = cmd + 6 + off; p[0] && p[1] && n < sizeof(buf); p += 2) {
-        int h = hexval(p[0]), l = hexval(p[1]);
-        if (h < 0 || l < 0) break;
-        buf[n++] = (uint8_t)(h << 4 | l);
+  } else if (!strncmp(cmd, "fsktx ", 6) || !strncmp(cmd, "fskraw ", 7)) {
+    bool raw = cmd[3] == 'r';
+    float f, kbps = 17.24f, dev; int off = 0;
+    static uint8_t buf[64], sync[8] = { 0x2D, 0xD4 };
+    size_t n = 0, slen = 2;
+    const char* p = NULL;
+    if (raw) {
+      char sh[20];
+      if (sscanf(cmd + 7, "%f %f %f %19s %n", &f, &kbps, &dev, sh, &off) >= 4 && off) {
+        slen = 0;
+        for (const char* q = sh; q[0] && q[1] && slen < sizeof(sync); q += 2) {
+          int h = hexval(q[0]), l = hexval(q[1]);
+          if (h < 0 || l < 0) break;
+          sync[slen++] = (uint8_t)(h << 4 | l);
+        }
+        p = cmd + 7 + off;
       }
+    } else if (sscanf(cmd + 6, "%f %f %n", &f, &dev, &off) >= 2 && off) {
+      p = cmd + 6 + off;
     }
-    if (n == 0) { Serial.println("  -> ERR args"); return; }
+    for (; p && p[0] && p[1] && n < sizeof(buf); p += 2) {
+      int h = hexval(p[0]), l = hexval(p[1]);
+      if (h < 0 || l < 0) break;
+      buf[n++] = (uint8_t)(h << 4 | l);
+    }
+    if (n == 0 || slen == 0) { Serial.println("  -> ERR args"); return; }
     listening = false;
-    int st = radio.beginFSK(f, 17.24, dev, 156.2, dbm, 40, 1.8);
-    uint8_t sync[] = { 0x2D, 0xD4 };
+    int st = radio.beginFSK(f, kbps, dev, 156.2, dbm, 40, 1.8);
     if (st == RADIOLIB_ERR_NONE) st = radio.setDio2AsRfSwitch(true);
-    if (st == RADIOLIB_ERR_NONE) st = radio.setSyncWord(sync, 2);
+    if (st == RADIOLIB_ERR_NONE) st = radio.setSyncWord(sync, slen);
     if (st == RADIOLIB_ERR_NONE) st = radio.setCRC(0);
     if (st == RADIOLIB_ERR_NONE) st = radio.setWhitening(false);
     if (st == RADIOLIB_ERR_NONE) st = radio.setDataShaping(RADIOLIB_SHAPING_NONE);

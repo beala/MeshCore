@@ -316,6 +316,176 @@ TEST(Tracker, SurvivesMillisWrap) {
   EXPECT_EQ(sim.t.find(sensorKey(make(WH65, 1)))->period, 16000u);
 }
 
+// ---- La Crosse View ----
+
+static uint8_t crcLa(const std::vector<uint8_t>& b, size_t n, uint8_t init) {
+  uint8_t c = init;
+  for (size_t i = 0; i < n; i++) {
+    c ^= b[i];
+    for (int k = 0; k < 8; k++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x31) : (uint8_t)(c << 1);
+  }
+  return c;
+}
+
+// TH packet: ID, flags, temperature/humidity, CRC (init 0, or 0xAC / 0xB2 as TH2 sensors use)
+static std::vector<uint8_t> laTH(uint32_t id, int temp_c10, int hum, uint8_t init = 0) {
+  int t = temp_c10 + 400;
+  std::vector<uint8_t> b = { (uint8_t)(id >> 16), (uint8_t)(id >> 8), (uint8_t)id, 0x06,
+                             (uint8_t)(t >> 4), (uint8_t)((t & 0x0F) << 4 | (hum >> 8)), (uint8_t)hum };
+  // the CRC byte that makes crc over 8 bytes come out 0 from this init
+  b.push_back(crcLa(b, 7, init));
+  b.resize(11, 0xD2);   // trailer
+  return b;
+}
+
+static std::vector<uint8_t> laBreeze(uint32_t id, int temp_c10, int hum, int kmh10, int dir) {
+  int t = temp_c10 + 400;
+  std::vector<uint8_t> b = { (uint8_t)(id >> 16), (uint8_t)(id >> 8), (uint8_t)id, 0x04,
+                             (uint8_t)(t >> 4), (uint8_t)((t & 0x0F) << 4 | (hum >> 8)), (uint8_t)hum,
+                             (uint8_t)(kmh10 >> 4), (uint8_t)((kmh10 & 0x0F) << 4 | (dir >> 8)), (uint8_t)dir };
+  b.push_back(crcLa(b, 10, 0));
+  return b;
+}
+
+static Reading decLa(std::vector<uint8_t> b) {
+  b.resize(11, 0);
+  Reading r;
+  EXPECT_TRUE(decodeLaCrosse(b.data(), (int)b.size(), &r));
+  return r;
+}
+
+TEST(LaCrosse, R1Published) {
+  Reading r = decLa(hex("380322 0e 00aa14 6a 93"));   // 20 ticks of 0.25 mm
+  EXPECT_EQ(r.model, LTV_R1);
+  EXPECT_EQ(r.id, 0x380322u);
+  EXPECT_EQ(r.rain_um, 20u * 250);
+  Reading r2 = decLa(hex("380322 00 00aa1a 60 81"));
+  EXPECT_EQ(r2.rain_um, 26u * 250);
+}
+
+TEST(LaCrosse, W1Published) {
+  Reading r = decLa(hex("0fb220 0e aaaaaa 07 fa aa fe"));   // "07f aaa": 12.7 km/h ("13 km"), 3.5 m/s
+  EXPECT_EQ(r.model, LTV_W1);
+  EXPECT_EQ(r.id, 0x0FB220u);
+  EXPECT_EQ(r.wind_dms, 35);
+  Reading r2 = decLa(hex("0fb220 42 aaaaaa 00 0a aa 73"));
+  EXPECT_EQ(r2.wind_dms, 0);
+}
+
+TEST(LaCrosse, TH) {
+  for (uint8_t init : { 0x00, 0xAC, 0xB2 }) {
+    Reading r = decLa(laTH(0xA1B2C3, 215, 47, init));
+    EXPECT_EQ(r.model, LTV_TH);
+    EXPECT_EQ(r.id, 0xA1B2C3u);
+    EXPECT_EQ(r.temp_c10, 215);
+    EXPECT_EQ(r.humidity, 47);
+    EXPECT_EQ(fmt(r, true), "LTV-TH a1b2c3: 21.5C 47%");
+  }
+  // temperatures whose last nibble looks like a rain count's 0xA marker are still TH
+  for (int t = -400; t <= 600; t++) {
+    Reading r = decLa(laTH(0x123456, t, 55));
+    ASSERT_EQ(r.model, LTV_TH) << t;
+    ASSERT_EQ(r.temp_c10, t);
+  }
+}
+
+TEST(LaCrosse, BreezePro) {
+  Reading r = decLa(laBreeze(0x0C0FFE, -52, 81, 254, 225));
+  EXPECT_EQ(r.model, LTV_WSDTH);
+  EXPECT_EQ(r.temp_c10, -52);
+  EXPECT_EQ(r.humidity, 81);
+  EXPECT_EQ(r.wind_dms, 71);   // 25.4 km/h
+  EXPECT_EQ(r.wind_dir, 225);
+  EXPECT_EQ(fmt(r, false), "LTV-WSDTH c0ffe: 22.6F 81% wind 16 SW mph");
+}
+
+TEST(LaCrosse, Rejects) {
+  auto b = laBreeze(0x0C0FFE, 100, 50, 30, 90);
+  Reading r;
+  for (size_t i = 0; i < 11; i++) {
+    for (int bit = 0; bit < 8; bit++) {
+      auto c = b;
+      c[i] ^= 1 << bit;
+      // a flipped bit may still form some other valid-looking packet only by CRC luck: none here
+      EXPECT_FALSE(decodeLaCrosse(c.data(), 11, &r) && r.model == LTV_WSDTH && r.id == 0x0C0FFE &&
+                   r.temp_c10 == 100 && r.humidity == 50) << i << " " << bit;
+    }
+  }
+  EXPECT_FALSE(decodeLaCrosse(b.data(), 7, &r));
+  uint8_t zeros[11] = {};
+  zeros[7] = 1;
+  EXPECT_FALSE(decodeLaCrosse(zeros, 11, &r));
+}
+
+TEST(Tracker, BothFormatsScanInTurnAndWindowsUseTheSensorsFormat) {
+  Tracker t;
+  t.reset(0);
+  t.setProtocols(1 << PROTO_FINEOFFSET | 1 << PROTO_LACROSSE);
+  t.scanFor(0);
+  Window w;
+  ASSERT_TRUE(t.nextWindow(0, &w));
+  EXPECT_EQ(w.proto, PROTO_FINEOFFSET);
+  EXPECT_EQ(w.len, Tracker::SCAN_LEN);
+  ASSERT_TRUE(t.nextWindow(Tracker::SCAN_LEN + 5, &w));
+  EXPECT_EQ(w.proto, PROTO_LACROSSE);
+  EXPECT_EQ(w.len, Tracker::SCAN_LEN - 5);
+  Reading la = make(LTV_TH, 0x123456);
+  t.onPacket(Tracker::SCAN_LEN + 1000, la, -90);
+  Reading fo = make(WH65, 7);
+  t.onPacket(Tracker::SCAN_LEN + 2000, fo, -90);
+  uint32_t after = 2 * Tracker::SCAN_LEN + 1;
+  ASSERT_FALSE(t.scanning(after));
+  // each sensor's windows come up in its own format
+  bool saw_la = false, saw_fo = false;
+  uint32_t now = after;
+  for (int i = 0; i < 20; i++) {
+    ASSERT_TRUE(t.nextWindow(now, &w));
+    if (w.key == sensorKey(la)) { saw_la = true; EXPECT_EQ(w.proto, PROTO_LACROSSE); }
+    if (w.key == sensorKey(fo)) { saw_fo = true; EXPECT_EQ(w.proto, PROTO_FINEOFFSET); }
+    now = w.start + w.len;
+    t.windowDone(now, w, true, true);
+  }
+  EXPECT_TRUE(saw_la);
+  EXPECT_TRUE(saw_fo);
+}
+
+TEST(Tracker, SkippingSensorsGetMorePatience) {
+  Sim sim;
+  sim.t.setSeed(5);
+  sim.t.setProtocols(1 << PROTO_LACROSSE);
+  sim.sensors.push_back({ make(LTV_WSDTH, 0xC0FFE), 31000, 4000, true });
+  sim.t.scanFor(0);
+  sim.run(10 * 60000);
+  const Tracker::Sensor* s = sim.t.find(sensorKey(make(LTV_WSDTH, 0xC0FFE)));
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->period, 31000u);
+  // it stops sending for 5 minutes (nothing changed), then carries on on the same grid
+  sim.sensors[0].alive = false;
+  sim.run(15 * 60000, 10 * 60000);
+  EXPECT_EQ(s->period, 31000u);   // 9-10 misses: still tracked
+  sim.sensors[0].alive = true;
+  auto got = sim.run(25 * 60000, 15 * 60000);
+  EXPECT_GE(got[0], 600 / 31 - 1);
+}
+
+TEST(Tracker, ScanForeverTakesTurnsAndFindsEverything) {
+  Sim sim;
+  sim.t.setSeed(9);
+  sim.t.setProtocols(1 << PROTO_FINEOFFSET | 1 << PROTO_LACROSSE);
+  sim.t.scanForever(0, true);
+  Window w;
+  ASSERT_TRUE(sim.t.nextWindow(0, &w));
+  EXPECT_EQ(w.proto, PROTO_FINEOFFSET);
+  EXPECT_EQ(w.len, Tracker::SCAN_SLICE);
+  ASSERT_TRUE(sim.t.nextWindow(Tracker::SCAN_SLICE, &w));
+  EXPECT_EQ(w.proto, PROTO_LACROSSE);
+  ASSERT_TRUE(sim.t.nextWindow(10 * Tracker::SCAN_SLICE + 1, &w));
+  EXPECT_EQ(w.proto, PROTO_FINEOFFSET);
+  EXPECT_TRUE(sim.t.scanning(3600000));
+  sim.t.scanForever(3600000, false);
+  EXPECT_FALSE(sim.t.scanning(3600001));
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

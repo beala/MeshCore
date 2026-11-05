@@ -416,6 +416,9 @@ private:
   bool _wx_win_open = false;         // a listen was asked of the radio for _wx_win
   bool _wx_win_got = false;          // the sensor it was for was heard
   wxsensor::Window _wx_win;
+  uint8_t _wx_rx_proto = 0;          // format of the listen the queued packets came from
+  bool _wx_scan_report = false;      // post what the scan found to the Radio console when it ends
+  void weatherScanReport();
   uint32_t _wx_heard = 0, _wx_bad = 0, _wx_shown = 0, _wx_windows = 0, _wx_listen_ms = 0, _wx_since = 0;
   void applyWeather();
   void weatherLoop();
@@ -425,6 +428,7 @@ private:
   int virtualChannelCount() const { return (_mt_active ? 1 : 0) + (_wx_active ? 1 : 0); }
   bool weatherShown(const wxsensor::Reading& r) const;
   void showWeather(const char* text, int8_t snr_x4);
+  mesh::Radio::FskListen weatherListen(uint8_t proto) const;
 };
 
 extern MyMesh the_mesh;

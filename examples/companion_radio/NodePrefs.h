@@ -241,6 +241,7 @@ private:
     uint8_t metric = 0;           // 0 = °F, mph, inches; 1 = °C, m/s, mm
     uint16_t every = 30;          // minutes between posts of a sensor's readings (0 = only changes and alerts)
     char only[40] = "";           // comma-separated sensor labels to show and follow (as in the posts); empty = all
+    uint8_t kinds = 3;            // radio formats: bit 0 Ecowitt/Fine Offset, bit 1 La Crosse View
   protected:
     void structure() override {
       def("en", en);
@@ -248,6 +249,7 @@ private:
       def("metric", metric);
       def("every", every);
       def("only", only, sizeof(only));
+      def("kinds", kinds);
     }
   };
 public:

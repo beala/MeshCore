@@ -14,8 +14,30 @@ uint32_t Tracker::nominalPeriod(uint8_t model) {
     case WH40: return 49000;
     case WH51: return 70000;
     case WH57: return 79000;
+    case LTV_TH: return 30000;
+    case LTV_WSDTH: return 31000;
     default: return 0;
   }
+}
+
+uint8_t Tracker::maxMisses(uint8_t model) {
+  return protocolOf(model) == PROTO_LACROSSE ? MAX_MISSES_SKIPPY : MAX_MISSES;
+}
+
+int Tracker::protocolCount() const {
+  int n = 0;
+  for (int p = 0; p < PROTO_COUNT; p++) if (_protos & (1 << p)) n++;
+  return n;
+}
+
+uint8_t Tracker::nthProto(int n) const {
+  for (int p = 0; p < PROTO_COUNT; p++) {
+    if (_protos & (1 << p)) {
+      if (n == 0) return (uint8_t)p;
+      n--;
+    }
+  }
+  return PROTO_FINEOFFSET;
 }
 
 void Tracker::reset(uint32_t now) {
@@ -23,6 +45,9 @@ void Tracker::reset(uint32_t now) {
   _n = 0;
   _hunt_until = now;
   _scan_until = now;
+  _scan_start = now;
+  _scan_each = SCAN_LEN;
+  _scan_forever = false;
   _next_hunt = now;
   if (_rng == 0) _rng = 0x9E3779B9u;
 }
@@ -40,11 +65,22 @@ Tracker::Sensor* Tracker::find(uint32_t key) {
 }
 
 void Tracker::scanFor(uint32_t now, uint32_t ms) {
-  _scan_until = now + ms;
+  if (ms == 0) { _scan_until = now; return; }   // no scan
+  int n = protocolCount();
+  _scan_start = now;
+  _scan_each = ms;
+  _scan_until = now + ms * (uint32_t)n;
 }
 
 bool Tracker::scanning(uint32_t now) const {
-  return before(now, _scan_until);
+  return _scan_forever || before(now, _scan_until);
+}
+
+void Tracker::scanForever(uint32_t now, bool on) {
+  _scan_forever = on;
+  _scan_start = now;
+  _scan_each = SCAN_SLICE;
+  _scan_until = now;
 }
 
 void Tracker::huntFor(uint32_t now, uint32_t ms) {
@@ -107,7 +143,7 @@ Tracker::Sensor* Tracker::onPacket(uint32_t now, const Reading& r, int16_t rssi)
 
 // Moves next_due past packets whose windows are already over (missed or skipped)
 void Tracker::catchUp(Sensor& s, uint32_t now) {
-  uint32_t m = MARGIN + MARGIN_STEP * s.misses;
+  uint32_t m = MARGIN + MARGIN_STEP * (s.misses < MARGIN_MISSES ? s.misses : MARGIN_MISSES);
   if (before(s.next_due + m, now)) {
     uint32_t behind = now - (s.next_due + m);
     s.next_due += (behind / s.period + 1) * s.period;
@@ -116,9 +152,11 @@ void Tracker::catchUp(Sensor& s, uint32_t now) {
 
 bool Tracker::nextWindow(uint32_t now, Window* w) {
   if (scanning(now)) {
+    uint32_t k = (now - _scan_start) / _scan_each;   // which format's turn
     w->start = now;
-    w->len = _scan_until - now;
+    w->len = _scan_start + (k + 1) * _scan_each - now;
     w->key = 0;
+    w->proto = nthProto((int)(_scan_forever ? k % (uint32_t)protocolCount() : k));
     return true;
   }
   bool found = false;
@@ -126,12 +164,13 @@ bool Tracker::nextWindow(uint32_t now, Window* w) {
     Sensor& s = _s[i];
     if (s.period == 0) continue;
     catchUp(s, now);
-    uint32_t m = MARGIN + MARGIN_STEP * s.misses;
+    uint32_t m = MARGIN + MARGIN_STEP * (s.misses < MARGIN_MISSES ? s.misses : MARGIN_MISSES);
     uint32_t start = s.next_due - m;
     if (!found || before(start, w->start)) {
       w->start = start;
       w->len = 2 * m + PACKET_MS;
       w->key = s.key;
+      w->proto = protocolOf(s.last.model);
       found = true;
     }
   }
@@ -140,6 +179,7 @@ bool Tracker::nextWindow(uint32_t now, Window* w) {
       w->start = _next_hunt;
       w->len = HUNT_LEN;
       w->key = 0;
+      w->proto = nthProto(_hunt_turn % protocolCount());
       found = true;
     }
   }
@@ -162,6 +202,7 @@ bool Tracker::nextWindow(uint32_t now, Window* w) {
 
 void Tracker::windowDone(uint32_t now, const Window& w, bool heard_target, bool ran) {
   if (w.key == 0) {
+    if (!scanning(now)) _hunt_turn++;
     _next_hunt = now + HUNT_GAP_MIN + rand32() % (HUNT_GAP_MAX - HUNT_GAP_MIN);
     return;
   }
@@ -170,7 +211,7 @@ void Tracker::windowDone(uint32_t now, const Window& w, bool heard_target, bool 
   // not heard: the next window is for the packet after
   if (s->period) {
     s->next_due += s->period;
-    if (ran && ++s->misses >= MAX_MISSES) {
+    if (ran && ++s->misses >= maxMisses(s->last.model)) {
       s->period = 0;   // lost it: hunt again
       s->misses = 0;
     }

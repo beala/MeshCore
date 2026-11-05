@@ -8,9 +8,6 @@
 
 #include "MyMesh.h"
 
-#define WX_KBPS      17.24f   // 58 µs bits
-#define WX_DEV_KHZ   35.0f    // only used for transmitting; the receiver bandwidth is what matters
-#define WX_RXBW_KHZ  153.8f   // room for the sensors' crystal error (±20 ppm is ±18 kHz at 915 MHz)
 #define WX_PKT_LEN   32       // the longest packet (WS90)
 #define WX_REPLY_MAX 140      // CLI replies go into a 166 byte buffer, after an optional prefix
 
@@ -33,6 +30,26 @@ void MyMesh::getWeatherChannel(ChannelDetails& ch) {
   memcpy(ch.channel.secret, h, 16);
 }
 
+// Listen settings per radio format. The deviation is only used for transmitting; the receiver
+// bandwidth is what matters, with room for the sensors' crystal error (±20 ppm is ±18 kHz).
+mesh::Radio::FskListen MyMesh::weatherListen(uint8_t proto) const {
+  mesh::Radio::FskListen cfg = {};
+  cfg.freq = _prefs.wx.freq;
+  if (proto == wxsensor::PROTO_LACROSSE) {
+    // 104-107 µs bits, sync 0xD2AA2DD4, up to 11 bytes. Some models sit at 914.938 MHz: a wider
+    // receiver covers both
+    cfg.kbps = 9.6f; cfg.dev_khz = 35.0f; cfg.rxbw_khz = 238.1f;
+    cfg.sync[0] = 0xD2; cfg.sync[1] = 0xAA; cfg.sync[2] = 0x2D; cfg.sync[3] = 0xD4; cfg.sync_len = 4;
+    cfg.pkt_len = 11;
+  } else {
+    // 58 µs bits, sync 0x2DD4, up to 32 bytes (WS90)
+    cfg.kbps = 17.24f; cfg.dev_khz = 35.0f; cfg.rxbw_khz = 153.8f;
+    cfg.sync[0] = 0x2D; cfg.sync[1] = 0xD4; cfg.sync_len = 2;
+    cfg.pkt_len = WX_PKT_LEN;
+  }
+  return cfg;
+}
+
 void MyMesh::applyWeather() {
   bool was = _wx_active;
   _radio->stopFskListen();
@@ -42,16 +59,16 @@ void MyMesh::applyWeather() {
     return;
   }
   // probe: a radio without FSK listens says no straight away
-  mesh::Radio::FskListen cfg = {};
-  cfg.freq = _prefs.wx.freq; cfg.kbps = WX_KBPS; cfg.dev_khz = WX_DEV_KHZ; cfg.rxbw_khz = WX_RXBW_KHZ;
-  cfg.sync[0] = 0x2D; cfg.sync[1] = 0xD4; cfg.sync_len = 2; cfg.pkt_len = WX_PKT_LEN;
-  _wx_active = _radio->startFskListen(cfg, 1);
+  _wx_active = _radio->startFskListen(weatherListen(wxsensor::PROTO_FINEOFFSET), 1);
   _radio->stopFskListen();
+  _wx.setProtocols(_prefs.wx.kinds & 3);
   if (_wx_active && !was) {
     _wx.setSeed(millis() ^ 0xA5A5u);
     _wx.reset(millis());
-    _wx.scanFor(millis());   // find the sensors in range: one listen without a break
+    _wx.scanFor(millis());   // find the sensors in range: one listen without a break per format
+    _wx_scan_report = true;
     _wx_since = millis();
+    _wx_heard = _wx_bad = _wx_shown = _wx_windows = _wx_listen_ms = 0;
   }
 }
 
@@ -97,7 +114,7 @@ void MyMesh::weatherLoop() {
     if (n <= 0) break;
     _wx_heard++;
     wxsensor::Reading r;
-    if (!wxsensor::decode(buf, n, &r)) { _wx_bad++; continue; }
+    if (!wxsensor::decodeAs(_wx_rx_proto, buf, n, &r)) { _wx_bad++; continue; }
     if (!weatherShown(r)) continue;   // filtered out: not followed either
     wxsensor::Tracker::Sensor* old = _wx.find(wxsensor::sensorKey(r));
     wxsensor::Reading prev = old ? old->last : r;
@@ -105,6 +122,16 @@ void MyMesh::weatherLoop() {
     wxsensor::Tracker::Sensor* s = _wx.onPacket(now, r, (int16_t) rssi);
     if (!s) continue;
     if (_wx_win_open && s->key == _wx_win.key) _wx_win_got = true;
+    if (is_new && _wx.scanningForever()) {   // driving around: say so the moment a new one turns up
+      char note[200], label[12];
+      sensorLabel(r, label, sizeof(label));
+      int m = snprintf(note, sizeof(note), "New sensor, %d dBm: ", (int) rssi);
+      if (m > 0 && m < (int) sizeof(note)) wxsensor::format(r, _prefs.wx.metric != 0, &note[m], sizeof(note) - m);
+      ChatRef to;
+      memset(&to, 0, sizeof(to));
+      to.kind = CHAT_CONSOLE;
+      postToChat(to, note);
+    }
 
     // what to say, if anything: alerts at once, otherwise each sensor every wx.every minutes
     char msg[MAX_FRAME_SIZE];
@@ -130,6 +157,8 @@ void MyMesh::weatherLoop() {
     }
   }
 
+  if (_wx_scan_report && !_wx.scanning(now) && !_wx_win_open) weatherScanReport();
+
   // the listen asked of the radio
   int st = _radio->fskListenState();
   if (_wx_win_open) {
@@ -145,16 +174,42 @@ void MyMesh::weatherLoop() {
   }
   wxsensor::Window w;
   if (_wx.nextWindow(now, &w) && (int32_t)(w.start - now) <= 0 && w.len > 0) {
-    mesh::Radio::FskListen cfg = {};
-    cfg.freq = _prefs.wx.freq; cfg.kbps = WX_KBPS; cfg.dev_khz = WX_DEV_KHZ; cfg.rxbw_khz = WX_RXBW_KHZ;
-    cfg.sync[0] = 0x2D; cfg.sync[1] = 0xD4; cfg.sync_len = 2; cfg.pkt_len = WX_PKT_LEN;
-    if (_radio->startFskListen(cfg, w.len)) {
+    if (_radio->startFskListen(weatherListen(w.proto), w.len)) {
+      _wx_rx_proto = w.proto;
       _wx_win = w;
       _wx_win_open = true;
       _wx_win_got = false;
       _wx_windows++;
     }
   }
+}
+
+// Posted to the Radio console when a scan ends: what was heard, or where to look if nothing was
+void MyMesh::weatherScanReport() {
+  _wx_scan_report = false;
+  char msg[400];
+  int n;
+  if (_wx.count() == 0) {
+    n = snprintf(msg, sizeof(msg), "Weather scan done: no sensors heard on %.3f MHz (%s).%s",
+                 _prefs.wx.freq, (_prefs.wx.kinds & 3) == 3 ? "Ecowitt and La Crosse" : (_prefs.wx.kinds & 3) == 2 ? "La Crosse" : "Ecowitt",
+                 _wx_bad ? " Some packets failed their checks: a sensor may be too far." : " 'wx scan' tries again.");
+  } else {
+    n = snprintf(msg, sizeof(msg), "Weather scan done: %d sensor%s.", _wx.count(), _wx.count() == 1 ? "" : "s");
+    for (int i = 0; i < _wx.count() && n > 0 && n < (int) sizeof(msg); i++) {
+      wxsensor::Tracker::Sensor* s = _wx.get(i);
+      char label[12];
+      sensorLabel(s->last, label, sizeof(label));
+      n += snprintf(&msg[n], sizeof(msg) - n, "\n%s %s: %d dBm, heard %lu time%s", wxsensor::modelName(s->last.model),
+                    label, s->rssi, (unsigned long) s->count, s->count == 1 ? "" : "s");
+    }
+    if (n > 0 && n < (int) sizeof(msg) && _wx.count() > 1 && !_prefs.wx.only[0]) {
+      snprintf(&msg[n], sizeof(msg) - n, "\nNeighbours' too? 'set wx.only <labels>' keeps just yours.");
+    }
+  }
+  ChatRef to;
+  memset(&to, 0, sizeof(to));
+  to.kind = CHAT_CONSOLE;
+  postToChat(to, msg);
 }
 
 static bool wxOnOff(const char* s, bool* on) {
@@ -167,8 +222,10 @@ bool MyMesh::handleWeatherCommand(const char* command, char* reply) {
   bool on;
   const char* arg = NULL;
   if (strcmp(command, "wx") == 0 || strcmp(command, "get wx") == 0) {
-    sprintf(reply, "> Weather %s: %.3f MHz, %s, every %u min, sensors %s",
-            _prefs.wx.en ? (_wx_active ? "on" : "on, but the radio can't") : "off", _prefs.wx.freq,
+    uint8_t k = _prefs.wx.kinds & 3;
+    sprintf(reply, "> Weather %s: %s, %.3f MHz, %s, every %u min, sensors %s",
+            _prefs.wx.en ? (_wx_active ? (_wx.scanningForever() ? "on, scanning all the time" : "on") : "on, but the radio can't") : "off",
+            k == 3 ? "Ecowitt + La Crosse" : k == 2 ? "La Crosse" : "Ecowitt", _prefs.wx.freq,
             _prefs.wx.metric ? "metric" : "US units", _prefs.wx.every, _prefs.wx.only[0] ? _prefs.wx.only : "all");
     return true;
   }
@@ -200,10 +257,21 @@ bool MyMesh::handleWeatherCommand(const char* command, char* reply) {
             (unsigned long)_wx_windows, pct10 / 10, pct10 % 10);
     return true;
   }
+  if (strcmp(command, "wx scan on") == 0 || strcmp(command, "wx scan off") == 0) {
+    if (!_wx_active) { strcpy(reply, "Error: weather is off ('wx on')"); return true; }
+    bool forever = command[8] == 'o' && command[9] == 'n';
+    _wx.scanForever(millis(), forever);
+    _wx_scan_report = !forever;   // a summary of everything heard when it stops
+    strcpy(reply, forever ? "OK - listening for sensors all the time; each new one shows here. The mesh can't be heard "
+                            "until 'wx scan off' (sending still works)"
+                          : "OK - back to normal");
+    return true;
+  }
   if (strcmp(command, "wx scan") == 0) {
     if (!_wx_active) { strcpy(reply, "Error: weather is off ('wx on')"); return true; }
     _wx.scanFor(millis());
-    strcpy(reply, "OK - listening for sensors for 85 s (the mesh can't be heard meanwhile)");
+    _wx_scan_report = true;
+    sprintf(reply, "OK - listening for sensors for %d s (the mesh can't be heard meanwhile)", 85 * _wx.protocolCount());
     return true;
   }
   if (strncmp(command, "wx ", 3) == 0 && wxOnOff(&command[3], &on)) arg = &command[3];
@@ -216,8 +284,9 @@ bool MyMesh::handleWeatherCommand(const char* command, char* reply) {
       strcpy(reply, "Error: this radio can't listen to weather sensors (needs an LR2021)");
     } else {
       savePrefs();
-      strcpy(reply, on ? "OK - Weather on, scanning for sensors for 85 s. Reconnect the app to see the channel"
-                       : "OK - Weather off");
+      if (on) sprintf(reply, "OK - Weather on, scanning for sensors for %d s. Reconnect the app to see the channel",
+                      85 * _wx.protocolCount());
+      else strcpy(reply, "OK - Weather off");
     }
     return true;
   }
@@ -233,6 +302,14 @@ bool MyMesh::handleWeatherCommand(const char* command, char* reply) {
     if (strcmp(v, "metric") == 0) _prefs.wx.metric = 1;
     else if (strcmp(v, "us") == 0 || strcmp(v, "imperial") == 0) _prefs.wx.metric = 0;
     else { strcpy(reply, "Error: units are metric or us"); return true; }
+  } else if (strncmp(setting, "kind ", 5) == 0) {
+    const char* v = &setting[5];
+    if (strcmp(v, "ecowitt") == 0 || strcmp(v, "ambient") == 0 || strcmp(v, "fineoffset") == 0) _prefs.wx.kinds = 1;
+    else if (strcmp(v, "lacrosse") == 0) _prefs.wx.kinds = 2;
+    else if (strcmp(v, "both") == 0 || strcmp(v, "all") == 0) _prefs.wx.kinds = 3;
+    else { strcpy(reply, "Error: kind is ecowitt, lacrosse or both"); return true; }
+    _wx.setProtocols(_prefs.wx.kinds);
+    if (_wx_active) { _wx.scanFor(millis()); _wx_scan_report = true; }   // look for the new kind's sensors
   } else if (strncmp(setting, "every ", 6) == 0) {
     int m = atoi(&setting[6]);
     if (m < 0 || m > 1440) { strcpy(reply, "Error: minutes, 0-1440 (0 = only alerts)"); return true; }
