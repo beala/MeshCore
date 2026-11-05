@@ -31,16 +31,6 @@ void LocalIdentity::sign(uint8_t* sig, const uint8_t*, int) const { memset(sig, 
 void LocalIdentity::calcSharedSecret(uint8_t* secret, const uint8_t*) const { memset(secret, 0x5A, PUB_KEY_SIZE); }
 }  // namespace mesh
 
-// Every allocation starts as the same junk, as RAM does on a radio, so a field nobody initializes
-// reads the same each run and a finding replays from its input alone (FUZZ_JUNK=<byte> to vary it)
-static int junk_byte() { static int b = getenv("FUZZ_JUNK") ? atoi(getenv("FUZZ_JUNK")) : 0xA5; return b; }
-void* operator new(size_t n) { void* p = malloc(n ? n : 1); if (!p) abort(); memset(p, junk_byte(), n); return p; }
-void* operator new[](size_t n) { return operator new(n); }
-void operator delete(void* p) noexcept { free(p); }
-void operator delete[](void* p) noexcept { free(p); }
-void operator delete(void* p, size_t) noexcept { free(p); }
-void operator delete[](void* p, size_t) noexcept { free(p); }
-
 namespace {
 
 const int POOL_SIZE = 16;
