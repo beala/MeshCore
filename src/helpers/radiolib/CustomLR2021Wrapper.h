@@ -159,7 +159,7 @@ public:
   }
 
   bool configSideDetectors(const uint8_t* sideDetSFs, uint8_t num, float bw) override {
-    LR2021LoRaSideDetector_t tmp[3];
+    LR2021LoRaSideDetector_t tmp[3] = {};
     uint8_t sf = getSpreadingFactor();
 
     if (sf >= 10 && num > 1) { return false; }  // only 1 side detector allowed when primary SF >= 10
@@ -232,18 +232,102 @@ public:
   }
 
   int recvRaw(uint8_t* bytes, int sz) override {
+    CustomLR2021* r = (CustomLR2021 *)_radio;
+    bool scan_pkt = r->isScanning() && isIrqPending();
     int len = RadioLibWrapper::recvRaw(bytes, sz);
-    if (len > 0) {
+    _scan_cached = false;
+    if (len > 0 || scan_pkt) {
       uint8_t step = 0;
-      if (((CustomLR2021 *)_radio)->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
+      if (len > 0 && r->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
         _last_gain_step = step;
-        _rx_gains.add({ (uint32_t)millis(), step, (int16_t)getLastRSSI(), (int8_t)(getLastSNR() * 4) });
-        MESH_DEBUG_PRINTLN("LR2021: RX gain step G%u", step);
       } else {
         _last_gain_step = -1;
       }
+      if (scan_pkt) {
+        // The scan parks after RxDone; read what belongs to this packet, then let it carry on.
+        _scan_rssi = r->getRSSI();
+        _scan_snr = r->getSNR();
+        _scan_cached = true;
+        uint8_t hit = 0;
+        if (r->scanResume(&hit) != RADIOLIB_ERR_NONE) {
+          _scan_restarts++;
+          _scan_resume_fail++;
+          idle();     // the next recvRaw() starts the scan again
+        }
+        if (hit != 0 && hit != 0xFF) {   // another network's packet: never give it to the mesh
+          if (len > 0) {
+            n_recv--;
+            pushSide(bytes, len, _scan_rssi, _scan_snr);
+          }
+          _scan_cached = false;
+          return 0;
+        }
+      }
+      if (len > 0 && _last_gain_step > 0) {
+        _rx_gains.add({ (uint32_t)millis(), (uint8_t)_last_gain_step, (int16_t)getLastRSSI(), (int8_t)(getLastSNR() * 4) });
+        MESH_DEBUG_PRINTLN("LR2021: RX gain step G%u", _last_gain_step);
+      }
     }
     return len;
+  }
+
+  // ---- Second network (on-chip scanner) ----
+  bool setSideListen(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t sync, uint8_t preamble) override {
+    CustomLR2021* r = (CustomLR2021 *)_radio;
+    CustomLR2021::ScanChannel ch = { freq, bw, sf, cr, preamble, sync };
+    if (!r->setScanChannels(&ch, 1)) return false;
+    if (!r->isScanLoaded()) {
+      // the scanner replaces Semtech's patch in PRAM, which only a chip reset clears
+      r->setScanBlob(true);
+      reinitRadio();
+      if (!r->isScanLoaded()) {
+        r->setScanChannels(NULL, 0);
+        r->setScanBlob(false);
+        reinitRadio();
+        return false;
+      }
+    }
+    idle();   // restart receive as a scan
+    return true;
+  }
+
+  void stopSideListen() override {
+    CustomLR2021* r = (CustomLR2021 *)_radio;
+    r->setScanChannels(NULL, 0);
+    if (r->wantsScanBlob()) {
+      r->setScanBlob(false);   // put Semtech's patch back
+      reinitRadio();
+    }
+    _side_head = _side_count = 0;
+  }
+
+  bool isSideListening() const override {
+    CustomLR2021* r = (CustomLR2021 *)_radio;
+    return r->isScanLoaded() && r->getScanChannelCount() > 0;
+  }
+
+  int recvSide(uint8_t* bytes, int sz, float* rssi, float* snr) override {
+    if (_side_count == 0) return 0;
+    const SidePacket& p = _side[_side_head];
+    int len = p.len < sz ? p.len : sz;
+    memcpy(bytes, p.data, len);
+    if (rssi) *rssi = p.rssi;
+    if (snr) *snr = p.snr_x4 / 4.0f;
+    _side_head = (_side_head + 1) % SIDE_QUEUE;
+    _side_count--;
+    return len;
+  }
+
+  void loop() override {
+    if (isSideListening()) {
+      // no noise floor sampling while the radio hops between networks
+      if (millis() - _scan_check_at >= 1000) {
+        _scan_check_at = millis();
+        checkScan();
+      }
+      return;
+    }
+    RadioLibWrapper::loop();
   }
 
   int getLastGainStep() const override { return _last_gain_step; }
@@ -259,6 +343,22 @@ public:
       formatRxGains(reply);
       return true;
     }
+    if (strcmp(command, "get radio.counts") == 0) {
+      sprintf(reply, "> rx %lu ok %lu errors, tx %lu, other network %lu",
+              (unsigned long)getPacketsRecv(), (unsigned long)getPacketsRecvErrors(), (unsigned long)getPacketsSent(),
+              (unsigned long)_side_heard);
+      return true;
+    }
+    if (strcmp(command, "get radio.scan.restarts") == 0) {
+      sprintf(reply, "> %lu restarts: %lu lost hook, %lu parked without IRQ, %lu stuck in RX, %lu resume failed",
+              (unsigned long)_scan_restarts, (unsigned long)_scan_unhooked, (unsigned long)_scan_unparked,
+              (unsigned long)_scan_stuck, (unsigned long)_scan_resume_fail);
+      return true;
+    }
+    if (strcmp(command, "get radio.scan") == 0) {
+      formatScan(reply);
+      return true;
+    }
     return false;
   }
 
@@ -268,8 +368,8 @@ public:
   // gain step, RSSI and SNR of the most recent received packets (newest first via get(0))
   const RecentHistory<RxGain, RX_GAIN_HISTORY>& getRxGains() const { return _rx_gains; }
 
-  float getLastRSSI() const override { return ((CustomLR2021 *)_radio)->getRSSI(); }
-  float getLastSNR() const override { return ((CustomLR2021 *)_radio)->getSNR(); }
+  float getLastRSSI() const override { return _scan_cached ? _scan_rssi : ((CustomLR2021 *)_radio)->getRSSI(); }
+  float getLastSNR() const override { return _scan_cached ? _scan_snr : ((CustomLR2021 *)_radio)->getSNR(); }
 
   uint8_t getSpreadingFactor() const override { return ((CustomLR2021 *)_radio)->getSpreadingFactor(); }
   
@@ -294,6 +394,89 @@ public:
   }
 
   protected:
+    struct SidePacket {
+      uint8_t len;
+      int8_t snr_x4;
+      int16_t rssi;
+      uint8_t data[255];
+    };
+    static const int SIDE_QUEUE = 4;
+    SidePacket _side[SIDE_QUEUE];
+    uint8_t _side_head = 0, _side_count = 0;
+    uint32_t _side_dropped = 0, _side_heard = 0;
+    bool _scan_cached = false;
+    float _scan_rssi = 0, _scan_snr = 0;
+    uint32_t _scan_check_at = 0;
+    uint32_t _scan_restarts = 0;
+    uint32_t _scan_unhooked = 0, _scan_unparked = 0, _scan_stuck = 0, _scan_resume_fail = 0;   // why
+    uint8_t _scan_parked_checks = 0, _scan_busy_checks = 0;
+
+    void pushSide(const uint8_t* bytes, int len, float rssi, float snr) {
+      _side_heard++;
+      if (len > (int)sizeof(_side[0].data)) len = sizeof(_side[0].data);
+      if (_side_count == SIDE_QUEUE) {          // full: drop the oldest
+        _side_head = (_side_head + 1) % SIDE_QUEUE;
+        _side_count--;
+        _side_dropped++;
+      }
+      SidePacket& p = _side[(_side_head + _side_count) % SIDE_QUEUE];
+      p.len = len;
+      p.rssi = (int16_t)rssi;
+      p.snr_x4 = (int8_t)(snr * 4);
+      memcpy(p.data, bytes, len);
+      _side_count++;
+    }
+
+    // Resets and configures the chip again (std_init), eg. to swap what's in PRAM. The caller
+    // applies the MeshCore radio settings again afterwards.
+    void reinitRadio() {
+      CustomLR2021* r = (CustomLR2021 *)_radio;
+      r->std_init(NULL);
+      updatePreamble(getSpreadingFactor());
+      idle();
+    }
+
+    // Once a second while scanning: restart the scan if a host command took it over, and
+    // resume it if a packet's IRQ was missed.
+    void checkScan() {
+      CustomLR2021* r = (CustomLR2021 *)_radio;
+      if (!r->isScanning() || !isInRecvMode() || isIrqPending()) {
+        _scan_parked_checks = _scan_busy_checks = 0;
+        return;
+      }
+      CustomLR2021::ScanStatus st;
+      if (r->scanGetStatus(&st) != RADIOLIB_ERR_NONE || !st.hooked || st.state == CustomLR2021::SCAN_OFF) {
+        _scan_restarts++;
+        _scan_unhooked++;
+        idle();
+        return;
+      }
+      _scan_parked_checks = st.state == CustomLR2021::SCAN_PARK ? _scan_parked_checks + 1 : 0;
+      _scan_busy_checks = (st.state == CustomLR2021::SCAN_WAIT || st.state == CustomLR2021::SCAN_RX) ? _scan_busy_checks + 1 : 0;
+      if (_scan_parked_checks >= 2 || _scan_busy_checks >= 8) {   // no IRQ for a parked packet, or stuck in RX
+        _scan_restarts++;
+        if (_scan_parked_checks >= 2) _scan_unparked++; else _scan_stuck++;
+        _scan_parked_checks = _scan_busy_checks = 0;
+        idle();
+      }
+    }
+
+    // eg. "> scan: 1203 CADs 0 false 1 lost, 12 mesh 5 side (5 queued 0 dropped), 0 restarts"
+    void formatScan(char* reply) {
+      CustomLR2021* r = (CustomLR2021 *)_radio;
+      if (!isSideListening()) {
+        strcpy(reply, r->isScanLoaded() ? "> scan: loaded, no channels" : "> scan: off");
+        return;
+      }
+      CustomLR2021::ScanStatus st;
+      memset(&st, 0, sizeof(st));
+      r->scanGetStatus(&st);
+      snprintf(reply, REPLY_MAX, "> scan %s: %lu CADs %lu false %lu lost, %lu mesh %lu side (%lu heard, %lu dropped), %lu restarts",
+               r->isScanning() ? "on" : "paused", (unsigned long)st.cads, (unsigned long)st.falses,
+               (unsigned long)st.lost, (unsigned long)st.packets_main, (unsigned long)st.packets_other,
+               (unsigned long)_side_heard, (unsigned long)_side_dropped, (unsigned long)_scan_restarts);
+    }
+
     int _last_gain_step = -1;
     RecentHistory<TxFault, TX_FAULT_HISTORY> _tx_faults;
     RecentHistory<RxGain, RX_GAIN_HISTORY> _rx_gains;

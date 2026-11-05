@@ -5,6 +5,7 @@
 #   test/fuzz/build.sh
 #   .pio/fuzz/fuzz_cli -dict=test/fuzz/cli.dict -max_len=600 -max_total_time=60 .pio/fuzz/corpus_cli
 #   .pio/fuzz/fuzz_mesh -max_len=1200 -max_total_time=60 .pio/fuzz/corpus_mesh
+#   .pio/fuzz/fuzz_meshtastic -max_len=1200 -max_total_time=60 .pio/fuzz/corpus_meshtastic
 set -e
 cd "$(dirname "$0")/../.."
 CRYPTO=.pio/libdeps/native_cli/Crypto
@@ -40,3 +41,11 @@ clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize=shif
   -I test/fuzz/mocks -I test/cli_mocks -I src -I $BASE64 -I test/mocks \
   test/fuzz/fuzz_mesh.cpp $MESH_SRC -o .pio/fuzz/fuzz_mesh
 echo "built .pio/fuzz/fuzz_mesh"
+
+# Meshtastic decoding, with the real AES
+clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+  -I src -I $CRYPTO \
+  test/fuzz/fuzz_meshtastic.cpp src/helpers/meshtastic/MeshtasticRx.cpp \
+  $CRYPTO/AES128.cpp $CRYPTO/AES256.cpp $CRYPTO/AESCommon.cpp $CRYPTO/BlockCipher.cpp $CRYPTO/Crypto.cpp \
+  -o .pio/fuzz/fuzz_meshtastic
+echo "built .pio/fuzz/fuzz_meshtastic"

@@ -212,9 +212,30 @@ private:
       def("tag", tag);
     }
   };
+  // Listening to a Meshtastic channel with the LR2021's on-chip scanner; its texts show in the app
+  // as an extra, receive-only channel
+  class MeshtasticPrefs : public ConfigSerializer {
+  public:
+    uint8_t en = 0;
+    float freq = 0;               // MHz; 0 = the preset's default US frequency
+    char preset[14] = "LongFast";
+    char name[12] = "";           // channel name; empty = the preset's name (the primary channel)
+    uint8_t key[32] = { 1 };      // as Meshtastic stores it: 1 byte = default key (index), 16 or 32 = AES key
+    uint8_t key_len = 1;
+  protected:
+    void structure() override {
+      def("en", en);
+      def("freq", freq);
+      def("preset", preset, sizeof(preset));
+      def("name", name, sizeof(name));
+      def("key", (void *) key, sizeof(key));
+      def("klen", key_len);
+    }
+  };
 public:
   FloodRetryPrefs flood_retry;
   ClonePrefs clone;
+  MeshtasticPrefs mt;
 private:
 
   class CompanionPrefs : public ConfigSerializer {
@@ -316,6 +337,7 @@ protected:
     def("comp", companion);
     def("custom", custom);
     def("find", find);
+    def("mt", mt);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif

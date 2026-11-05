@@ -586,30 +586,37 @@ void MyMesh::postPart(const ChatRef& to, const char* text) {
     queueMessage(*c, TXT_TYPE_PLAIN, &pkt, ts, NULL, 0, msg);
   } else if (to.kind == CHAT_CHANNEL) {
     snprintf(msg, sizeof(msg), "\xE2\x9A\x99 Radio: %s", text);   // channel texts are "sender: text"
-    int i = 0;
-    if (app_target_ver >= 3) {
-      out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV_V3;
-      out_frame[i++] = 0;   // SNR
-      out_frame[i++] = 0;
-      out_frame[i++] = 0;
-    } else {
-      out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
-    }
-    out_frame[i++] = to.channel_idx;
-    out_frame[i++] = 0xFF;   // direct
-    out_frame[i++] = TXT_TYPE_PLAIN;
-    memcpy(&out_frame[i], &ts, 4);
-    i += 4;
-    int tlen = strlen(msg);
-    if (i + tlen > MAX_FRAME_SIZE) tlen = MAX_FRAME_SIZE - i;
-    memcpy(&out_frame[i], msg, tlen);
-    i += tlen;
-    addToOfflineQueue(out_frame, i);
-    if (_serial->isConnected()) {
-      uint8_t frame[1];
-      frame[0] = PUSH_CODE_MSG_WAITING;
-      _serial->writeFrame(frame, 1);
-    }
+    pushChannelText(to.channel_idx, ts, 0, 0xFF, msg, strlen(msg));
+  }
+}
+
+// Shows a text in a channel as if received there; it stays on this radio and phone.
+// path_len 0xFF = direct.
+void MyMesh::pushChannelText(uint8_t channel_idx, uint32_t ts, int8_t snr_x4, uint8_t path_len, const char* text, int len) {
+  int i = 0;
+  if (app_target_ver >= 3) {
+    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV_V3;
+    out_frame[i++] = (uint8_t) snr_x4;
+    out_frame[i++] = 0;
+    out_frame[i++] = 0;
+  } else {
+    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+  }
+  out_frame[i++] = channel_idx;
+  out_frame[i++] = path_len;
+  out_frame[i++] = TXT_TYPE_PLAIN;
+  memcpy(&out_frame[i], &ts, 4);
+  i += 4;
+  int tlen = len;
+  if (tlen < 0) tlen = 0;
+  if (i + tlen > MAX_FRAME_SIZE) tlen = MAX_FRAME_SIZE - i;
+  memcpy(&out_frame[i], text, tlen);
+  i += tlen;
+  addToOfflineQueue(out_frame, i);
+  if (_serial->isConnected()) {
+    uint8_t frame[1];
+    frame[0] = PUSH_CODE_MSG_WAITING;
+    _serial->writeFrame(frame, 1);
   }
 }
 
@@ -1498,9 +1505,8 @@ void MyMesh::begin() {
                        _crypto_seq, _prefs.crypto_seq);
   }
 
-  radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
-  radio_driver.setTxPower(_prefs.tx_power_dbm);
-  radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+  applyMeshtastic();   // may load the on-chip scanner, which restarts the radio: settings come next
+  applyRadioPrefs();
   radio_driver.setTxLedEnabled(!_prefs.led_off);
   loadFindAllow();
 
@@ -1559,7 +1565,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     out_frame[i++] = RESP_CODE_DEVICE_INFO;
     out_frame[i++] = FIRMWARE_VER_CODE;
     out_frame[i++] = MAX_CONTACTS / 2;   // v3+
-    out_frame[i++] = MAX_GROUP_CHANNELS; // v3+
+    out_frame[i++] = MAX_GROUP_CHANNELS + (_mt_active ? 1 : 0); // v3+; the last one is Meshtastic's
     memcpy(&out_frame[i], &_prefs.ble_pin, 4);
     i += 4;
     memset(&out_frame[i], 0, 12);
@@ -1711,6 +1717,13 @@ void MyMesh::handleCmdFrame(size_t len) {
 
     if (txt_type != TXT_TYPE_PLAIN) {
       writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
+    } else if (isMeshtasticChannel(channel_idx)) {   // receive only: nothing goes out on either network
+      writeOKFrame();
+      ChatRef to;
+      memset(&to, 0, sizeof(to));
+      to.kind = CHAT_CHANNEL;
+      to.channel_idx = channel_idx;
+      postToChat(to, "Not sent: the Meshtastic channel is receive-only");
     } else {
       ChannelDetails channel;
       bool success = getChannel(channel_idx, channel);
@@ -2286,11 +2299,18 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_GET_CHANNEL && len >= 2) {
     uint8_t channel_idx = cmd_frame[1];
     ChannelDetails channel;
-    if (getChannel(channel_idx, channel)) {
+    bool found = isMeshtasticChannel(channel_idx);
+    if (found) {
+      getMeshtasticChannel(channel);
+    } else {
+      found = getChannel(channel_idx, channel);
+    }
+    if (found) {
       int i = 0;
       out_frame[i++] = RESP_CODE_CHANNEL_INFO;
       out_frame[i++] = channel_idx;
-      strcpy((char *)&out_frame[i], channel.name);
+      memset(&out_frame[i], 0, 32);
+      StrHelper::strncpy((char *)&out_frame[i], channel.name, 32);
       i += 32;
       memcpy(&out_frame[i], channel.channel.secret, 16);
       i += 16; // NOTE: only 128-bit supported
@@ -2300,6 +2320,8 @@ void MyMesh::handleCmdFrame(size_t len) {
     }
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 32) {
     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD); // not supported (yet)
+  } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 16 && isMeshtasticChannel(cmd_frame[1])) {
+    writeErrFrame(ERR_CODE_ILLEGAL_ARG);   // set with 'set mt.*' instead
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 16) {
     uint8_t channel_idx = cmd_frame[1];
     ChannelDetails channel;
@@ -2741,6 +2763,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 
   if (handleCloneCommand(command, reply)) return true;
+  if (handleMeshtasticCommand(command, reply)) return true;
 
   // hook for variant-specific CLI processing
   if (board.handleCommand(command, sender_timestamp, reply)) {
@@ -3470,6 +3493,7 @@ void MyMesh::checkSerialInterface() {
 void MyMesh::loop() {
   BaseChatMesh::loop();
   findLoop();
+  meshtasticLoop();
 
   if (_crypto_save_pending && (long)(millis() - _crypto_save_at) >= 0) {
     _crypto_save_pending = false;

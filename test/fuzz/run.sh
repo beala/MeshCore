@@ -8,8 +8,10 @@ set -e
 cd "$(dirname "$0")/../.."
 SECONDS_EACH=${1:-60}
 test/fuzz/build.sh
-mkdir -p .pio/fuzz/findings .pio/fuzz/corpus_cli .pio/fuzz/corpus_mesh .pio/fuzz/seeds_mesh
+mkdir -p .pio/fuzz/findings .pio/fuzz/corpus_cli .pio/fuzz/corpus_mesh .pio/fuzz/seeds_mesh \
+  .pio/fuzz/corpus_meshtastic .pio/fuzz/seeds_meshtastic
 FUZZ_WRITE_SEEDS=.pio/fuzz/seeds_mesh .pio/fuzz/fuzz_mesh
+FUZZ_WRITE_SEEDS=.pio/fuzz/seeds_meshtastic .pio/fuzz/fuzz_meshtastic
 
 run() {
   local name=$1; shift
@@ -24,4 +26,5 @@ run() {
 }
 run cli -dict=test/fuzz/cli.dict -max_len=600 .pio/fuzz/corpus_cli
 run mesh -max_len=1200 .pio/fuzz/corpus_mesh .pio/fuzz/seeds_mesh
+run meshtastic -max_len=1200 .pio/fuzz/corpus_meshtastic .pio/fuzz/seeds_meshtastic
 echo "no findings"

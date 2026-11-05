@@ -2,6 +2,7 @@
 
 #include "CustomLR2021.h"
 #include "lr20xx_pram_lr2021.h"
+#include "lr2021_scan_blob.h"
 
 // PRAM write window, from Semtech's LR20xx driver (LR20XX_PRAM_BASE_ADDRESS).
 // RadioLib has the same value in LR2021_registers.h, which LR2021.h doesn't include.
@@ -29,6 +30,160 @@ int16_t CustomLR2021::loadPram() {
   if (!loaded) return RADIOLIB_ERR_UNKNOWN;
 
   return getPramVersion(&_pram_version);
+}
+
+// ---- On-chip scanner (tools/lr2021_scan/scan.c) ----
+
+#define SCAN_TABLE_ADDR  0x807800   // channel table in the chip's RAM, 3 words per channel
+#define SCAN_ENTRY       1          // ActivatePram entry of the scanner
+#define SCAN_HELLO       2          // entry that answers "MCS1"
+#define SCAN_CAD_SYMBOLS 2
+#define SCAN_WAIT_SYMS   8          // after a CAD detection, how long to wait for a preamble
+#define SCAN_CAD_FLAGS   0x18       // preamble-only detection, fast CAD (docs/pram-scanner.md in lr2021-re-public)
+
+// CAD detect peaks for a 2-symbol CAD, SF5..SF12 (Semtech datasheet table, as used by the scanner bench)
+static const uint8_t SCAN_PEAK_2SYM[8] = { 56, 56, 56, 58, 58, 60, 64, 68 };
+
+int16_t CustomLR2021::loadScanBlob() {
+  for (uint32_t i = 0; i < lr2021_scan_blob_words; i += PRAM_BLOCK_WORDS) {
+    size_t len = lr2021_scan_blob_words - i;
+    if (len > PRAM_BLOCK_WORDS) len = PRAM_BLOCK_WORDS;
+    int16_t state = writeRegMem32(PRAM_BASE_ADDR + i * 4, &lr2021_scan_blob[i], len);
+    if (state != RADIOLIB_ERR_NONE) return state;
+  }
+  int16_t state = activatePram();
+  if (state != RADIOLIB_ERR_NONE) return state;
+
+  uint8_t req[1] = { SCAN_HELLO };
+  uint8_t rsp[4] = { 0 };
+  state = SPIcommand(RADIOLIB_LR2021_CMD_ACTIVATE_PRAM, false, rsp, sizeof(rsp), req, sizeof(req));
+  if (state != RADIOLIB_ERR_NONE) return state;
+  if (memcmp(rsp, "MCS1", 4) != 0) return RADIOLIB_ERR_UNKNOWN;
+  _pram_version = 0;
+  return RADIOLIB_ERR_NONE;
+}
+
+bool CustomLR2021::bwCode(float bw, uint8_t* code) {
+  static const struct { float khz; uint8_t code; } table[] = {
+    { 31.25f, RADIOLIB_LR2021_LORA_BW_31 }, { 41.67f, RADIOLIB_LR2021_LORA_BW_41 },
+    { 62.5f, RADIOLIB_LR2021_LORA_BW_62 }, { 83.34f, RADIOLIB_LR2021_LORA_BW_83 },
+    { 101.56f, RADIOLIB_LR2021_LORA_BW_101 }, { 125.0f, RADIOLIB_LR2021_LORA_BW_125 },
+    { 203.13f, RADIOLIB_LR2021_LORA_BW_203 }, { 250.0f, RADIOLIB_LR2021_LORA_BW_250 },
+    { 500.0f, RADIOLIB_LR2021_LORA_BW_500 },
+  };
+  for (auto& t : table) {
+    if (fabsf(bw - t.khz) < 0.1f) { *code = t.code; return true; }
+  }
+  return false;
+}
+
+static void scanTableEntry(uint32_t* w, float freqMHz, uint8_t sf, uint8_t bw_code, uint8_t cr_code, bool ldro,
+                           uint16_t preamble, uint8_t sync) {
+  w[0] = (uint32_t)(freqMHz * 1000000.0f + 0.5f);
+  uint8_t mod0 = (uint8_t)((sf << 4) | (bw_code & 0x0F));
+  uint8_t mod1 = (uint8_t)((cr_code << 4) | (ldro ? 1 : 0));
+  uint8_t peak = SCAN_PEAK_2SYM[(sf >= 5 && sf <= 12) ? sf - 5 : 2];
+  uint8_t pre = preamble > 255 ? 255 : (uint8_t)preamble;
+  w[1] = mod0 | (mod1 << 8) | ((uint32_t)peak << 16) | ((uint32_t)pre << 24);
+  // raw sync symbols: each nibble doubled, as SetLoraSyncword does (0x12 -> 2, 4)
+  uint8_t s1 = (uint8_t)((sync >> 4) * 2), s2 = (uint8_t)((sync & 0x0F) * 2);
+  w[2] = s1 | (s2 << 8);
+}
+
+int16_t CustomLR2021::scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st) {
+  uint8_t rsp[40] = { 0 };
+  int16_t state = SPIcommand(RADIOLIB_LR2021_CMD_ACTIVATE_PRAM, false, rsp, sizeof(rsp), req, req_len);
+  if (state != RADIOLIB_ERR_NONE || !st) return state;
+  uint32_t v[10];
+  for (int i = 0; i < 10; i++) {
+    v[i] = rsp[4 * i] | (rsp[4 * i + 1] << 8) | (rsp[4 * i + 2] << 16) | ((uint32_t)rsp[4 * i + 3] << 24);
+  }
+  st->state = v[0] & 0xFF;
+  st->last_hit = (v[0] >> 8) & 0xFF;
+  st->channel = (v[0] >> 16) & 0xFF;
+  st->hooked = (v[0] >> 24) != 0;
+  st->cads = v[1]; st->falses = v[2]; st->lost = v[3]; st->packets = v[4]; st->rounds = v[5];
+  st->events = v[6]; st->packets_main = v[7]; st->packets_other = v[8]; st->irq = v[9];
+  return state;
+}
+
+int16_t CustomLR2021::scanStart() {
+  if (_scan_running) scanStop();
+  int16_t state = LR2021::standby();
+  if (state != RADIOLIB_ERR_NONE) return state;
+  this->mod->setRfSwitchState(Module::MODE_RX);
+
+  // channel 0 is MeshCore, from RadioLib's cached settings; then the extra channels
+  uint32_t words[3 * (1 + SCAN_MAX_EXTRA)];
+  scanTableEntry(&words[0], freqMHz, spreadingFactor, bandwidth, codingRate, ldrOptimize, preambleLengthLoRa, _sync_word);
+  for (uint8_t i = 0; i < _scan_extra_n; i++) {
+    const ScanChannel& c = _scan_extra[i];
+    uint8_t code = RADIOLIB_LR2021_LORA_BW_125;
+    bwCode(c.bwKHz, &code);
+    bool ldro = (float)(1UL << c.sf) / c.bwKHz >= 16.0f;
+    scanTableEntry(&words[3 * (i + 1)], c.freqMHz, c.sf, code, c.cr - 4, ldro, c.preamble, c.sync);
+  }
+  uint8_t n = 1 + _scan_extra_n;
+  state = writeRegMem32(SCAN_TABLE_ADDR, words, 3 * n);
+  if (state != RADIOLIB_ERR_NONE) return state;
+
+  // the synthesizer keeps running between hops; a detected preamble stops the RX timeout
+  state = setRxTxFallbackMode(RADIOLIB_LR2021_FALLBACK_MODE_FS);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  uint8_t on = 1;
+  state = SPIcommand(RADIOLIB_LR2021_CMD_STOP_TIMEOUT_ON_PREAMBLE, true, &on, 1);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  state = setDioIrqConfig(irqDioNum, RADIOLIB_LR2021_IRQ_RX_DONE | RADIOLIB_LR2021_IRQ_CRC_ERROR);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
+  if (state != RADIOLIB_ERR_NONE) return state;
+
+  uint8_t req[] = { SCAN_ENTRY, 1, n, SCAN_CAD_SYMBOLS, SCAN_WAIT_SYMS, SCAN_CAD_FLAGS };
+  ScanStatus st;
+  state = scanCmd(req, sizeof(req), &st);
+  if (state == RADIOLIB_ERR_NONE) _scan_running = true;
+  return state;
+}
+
+int16_t CustomLR2021::scanResume(uint8_t* hit) {
+  uint8_t req[] = { SCAN_ENTRY, 3 };
+  ScanStatus st;
+  int16_t state = scanCmd(req, sizeof(req), &st);
+  if (hit) *hit = st.last_hit;
+  return state;
+}
+
+void CustomLR2021::addScanTotals(const ScanStatus& st) {
+  _scan_totals.cads += st.cads; _scan_totals.falses += st.falses; _scan_totals.lost += st.lost;
+  _scan_totals.packets += st.packets; _scan_totals.rounds += st.rounds; _scan_totals.events += st.events;
+  _scan_totals.packets_main += st.packets_main; _scan_totals.packets_other += st.packets_other;
+}
+
+int16_t CustomLR2021::scanStop() {
+  uint8_t req[] = { SCAN_ENTRY, 0 };
+  ScanStatus st;
+  int16_t state = scanCmd(req, sizeof(req), &st);
+  if (state == RADIOLIB_ERR_NONE) addScanTotals(st);
+  _scan_running = false;
+  setRxTxFallbackMode(RADIOLIB_LR2021_FALLBACK_MODE_STBY_RC);   // RadioLib's setting
+  uint8_t off = 0;
+  SPIcommand(RADIOLIB_LR2021_CMD_STOP_TIMEOUT_ON_PREAMBLE, true, &off, 1);
+  return state;
+}
+
+int16_t CustomLR2021::scanGetStatus(ScanStatus* st) {
+  int16_t state = RADIOLIB_ERR_NONE;
+  ScanStatus now = {};
+  if (_scan_running) {
+    uint8_t req[] = { SCAN_ENTRY, 2 };
+    state = scanCmd(req, sizeof(req), &now);
+    if (state != RADIOLIB_ERR_NONE) return state;
+  }
+  *st = now;
+  st->cads += _scan_totals.cads; st->falses += _scan_totals.falses; st->lost += _scan_totals.lost;
+  st->packets += _scan_totals.packets; st->rounds += _scan_totals.rounds; st->events += _scan_totals.events;
+  st->packets_main += _scan_totals.packets_main; st->packets_other += _scan_totals.packets_other;
+  return state;
 }
 
 #endif

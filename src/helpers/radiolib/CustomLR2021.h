@@ -16,6 +16,37 @@ class CustomLR2021 : public LR2021 {
 
   int16_t loadPram();
 
+public:
+  // One extra channel the on-chip scanner listens to besides MeshCore's own (see lr2021_scan_blob.h
+  // and tools/lr2021_scan/scan.c). sync is the one-byte LoRa sync word (MeshCore 0x12, Meshtastic 0x2B).
+  struct ScanChannel {
+    float freqMHz;
+    float bwKHz;
+    uint8_t sf, cr, preamble, sync;
+  };
+  struct ScanStatus {
+    uint8_t state, last_hit, channel;
+    bool hooked;
+    uint32_t cads, falses, lost, packets, rounds, events, packets_main, packets_other, irq;
+  };
+  static const int SCAN_MAX_EXTRA = 3;
+  enum { SCAN_OFF, SCAN_CAD, SCAN_WAIT, SCAN_RX, SCAN_PARK };
+
+private:
+  bool _scan_blob = false;      // load the scanner into PRAM instead of Semtech's patch
+  bool _scan_loaded = false;    // the scanner answered after the last load
+  bool _scan_running = false;   // started on the chip and not stopped since
+  uint8_t _scan_extra_n = 0;
+  ScanChannel _scan_extra[SCAN_MAX_EXTRA];
+  uint8_t _sync_word = RADIOLIB_LR2021_LORA_SYNC_WORD_PRIVATE;
+  ScanStatus _scan_totals = {};   // counts from scans that have ended (the chip's restart at each start)
+  void addScanTotals(const ScanStatus& st);
+  SPIClass* _spi = NULL;
+
+  int16_t loadScanBlob();
+  int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);
+  static bool bwCode(float bw, uint8_t* code);
+
   // Sub-GHz PA table, one entry per dBm from -9 to +22 (RADIOLIB_LR2021_PA_TABLE_LEN entries).
   // paVal is TX_POWER in 0.5 dB units.
   // +10..+22 dBm come from the Semtech LR2021/22/12 datasheet Rev 2.2 (2026-08-08), Table 7-19
@@ -102,6 +133,9 @@ class CustomLR2021 : public LR2021 {
 
     bool std_init(SPIClass* spi = NULL)
     {
+      if (spi) _spi = spi;
+      _scan_running = false;
+      _scan_loaded = false;
       
   #ifdef LR2021_TCXO_VOLTAGE
       float tcxo = LR2021_TCXO_VOLTAGE;
@@ -158,7 +192,14 @@ class CustomLR2021 : public LR2021 {
       setCRC(2);
       explicitHeader();
 
-      if (_pram_status == RADIOLIB_ERR_NONE) {
+      if (_scan_blob) {
+        if (_scan_loaded) {
+          Serial.println("LR2021 scanner loaded in place of Semtech's patch");
+        } else {
+          Serial.print("WARNING: LR2021 scanner not loaded: ");
+          Serial.println(_pram_status);
+        }
+      } else if (_pram_status == RADIOLIB_ERR_NONE) {
         Serial.print("LR2021 PRAM patch loaded: type ");
         Serial.print(_pram_version >> 8);
         Serial.print(", version 0x");
@@ -189,13 +230,68 @@ class CustomLR2021 : public LR2021 {
     // Semtech's own driver loads the patch, so the load is hooked in here.
     using LR2021::standby;
     int16_t standby() override {
+      if (_scan_running) scanStop();
       int16_t state = LR2021::standby();
       if (_pram_pending && state == RADIOLIB_ERR_NONE) {
         _pram_pending = false;
-        _pram_status = loadPram();
+        if (_scan_blob) {
+          _pram_status = loadScanBlob();
+          _scan_loaded = _pram_status == RADIOLIB_ERR_NONE;
+        } else {
+          _pram_status = loadPram();
+        }
       }
       return state;
     }
+
+    // RadioLib starts a transmit (and other modes) without going to standby first. While scanning,
+    // the chip may be tuned to the other network or in the middle of a CAD: stop the scan, which
+    // puts MeshCore's settings back, before anything is staged.
+    int16_t stageMode(RadioModeType_t mode, RadioModeConfig_t* cfg) override {
+      if (_scan_running) {
+        scanStop();
+        LR2021::standby();
+      }
+      return LR2021::stageMode(mode, cfg);
+    }
+
+    using LR2021::sleep;
+    int16_t sleep() override {
+      if (_scan_running) scanStop();
+      return LR2021::sleep();
+    }
+
+    // ---- On-chip scanner ----
+    // Choose the PRAM image for the next std_init(): the scanner, or Semtech's patch.
+    void setScanBlob(bool en) { _scan_blob = en; }
+    bool wantsScanBlob() const { return _scan_blob; }
+    bool isScanLoaded() const { return _scan_loaded; }
+    bool isScanning() const { return _scan_running; }
+    SPIClass* getSPI() const { return _spi; }
+
+    // Channels scanned after MeshCore's own (channel 0, always the current radio settings).
+    // Takes effect at the next startReceive().
+    bool setScanChannels(const ScanChannel* chans, uint8_t n) {
+      if (n > SCAN_MAX_EXTRA) return false;
+      for (uint8_t i = 0; i < n; i++) {
+        uint8_t code;
+        if (!bwCode(chans[i].bwKHz, &code) || chans[i].sf < 5 || chans[i].sf > 12 || chans[i].cr < 5 || chans[i].cr > 8) return false;
+        _scan_extra[i] = chans[i];
+      }
+      _scan_extra_n = n;
+      return true;
+    }
+    uint8_t getScanChannelCount() const { return _scan_extra_n; }
+
+    // Starts the scan over channel 0 (MeshCore) and the extra channels. Only RxDone and CRC errors
+    // reach the IRQ pin; the chip hops on its own between packets.
+    int16_t scanStart();
+    // After a packet has been read: carry on scanning. *hit is the channel it came in on.
+    int16_t scanResume(uint8_t* hit);
+    // Leaves the scan with the radio tuned to MeshCore's settings again.
+    int16_t scanStop();
+    // Counts since boot (all scans so far plus the running one)
+    int16_t scanGetStatus(ScanStatus* st);
 
     float getFreqMHz() const { return freqMHz; }
 
@@ -208,6 +304,7 @@ class CustomLR2021 : public LR2021 {
     bool getRxBoostedGainMode() const { return _rx_boosted; }
 
     int16_t startReceive() override {
+      if (_scan_loaded && _scan_extra_n > 0) return scanStart();
       // include the PREAMBLE_DETECTED irq bit in reported flags
       return LR2021::startReceive(RADIOLIB_LR2021_RX_TIMEOUT_INF, RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_IRQ_PREAMBLE_DETECTED), RADIOLIB_IRQ_RX_DEFAULT_MASK, 0);
     }
@@ -270,6 +367,7 @@ class CustomLR2021 : public LR2021 {
     // then restore what sleep loses. Warm sleep keeps RAM (command settings) but not
     // registers (datasheet 23.6), so register-based settings must be written again.
     int16_t resetAGC() {
+      if (_scan_running) scanStop();
       sleep(true, 0);
       int16_t state = standby(RADIOLIB_LR2021_STANDBY_RC, true);  // NOP pulls NSS low to wake
       if (state != RADIOLIB_ERR_NONE) return state;

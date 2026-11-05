@@ -351,6 +351,25 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+#### Listen to a Meshtastic channel (LR2021 only)
+**Usage:**
+- `mt on`, `mt off`
+- `mt` or `get mt`: the settings
+- `set mt.preset <name>`: `LongFast` (default), `MediumFast`, `ShortFast`, ...
+- `set mt.freq <MHz>` or `set mt.freq auto` (default: the preset's US frequency, 906.875 MHz for LongFast)
+- `set mt.channel <name>` or `set mt.channel default` (the preset's name)
+- `set mt.key <base64>`, `set mt.key default` (`AQ==`) or `set mt.key none`
+- `get mt.stats`, `get mt.last`: what was heard
+- `get radio.scan`, `get radio.scan.restarts`, `get radio.counts`: the on-chip scanner
+
+**Example reply:** `> Meshtastic on: LongFast, 906.875 MHz (auto), channel LongFast, key default`
+
+**Notes:**
+- The radio also listens to a Meshtastic channel, and its texts show in the app as one more channel, "Meshtastic LongFast", after your own. Receive only: text typed there is not sent. See [Meshtastic channel](meshtastic_channel.md).
+- Settings are saved. Reconnect the app after `mt on` so it lists the new channel.
+
+---
+
 ### Power
 
 #### How long the radio has been running

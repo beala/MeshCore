@@ -9,9 +9,9 @@ plan for the part that isn't covered yet: the companion firmware's own code.
 |---|---|---|
 | `-Wall -Werror` on MeshCore's own code | `platformio.ini` `[arduino_base]` `build_src_flags` | anything gcc can see at build time, e.g. a string copied into a buffer too small for it |
 | Stack canaries (`-fstack-protector-strong`) | `[nrf52_base]`, `[esp32_base]` | a write past the end of a stack buffer, when the function returns. nRF52 reboots and the next `uptime` says "The run before crashed: stack overwrite" |
-| Host tests under AddressSanitizer + UBSan | `env:native_asan`, `native_crypto`, `native_entropy`, `native_kiss_modem`, `native_cli` | out-of-bounds reads and writes, use after free, leaks, undefined behavior, in the code the tests run |
+| Host tests under AddressSanitizer + UBSan | `env:native_asan`, `native_crypto`, `native_entropy`, `native_kiss_modem`, `native_cli`, `native_meshtastic` | out-of-bounds reads and writes, use after free, leaks, undefined behavior, in the code the tests run |
 | Every repeater/room CLI command | `env:native_cli`, `test/test_common_cli` | a reply or argument copy that doesn't fit the firmware's 160-byte buffers |
-| Fuzzers (libFuzzer + ASAN + UBSan) | `test/fuzz/` | the same errors, on millions of generated inputs: CLI command sequences (`fuzz_cli`) and radio packets into a chat node (`fuzz_mesh`) |
+| Fuzzers (libFuzzer + ASAN + UBSan) | `test/fuzz/` | the same errors, on millions of generated inputs: CLI command sequences (`fuzz_cli`), radio packets into a chat node (`fuzz_mesh`) and Meshtastic packets into the decoder (`fuzz_meshtastic`) |
 
 The Custom Builds workflow runs all the host test envs and a minute of each fuzzer before every
 release; a failure stops the release.
@@ -19,7 +19,7 @@ release; a failure stops the release.
 Run them locally:
 
 ```
-pio test -e native_asan -e native_kiss_modem -e native_crypto -e native_entropy -e native_cli
+pio test -e native_asan -e native_kiss_modem -e native_crypto -e native_entropy -e native_cli -e native_meshtastic
 test/fuzz/run.sh          # a minute per fuzzer; test/fuzz/run.sh 3600 for an hour
 ```
 

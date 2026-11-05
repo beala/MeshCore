@@ -89,6 +89,21 @@ public:
    * \returns  true if the command was handled, with the reply in 'reply'.
    */
   virtual bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) { return false; }
+
+  /**
+   * \brief  Some radios can also listen to a second LoRa network (eg. Meshtastic) between their own
+   *         packets. Packets heard there never reach the mesh; read them with recvSide().
+   *         Turning this on or off may restart the radio: apply the radio settings again afterwards.
+   * \param  sync  one-byte LoRa sync word of the other network
+   * \returns  false if this radio can't do it, or the settings aren't valid.
+   */
+  virtual bool setSideListen(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t sync, uint8_t preamble) { return false; }
+  virtual void stopSideListen() { }
+  virtual bool isSideListening() const { return false; }
+  /**
+   * \returns  length of the next packet heard on the second network (0 = none), with its RSSI and SNR.
+   */
+  virtual int recvSide(uint8_t* bytes, int sz, float* rssi, float* snr) { return 0; }
 };
 
 /**

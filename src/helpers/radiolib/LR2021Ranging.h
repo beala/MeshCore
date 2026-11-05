@@ -40,6 +40,7 @@ public:
   int16_t begin(bool manager, uint32_t addr, bool extended = false) {
     int16_t st;
     uint8_t b[5];
+    _r->standby();   // stops the on-chip scan, if running, back on MeshCore's frequency
     if ((st = standbyRC()) != RADIOLIB_ERR_NONE) return st;
     if ((st = packetType(RADIOLIB_LR2021_PACKET_TYPE_RTTOF)) != RADIOLIB_ERR_NONE) return st;
     b[0] = (SF << 4) | 0x06; b[1] = 1 << 4;                       // SF9, BW 500 kHz, CR 4/5

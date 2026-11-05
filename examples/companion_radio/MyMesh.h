@@ -28,6 +28,7 @@
 #include <RTClib.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/BaseSerialInterface.h>
+#include <helpers/meshtastic/MeshtasticRx.h>
 #include <helpers/IdentityStore.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
@@ -389,6 +390,23 @@ private:
   static bool rangingAvailable(float freq);
   void runRanging(bool manager, uint32_t addr);
   void setFindStatus(const char* fmt, ...);
+
+  // A Meshtastic channel heard through the LR2021's on-chip scanner, shown in the app as one more,
+  // receive-only channel (MyMeshMeshtastic.cpp, docs/meshtastic_channel.md)
+  meshtastic::Receiver _mt;
+  bool _mt_active = false;           // the radio is listening to it
+  uint32_t _mt_shown = 0;            // texts passed to the app
+  int _mt_last_len = 0;              // the last packet heard, for 'get mt.last'
+  uint8_t _mt_last_head[20] = {}, _mt_last_tail[8] = {};
+  bool applyMeshtastic();            // start/stop listening per _prefs.mt; true if the radio was restarted
+  void applyRadioPrefs();
+  void meshtasticLoop();
+  bool handleMeshtasticCommand(const char* command, char* reply);
+  bool isMeshtasticChannel(int idx) const;
+  void getMeshtasticChannel(ChannelDetails& ch);
+  const char* meshtasticChannelName() const;
+  void showMeshtasticText(const meshtastic::Message& m, float snr);
+  void pushChannelText(uint8_t channel_idx, uint32_t ts, int8_t snr_x4, uint8_t path_len, const char* text, int len);
 };
 
 extern MyMesh the_mesh;
