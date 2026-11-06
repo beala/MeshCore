@@ -58,7 +58,8 @@ still shows any distance until `set air.range 10`.
 
 The [fluxcore app](https://fluxcore.party/app/) connects to the radio over Bluetooth (Chrome or Edge
 on a computer or Android, Bluefy on iPhone and iPad) and shows every aircraft the radio holds on a
-map, with its trail, every 2 seconds. It reads them with `get air.list`:
+map, with its trail, every 2 seconds, on its own Bluetooth channel (the fluxcore service in
+[companion_protocol.md](companion_protocol.md)), so the MeshCore app can stay connected. It reads them with `get air.list`:
 
 ```
 get air.list        > 3 0 a1b2c3,N123AB,4012345,-10512345,5800,79,299,-500,6,-92,1;a6ae97,,,,5475,,,,24,-84,2

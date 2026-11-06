@@ -32,6 +32,15 @@ class SerialBLEInterface : public BaseSerialInterface, BLESecurityCallbacks, BLE
   int send_queue_len;
   Frame send_queue[FRAME_QUEUE_SIZE];
 
+  // the fluxcore service (BaseSerialInterface: checkRecvSideFrame/writeSideFrame)
+  BLEService *pFluxService;
+  BLECharacteristic *pFluxTx, *pFluxRx;
+  StaticQueue_t side_queue_state;
+  uint8_t side_queue_storage[FRAME_QUEUE_SIZE * sizeof(Frame)];
+  QueueHandle_t side_queue;
+  int side_send_len;
+  Frame side_send[FRAME_QUEUE_SIZE];
+
   void clearBuffers();
 
 protected:
@@ -65,6 +74,10 @@ public:
       FRAME_QUEUE_SIZE, sizeof(Frame), recv_queue_storage, &recv_queue_state
     );
     send_queue_len = 0;
+    pFluxService = NULL;
+    pFluxTx = pFluxRx = NULL;
+    side_queue = xQueueCreateStatic(FRAME_QUEUE_SIZE, sizeof(Frame), side_queue_storage, &side_queue_state);
+    side_send_len = 0;
   }
 
   /**
@@ -85,6 +98,8 @@ public:
   bool isWriteBusy() const override;
   size_t writeFrame(const uint8_t src[], size_t len) override;
   size_t checkRecvFrame(uint8_t dest[]) override;
+  size_t checkRecvSideFrame(uint8_t dest[]) override;
+  size_t writeSideFrame(const uint8_t src[], size_t len) override;
 };
 
 #if BLE_DEBUG_LOGGING && ARDUINO

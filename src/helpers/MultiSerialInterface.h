@@ -197,4 +197,34 @@ public:
     return 0;
   }
 
+  // the second channel (BaseSerialInterface::checkRecvSideFrame): only Bluetooth has one, and
+  // the others' do nothing, so ask and answer them all
+  size_t checkRecvSideFrame(uint8_t dest[]) override {
+    if(!_enabled){
+      return 0;
+    }
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.instance->isEnabled()){
+        size_t frameSize = iface.instance->checkRecvSideFrame(dest);
+        if(frameSize > 0){
+          return frameSize;
+        }
+      }
+    }
+    return 0;
+  }
+
+  size_t writeSideFrame(const uint8_t src[], size_t len) override {
+    if(!_enabled || len == 0){
+      return 0;
+    }
+    size_t written = 0;
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.instance->isEnabled() && iface.instance->writeSideFrame(src, len) == len){
+        written = len;
+      }
+    }
+    return written;
+  }
+
 };

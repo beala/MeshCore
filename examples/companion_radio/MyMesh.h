@@ -497,6 +497,10 @@ private:
   void applyAircraft();
   void aircraftLoop();
   bool handleAircraftCommand(const char* command, char* reply);
+  int fillDeviceInfo(uint8_t* out);
+  int fillSelfInfo(uint8_t* out);
+  int fillBattAndStorage(uint8_t* out);
+  void handleSideFrame(uint8_t* frame, size_t len);
   bool isAircraftChannel(int idx) const;
   void describePlane(const Plane& p, char* out, size_t n);
   bool weatherShown(const wxsensor::Reading& r) const;

@@ -29,6 +29,16 @@ class SerialBLEInterface : public BaseSerialInterface {
   uint8_t recv_queue_len;
   Frame recv_queue[FRAME_QUEUE_SIZE];
 
+  // the fluxcore service (BaseSerialInterface: checkRecvSideFrame/writeSideFrame). Frames in come
+  // from the Bluetooth task: a ring with one writer (head) and one reader (tail)
+  #define SIDE_QUEUE_SIZE  4
+  BLEService fluxsvc;
+  BLECharacteristic fluxrx, fluxtx;
+  Frame side_recv[SIDE_QUEUE_SIZE];
+  volatile uint8_t side_recv_head, side_recv_tail;
+  uint8_t side_send_len;
+  Frame side_send[SIDE_QUEUE_SIZE];
+
   void clearBuffers();
   void shiftSendQueueLeft();
   void shiftRecvQueueLeft();
@@ -41,9 +51,12 @@ class SerialBLEInterface : public BaseSerialInterface {
   static void onPairingComplete(uint16_t connection_handle, uint8_t auth_status);
   static void onBLEEvent(ble_evt_t* evt);
   static void onBleUartRX(uint16_t conn_handle);
+  static void onSideRX(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len);
 
 public:
-  SerialBLEInterface() {
+  SerialBLEInterface() : fluxsvc(FLUX_SERVICE_UUID), fluxrx(FLUX_RX_UUID), fluxtx(FLUX_TX_UUID) {
+    side_recv_head = side_recv_tail = 0;
+    side_send_len = 0;
     _isEnabled = false;
     _isDeviceConnected = false;
     _conn_handle = BLE_CONN_HANDLE_INVALID;
@@ -69,6 +82,8 @@ public:
   bool isWriteBusy() const override;
   size_t writeFrame(const uint8_t src[], size_t len) override;
   size_t checkRecvFrame(uint8_t dest[]) override;
+  size_t checkRecvSideFrame(uint8_t dest[]) override;
+  size_t writeSideFrame(const uint8_t src[], size_t len) override;
 };
 
 #if BLE_DEBUG_LOGGING && ARDUINO

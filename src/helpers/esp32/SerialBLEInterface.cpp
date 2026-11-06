@@ -50,6 +50,18 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
   pRxCharacteristic->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
   pRxCharacteristic->setCallbacks(this);
 
+  // The fluxcore service, for the fluxcore app next to the MeshCore app on the same connection.
+  // Same security as the UART service: only a paired (PIN) connection can write or subscribe
+  pFluxService = pServer->createService(FLUX_SERVICE_UUID);
+  pFluxTx = pFluxService->createCharacteristic(FLUX_TX_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  pFluxTx->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM);
+  BLE2902* cccd = new BLE2902();
+  cccd->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM | ESP_GATT_PERM_WRITE_ENC_MITM);
+  pFluxTx->addDescriptor(cccd);
+  pFluxRx = pFluxService->createCharacteristic(FLUX_RX_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  pFluxRx->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
+  pFluxRx->setCallbacks(this);
+
   pServer->getAdvertising()->addServiceUUID(SERVICE_UUID);
 }
 
@@ -121,6 +133,10 @@ void SerialBLEInterface::onWrite(BLECharacteristic* pCharacteristic, esp_ble_gat
     Frame frame = {};
     frame.len = len;
     memcpy(frame.buf, rxValue, len);
+    if (pCharacteristic == pFluxRx) {   // the fluxcore service
+      if (deviceConnected) xQueueSend(side_queue, &frame, 0);
+      return;
+    }
 
     if (xQueueSend(recv_queue, &frame, 0) != pdTRUE) {
       BLE_DEBUG_PRINTLN("ERROR: onWrite(), recv_queue is full!");
@@ -133,6 +149,8 @@ void SerialBLEInterface::onWrite(BLECharacteristic* pCharacteristic, esp_ble_gat
 void SerialBLEInterface::clearBuffers() {
   xQueueReset(recv_queue);
   send_queue_len = 0;
+  xQueueReset(side_queue);
+  side_send_len = 0;
 }
 
 void SerialBLEInterface::enable() { 
@@ -141,8 +159,9 @@ void SerialBLEInterface::enable() {
   _isEnabled = true;
   clearBuffers();
 
-  // Start the service
+  // Start the services
   pService->start();
+  pFluxService->start();
 
   // Start advertising
 
@@ -161,6 +180,7 @@ void SerialBLEInterface::disable() {
   pServer->getAdvertising()->stop();
   pServer->disconnect(last_conn_id);
   pService->stop();
+  pFluxService->stop();
   oldDeviceConnected = deviceConnected = false;
   adv_restart_time = 0;
 }
@@ -248,4 +268,34 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
 
 bool SerialBLEInterface::isConnected() const {
   return deviceConnected;  //pServer != NULL && pServer->getConnectedCount() > 0;
+}
+
+// ---------- the fluxcore service
+
+size_t SerialBLEInterface::writeSideFrame(const uint8_t src[], size_t len) {
+  if (len == 0 || len > MAX_FRAME_SIZE || !deviceConnected || side_send_len >= FRAME_QUEUE_SIZE) return 0;
+  side_send[side_send_len].len = len;
+  memcpy(side_send[side_send_len].buf, src, len);
+  side_send_len++;
+  return len;
+}
+
+size_t SerialBLEInterface::checkRecvSideFrame(uint8_t dest[]) {
+  if (side_send_len > 0 && millis() >= _last_write + BLE_WRITE_MIN_INTERVAL) {   // shares the spacing with the UART service
+    if (!deviceConnected) {
+      side_send_len = 0;
+    } else {
+      _last_write = millis();
+      pFluxTx->setValue(side_send[0].buf, side_send[0].len);
+      pFluxTx->notify();
+      side_send_len--;
+      for (int i = 0; i < side_send_len; i++) side_send[i] = side_send[i + 1];
+    }
+  }
+  Frame frame;
+  if (xQueueReceive(side_queue, &frame, 0) == pdTRUE) {
+    memcpy(dest, frame.buf, frame.len);
+    return frame.len;
+  }
+  return 0;
 }

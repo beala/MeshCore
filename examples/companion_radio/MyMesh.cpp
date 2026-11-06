@@ -1571,23 +1571,7 @@ void MyMesh::startInterface(BaseSerialInterface &serial) {
 void MyMesh::handleCmdFrame(size_t len) {
   if (cmd_frame[0] == CMD_DEVICE_QUERY && len >= 2) { // sent when app establishes connection
     app_target_ver = cmd_frame[1];                    // which version of protocol does app understand
-
-    int i = 0;
-    out_frame[i++] = RESP_CODE_DEVICE_INFO;
-    out_frame[i++] = FIRMWARE_VER_CODE;
-    out_frame[i++] = MAX_CONTACTS / 2;   // v3+
-    out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft)
-    memcpy(&out_frame[i], &_prefs.ble_pin, 4);
-    i += 4;
-    memset(&out_frame[i], 0, 12);
-    strcpy((char *)&out_frame[i], FIRMWARE_BUILD_DATE);
-    i += 12;
-    StrHelper::strzcpy((char *)&out_frame[i], board.getManufacturerName(), 40);
-    i += 40;
-    StrHelper::strzcpy((char *)&out_frame[i], FIRMWARE_VERSION, 20);
-    i += 20;
-    out_frame[i++] = _prefs.isRepeatEn() ? 1 : 0;   // v9+
-    out_frame[i++] = _prefs.path_hash_mode;  // v10+
+    int i = fillDeviceInfo(out_frame);
     _serial->writeFrame(out_frame, i);
   } else if (cmd_frame[0] == CMD_APP_START &&
              len >= 8) { // sent when app establishes connection, respond with node ID
@@ -1597,39 +1581,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     MESH_DEBUG_PRINTLN("App %s connected", app_name);
 
     _iter_started = false; // stop any left-over ContactsIterator
-    int i = 0;
-    out_frame[i++] = RESP_CODE_SELF_INFO;
-    out_frame[i++] = ADV_TYPE_CHAT; // what this node Advert identifies as (maybe node's pronouns too?? :-)
-    out_frame[i++] = _prefs.tx_power_dbm;
-    out_frame[i++] = MAX_LORA_TX_POWER;
-    memcpy(&out_frame[i], self_id.pub_key, PUB_KEY_SIZE);
-    i += PUB_KEY_SIZE;
-
-    int32_t lat, lon;
-    lat = (sensors.node_lat * 1000000.0);
-    lon = (sensors.node_lon * 1000000.0);
-    memcpy(&out_frame[i], &lat, 4);
-    i += 4;
-    memcpy(&out_frame[i], &lon, 4);
-    i += 4;
-    out_frame[i++] = _prefs.multi_acks; // new v7+
-    out_frame[i++] = _prefs.advert_loc_policy;
-    out_frame[i++] = (_prefs.telemetry_mode_env << 4) | (_prefs.telemetry_mode_loc << 2) |
-                     (_prefs.telemetry_mode_base); // v5+
-    out_frame[i++] = _prefs.manual_add_contacts;
-
-    uint32_t freq = _prefs.freq * 1000;
-    memcpy(&out_frame[i], &freq, 4);
-    i += 4;
-    uint32_t bw = _prefs.bw * 1000;
-    memcpy(&out_frame[i], &bw, 4);
-    i += 4;
-    out_frame[i++] = _prefs.sf;
-    out_frame[i++] = _prefs.cr;
-
-    int tlen = strlen(_prefs.node_name); // revisit: UTF_8 ??
-    memcpy(&out_frame[i], _prefs.node_name, tlen);
-    i += tlen;
+    int i = fillSelfInfo(out_frame);
     _serial->writeFrame(out_frame, i);
   } else if (cmd_frame[0] == CMD_RUN_CLI_COMMAND && len >= 3) { // V14+
     int i = 1;
@@ -2076,14 +2028,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     board.reboot();
   } else if (cmd_frame[0] == CMD_GET_BATT_AND_STORAGE) {
     uint8_t reply[11];
-    int i = 0;
-    reply[i++] = RESP_CODE_BATT_AND_STORAGE;
-    uint16_t battery_millivolts = board.getBattMilliVolts();
-    uint32_t used = _store->getStorageUsedKb();
-    uint32_t total = _store->getStorageTotalKb();
-    memcpy(&reply[i], &battery_millivolts, 2); i += 2;
-    memcpy(&reply[i], &used, 4); i += 4;
-    memcpy(&reply[i], &total, 4); i += 4;
+    int i = fillBattAndStorage(reply);
     _serial->writeFrame(reply, i);
   } else if (cmd_frame[0] == CMD_EXPORT_PRIVATE_KEY) {
 #if ENABLE_PRIVATE_KEY_EXPORT
@@ -3494,7 +3439,109 @@ void MyMesh::checkCLIRescueCmd() {
   }
 }
 
+int MyMesh::fillDeviceInfo(uint8_t* out_frame) {
+  int i = 0;
+  out_frame[i++] = RESP_CODE_DEVICE_INFO;
+  out_frame[i++] = FIRMWARE_VER_CODE;
+  out_frame[i++] = MAX_CONTACTS / 2;   // v3+
+  out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft)
+  memcpy(&out_frame[i], &_prefs.ble_pin, 4);
+  i += 4;
+  memset(&out_frame[i], 0, 12);
+  strcpy((char *)&out_frame[i], FIRMWARE_BUILD_DATE);
+  i += 12;
+  StrHelper::strzcpy((char *)&out_frame[i], board.getManufacturerName(), 40);
+  i += 40;
+  StrHelper::strzcpy((char *)&out_frame[i], FIRMWARE_VERSION, 20);
+  i += 20;
+  out_frame[i++] = _prefs.isRepeatEn() ? 1 : 0;   // v9+
+  out_frame[i++] = _prefs.path_hash_mode;  // v10+
+  return i;
+}
+
+int MyMesh::fillSelfInfo(uint8_t* out_frame) {
+  int i = 0;
+  out_frame[i++] = RESP_CODE_SELF_INFO;
+  out_frame[i++] = ADV_TYPE_CHAT; // what this node Advert identifies as (maybe node's pronouns too?? :-)
+  out_frame[i++] = _prefs.tx_power_dbm;
+  out_frame[i++] = MAX_LORA_TX_POWER;
+  memcpy(&out_frame[i], self_id.pub_key, PUB_KEY_SIZE);
+  i += PUB_KEY_SIZE;
+
+  int32_t lat, lon;
+  lat = (sensors.node_lat * 1000000.0);
+  lon = (sensors.node_lon * 1000000.0);
+  memcpy(&out_frame[i], &lat, 4);
+  i += 4;
+  memcpy(&out_frame[i], &lon, 4);
+  i += 4;
+  out_frame[i++] = _prefs.multi_acks; // new v7+
+  out_frame[i++] = _prefs.advert_loc_policy;
+  out_frame[i++] = (_prefs.telemetry_mode_env << 4) | (_prefs.telemetry_mode_loc << 2) |
+                   (_prefs.telemetry_mode_base); // v5+
+  out_frame[i++] = _prefs.manual_add_contacts;
+
+  uint32_t freq = _prefs.freq * 1000;
+  memcpy(&out_frame[i], &freq, 4);
+  i += 4;
+  uint32_t bw = _prefs.bw * 1000;
+  memcpy(&out_frame[i], &bw, 4);
+  i += 4;
+  out_frame[i++] = _prefs.sf;
+  out_frame[i++] = _prefs.cr;
+
+  int tlen = strlen(_prefs.node_name); // revisit: UTF_8 ??
+  memcpy(&out_frame[i], _prefs.node_name, tlen);
+  i += tlen;
+  return i;
+}
+
+int MyMesh::fillBattAndStorage(uint8_t* reply) {
+  int i = 0;
+  reply[i++] = RESP_CODE_BATT_AND_STORAGE;
+  uint16_t battery_millivolts = board.getBattMilliVolts();
+  uint32_t used = _store->getStorageUsedKb();
+  uint32_t total = _store->getStorageTotalKb();
+  memcpy(&reply[i], &battery_millivolts, 2); i += 2;
+  memcpy(&reply[i], &used, 4); i += 4;
+  memcpy(&reply[i], &total, 4); i += 4;
+  return i;
+}
+
+// The fluxcore app's channel (BaseSerialInterface::checkRecvSideFrame), next to the MeshCore app's on
+// the same Bluetooth connection: who this is, the battery, and commands. Replies go back on it alone,
+// and nothing here touches the MeshCore app's session (protocol version, contact sync, messages).
+void MyMesh::handleSideFrame(uint8_t* frame, size_t len) {
+  uint8_t out[MAX_FRAME_SIZE];
+  int i = 0;
+  if (frame[0] == CMD_DEVICE_QUERY) {
+    i = fillDeviceInfo(out);
+  } else if (frame[0] == CMD_APP_START) {
+    i = fillSelfInfo(out);
+  } else if (frame[0] == CMD_GET_BATT_AND_STORAGE) {
+    i = fillBattAndStorage(out);
+  } else if (frame[0] == CMD_RUN_CLI_COMMAND && len >= 2) {
+    char text[MAX_FRAME_SIZE + 1];
+    memcpy(text, &frame[1], len - 1);
+    text[len - 1] = 0;
+    reply_buf[0] = 0;
+    if (!handleCommand(text, 0, reply_buf)) strcat(reply_buf, "Unknown command");
+    out[0] = RESP_CODE_CLI_REPLY;
+    int rlen = strlen(reply_buf);
+    memcpy(&out[1], reply_buf, rlen);
+    i = 1 + rlen;
+  } else {
+    out[i++] = RESP_CODE_ERR;
+    out[i++] = ERR_CODE_UNSUPPORTED_CMD;
+  }
+  _serial->writeSideFrame(out, i);
+}
+
 void MyMesh::checkSerialInterface() {
+  uint8_t side[MAX_FRAME_SIZE + 1];
+  size_t side_len = _serial->checkRecvSideFrame(side);
+  if (side_len > 0) handleSideFrame(side, side_len);
+
   size_t len = _serial->checkRecvFrame(cmd_frame);
   if (len > 0) {
     handleCmdFrame(len);

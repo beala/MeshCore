@@ -185,6 +185,19 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
   bleuart.begin();
   bleuart.setRxCallback(onBleUartRX);
 
+  // The fluxcore service, for the fluxcore app next to the MeshCore app on the same connection.
+  // Same security as the UART service: only a paired (PIN) connection can write or subscribe
+  fluxsvc.begin();
+  fluxtx.setProperties(CHR_PROPS_NOTIFY);
+  fluxtx.setPermission(SECMODE_ENC_WITH_MITM, SECMODE_NO_ACCESS);   // the subscription (CCCD) needs it too
+  fluxtx.setMaxLen(MAX_FRAME_SIZE);
+  fluxtx.begin();
+  fluxrx.setProperties(CHR_PROPS_WRITE | CHR_PROPS_WRITE_WO_RESP);
+  fluxrx.setPermission(SECMODE_NO_ACCESS, SECMODE_ENC_WITH_MITM);
+  fluxrx.setMaxLen(MAX_FRAME_SIZE);
+  fluxrx.setWriteCallback(onSideRX, true);
+  fluxrx.begin();
+
 
 
   // Register DFU on the main BLE stack so paired clients can discover it
@@ -208,6 +221,8 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
 void SerialBLEInterface::clearBuffers() {
   send_queue_len = 0;
   recv_queue_len = 0;
+  side_recv_tail = side_recv_head;
+  side_send_len = 0;
   _last_retry_attempt = 0;
   bleuart.flush();
 }
@@ -407,4 +422,46 @@ bool SerialBLEInterface::isConnected() const {
 
 bool SerialBLEInterface::isWriteBusy() const {
   return send_queue_len >= (FRAME_QUEUE_SIZE * 2 / 3);
+}
+
+// ---------- the fluxcore service
+
+void SerialBLEInterface::onSideRX(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
+  (void)chr;
+  if (!instance || instance->_conn_handle != conn_hdl || !instance->isConnected()) return;
+  if (len == 0 || len > MAX_FRAME_SIZE) return;
+  uint8_t head = instance->side_recv_head;
+  uint8_t next = (head + 1) % SIDE_QUEUE_SIZE;
+  if (next == instance->side_recv_tail) {
+    BLE_DEBUG_PRINTLN("onSideRX: queue full, dropping frame");
+    return;
+  }
+  instance->side_recv[head].len = len;
+  memcpy(instance->side_recv[head].buf, data, len);
+  instance->side_recv_head = next;
+}
+
+size_t SerialBLEInterface::writeSideFrame(const uint8_t src[], size_t len) {
+  if (len == 0 || len > MAX_FRAME_SIZE || !isConnected() || side_send_len >= SIDE_QUEUE_SIZE) return 0;
+  side_send[side_send_len].len = len;
+  memcpy(side_send[side_send_len].buf, src, len);
+  side_send_len++;
+  return len;
+}
+
+size_t SerialBLEInterface::checkRecvSideFrame(uint8_t dest[]) {
+  if (side_send_len > 0) {
+    if (!isConnected() || !fluxtx.notifyEnabled(_conn_handle)) {
+      side_send_len = 0;   // nobody to tell
+    } else if (fluxtx.notify(_conn_handle, side_send[0].buf, side_send[0].len)) {
+      side_send_len--;
+      for (uint8_t i = 0; i < side_send_len; i++) side_send[i] = side_send[i + 1];
+    }   // else: the stack's buffers are full, try again next time
+  }
+  uint8_t tail = side_recv_tail;
+  if (tail == side_recv_head) return 0;
+  size_t len = side_recv[tail].len;
+  memcpy(dest, side_recv[tail].buf, len);
+  side_recv_tail = (tail + 1) % SIDE_QUEUE_SIZE;
+  return len;
 }

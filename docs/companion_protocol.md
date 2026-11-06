@@ -50,6 +50,32 @@ MeshCore Companion devices expose a BLE service with the following UUIDs:
 - **RX Characteristic** (App → Firmware): `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
 - **TX Characteristic** (Firmware → App): `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
 
+### The fluxcore service (a second app on the same connection)
+
+fluxcore firmware (nRF52 and ESP32 Bluetooth builds) also has a second service, for an app that runs
+next to the MeshCore app, such as the [fluxcore app](https://fluxcore.party/app/):
+
+- **Service UUID**: `F1C00001-8A5D-4C75-B0C2-666C7578636F`
+- **RX Characteristic** (App → Firmware): `F1C00002-8A5D-4C75-B0C2-666C7578636F`, write or write without response
+- **TX Characteristic** (Firmware → App): `F1C00003-8A5D-4C75-B0C2-666C7578636F`, notify
+
+It carries the same frames as the UART service, one per write or notification, and answers on itself
+only, so the two apps never see each other's traffic. On an iPhone, where every app shares the phone's
+one link to the radio, the MeshCore app and a browser like Bluefy can both stay connected. It answers:
+
+- `CMD_DEVICE_QUERY` (22): `RESP_CODE_DEVICE_INFO`
+- `CMD_APP_START` (1): `RESP_CODE_SELF_INFO`
+- `CMD_GET_BATT_AND_STORAGE` (20): `RESP_CODE_BATT_AND_STORAGE`
+- `CMD_RUN_CLI_COMMAND` (66): `RESP_CODE_CLI_REPLY`
+- anything else: `RESP_CODE_ERR` with `ERR_CODE_UNSUPPORTED_CMD`
+
+None of these change the MeshCore app's session: the protocol version it asked for, its contact sync and
+its message queue stay as they are, and nothing is pushed on this service. It needs the same pairing
+(PIN) as the UART service. It isn't advertised: find the radio by the UART service, then ask for this
+one (in Web Bluetooth, list it in `optionalServices`). A phone or computer that was paired with the
+radio before it had this service may keep the old service list: forget the radio in its Bluetooth
+settings and pair again.
+
 ### Connection Steps
 
 1. **Scan for Devices**
