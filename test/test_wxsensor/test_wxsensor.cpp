@@ -486,6 +486,24 @@ TEST(Tracker, ScanForeverTakesTurnsAndFindsEverything) {
   EXPECT_FALSE(sim.t.scanning(3600001));
 }
 
+TEST(Tracker, ARestartedSensorIsPickedUpOnItsNominalInterval) {
+  Sim sim;
+  sim.t.setSeed(21);
+  sim.sensors.push_back({ make(WH31, 2), 61000, 5000, true });
+  sim.t.scanFor(0);
+  sim.run(10 * 60000);
+  ASSERT_EQ(sim.t.find(sensorKey(make(WH31, 2)))->period, 61000u);
+  // it stops, is lost, and comes back 7.3 s out of step (eg. new batteries keeping its ID here)
+  sim.sensors[0].alive = false;
+  sim.run(20 * 60000, 10 * 60000);
+  sim.sensors[0].alive = true;
+  sim.sensors[0].phase = 20 * 60000 + 7300;
+  auto got = sim.run(60 * 60000, 20 * 60000);
+  const Tracker::Sensor* s = sim.t.find(sensorKey(make(WH31, 2)));
+  EXPECT_EQ(s->period, 61000u);
+  EXPECT_GE(got[0], 20);   // found again by hunting (~13% of the time: some minutes), then every packet
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

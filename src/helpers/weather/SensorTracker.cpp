@@ -116,7 +116,9 @@ Tracker::Sensor* Tracker::onPacket(uint32_t now, const Reading& r, int16_t rssi)
         }
       }
       if (s->period == 0) {
-        s->period = est;
+        // back after being lost (or first heard while hunting): a gap that isn't a whole number of
+        // nominal intervals means the sensor restarted on a new schedule, so start from the nominal one
+        s->period = (nom && est == d && d > nom + nom / 7) ? nom : est;
       } else {
         uint32_t k = (d + s->period / 2) / s->period;
         if (k == 0) {

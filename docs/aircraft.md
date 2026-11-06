@@ -16,11 +16,12 @@ Weather's, if those are on). Each aircraft posts when first heard with a positio
 10 minutes while it's around:
 
 ```
-N501EL a63e16 6,200 ft, 2.1 mi SW, 88 kt heading 214
+N501EL: 6,200 ft, 2.1 mi SW, 88 kt heading 214
 ```
 
-- The callsign (tail number or flight) comes from the aircraft's mode-status messages, every few
-  seconds; until then only the 24-bit address shows.
+- Posts read `callsign: details`, as channel texts are `sender: text` in the app. The callsign (tail
+  number or flight) comes from the aircraft's mode-status messages, every few seconds; until one is
+  heard, the 24-bit address stands in for it (`a63e16: 6,200 ft, ...`).
 - Distance and direction are from this radio's location (set it in the app). Without one, the
   position shows as latitude, longitude.
 - "(via radar)" marks traffic the FAA rebroadcasts (TIS-B), for aircraft without ADS-B.

@@ -72,13 +72,15 @@ static void fmtThousands(char* out, size_t n, int32_t v) {
   else snprintf(out, n, "%ld", (long) v);
 }
 
-// eg. "N123AB 5,800 ft, 1.3 mi NNW, 79 kt heading 299, climbing" (or the address, or lat/lon if this
-// radio has no location set)
+// eg. "N123AB: 5,800 ft, 1.3 mi NNW, 79 kt heading 299, climbing". The app shows channel texts as
+// "sender: text", so the callsign (or the address, until a callsign is heard) comes first, then a colon.
+// Without a location set on this radio, the position shows as lat,lon.
 void MyMesh::describePlane(const Plane& p, char* out, size_t n) {
   const uat::Report& r = p.last;
-  int m = snprintf(out, n, "%s", p.callsign[0] ? p.callsign : "");
+  int m;
+  if (p.callsign[0]) m = snprintf(out, n, "%s:", p.callsign);
+  else m = snprintf(out, n, "%06lx:", (unsigned long) p.address);
   if (m < 0 || (size_t) m >= n) return;
-  m += snprintf(&out[m], n - m, "%s%06lx", p.callsign[0] ? " " : "", (unsigned long) p.address);
   if (r.qualifier == 2 || r.qualifier == 3) m += snprintf(&out[m], n - m, " (via radar)");
   if ((size_t) m >= n) return;
   if (r.ag_state == 2) m += snprintf(&out[m], n - m, " on the ground");
@@ -103,6 +105,8 @@ void MyMesh::describePlane(const Plane& p, char* out, size_t n) {
   if ((size_t) m >= n) return;
   if (r.has_vs && r.vs_fpm >= 300) snprintf(&out[m], n - m, ", climbing");
   else if (r.has_vs && r.vs_fpm <= -300) snprintf(&out[m], n - m, ", descending");
+  char* c = strstr(out, ":,");   // no altitude: "N123AB: 1.3 mi NNW", not "N123AB:, 1.3 mi"
+  if (c) memmove(c + 1, c + 2, strlen(c + 2) + 1);
 }
 
 void MyMesh::aircraftLoop() {
@@ -132,6 +136,7 @@ void MyMesh::aircraftLoop() {
       }
       memset(p, 0, sizeof(*p));
       p->address = r.address;
+      p->first_at = now;
     }
     // keep the last known position/altitude when a message doesn't carry them
     uat::Report merged = r;
@@ -154,15 +159,17 @@ void MyMesh::aircraftLoop() {
     }
     char text[MAX_FRAME_SIZE];
     if (is_new && _air_forever) {
-      int m = snprintf(text, sizeof(text), "New aircraft, %d dBm: ", (int) rssi);
+      int m = snprintf(text, sizeof(text), "New aircraft (%d dBm) ", (int) rssi);
       if (m > 0 && m < (int) sizeof(text)) describePlane(*p, &text[m], sizeof(text) - m);
       ChatRef to;
       memset(&to, 0, sizeof(to));
       to.kind = CHAT_CONSOLE;
       postToChat(to, text);
     }
-    // post once it has a position (the first message may not carry one)
-    bool due = !p->posted || (_prefs.air.every && now - p->posted_at >= (uint32_t) _prefs.air.every * 60000UL);
+    // post once it has a position (the first message may not carry one), and give the callsign up to
+    // 20 s to arrive so the post reads "N123AB: ..." rather than the address
+    bool first_ready = p->callsign[0] || now - p->first_at >= 20000;
+    bool due = (!p->posted && first_ready) || (p->posted && _prefs.air.every && now - p->posted_at >= (uint32_t) _prefs.air.every * 60000UL);
     if (in_range && merged.has_pos && due) {
       describePlane(*p, text, sizeof(text));
 #ifdef MAX_GROUP_CHANNELS
@@ -173,6 +180,28 @@ void MyMesh::aircraftLoop() {
       p->posted = true;
       p->posted_at = now;
     }
+  }
+
+  // an aircraft heard only briefly: post it once its callsign wait is over, even without more messages
+  for (int i = 0; i < _n_planes; i++) {
+    Plane& p = _planes[i];
+    if (p.posted || !p.last.has_pos || now - p.first_at < 20000) continue;
+    bool in_range = true;
+    if (_prefs.air.range && (_prefs.node_lat != 0 || _prefs.node_lon != 0)) {
+      uint32_t d;
+      uat::distanceBearing((int32_t)(_prefs.node_lat * 1e5), (int32_t)(_prefs.node_lon * 1e5), p.last.lat_e5, p.last.lon_e5, &d, NULL);
+      in_range = d <= (uint32_t) _prefs.air.range * 10;
+    }
+    if (!in_range) { p.posted = true; p.posted_at = now; continue; }
+    char text[MAX_FRAME_SIZE];
+    describePlane(p, text, sizeof(text));
+#ifdef MAX_GROUP_CHANNELS
+    int idx = MAX_GROUP_CHANNELS + (_mt_active ? 1 : 0) + (_wx_active ? 1 : 0);
+    pushChannelText(idx, getRTCClock()->getCurrentTimeUnique(), 0, 0, text, strlen(text));
+#endif
+    _air_shown++;
+    p.posted = true;
+    p.posted_at = now;
   }
 
   // forget aircraft long gone

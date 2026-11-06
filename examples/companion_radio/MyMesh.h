@@ -434,7 +434,7 @@ private:
     uint32_t address;
     char callsign[9];
     uat::Report last;
-    uint32_t heard_at, posted_at, count;
+    uint32_t heard_at, posted_at, count, first_at;
     int16_t rssi;
     bool posted;
   };

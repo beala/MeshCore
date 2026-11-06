@@ -395,7 +395,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - `set air.every <minutes>` (default 10), `set air.range <miles>` (default 0 = any), `set air.duty <percent>` (default 10)
 - `air` or `get air`, `get air.planes`, `get air.stats`
 
-**Example reply:** `> N501EL a63e16 6,200 ft, 2.1 mi SW, 88 kt heading 214 (6s)`
+**Example reply:** `> N501EL: 6,200 ft, 2.1 mi SW, 88 kt heading 214 (6s)`
 
 **Notes:**
 - Aircraft reporting on UAT (978 MHz) show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
