@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <helpers/aircraft/Uat.h>
 #include <helpers/aircraft/AdsB.h>
+#include <helpers/aircraft/RadarSweep.h>
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   uint8_t buf[uat::LONG_BYTES] = {};
@@ -47,6 +48,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (adsb::cprLocal(v[0], v[1], data[15] & 8, data[15] & 16, ref_lat, ref_lon, &lat, &lon)) {
       if (lat < -9000000 || lat > 9000000 || lon < -18000000 || lon > 18000000) abort();
     }
+  }
+  if (size >= 20) {   // radar periods from any pulse counts
+    radar::Burst b[radar::MAX_BURSTS];
+    int nb = radar::findBursts(data, (int) size, b);
+    if (nb < 0 || nb > radar::MAX_BURSTS) abort();
+    radar::Period p[3];
+    int np = radar::findPeriods(b, nb, size * radar::BIN_MS / 1000.0f + 1.0f, p, 3, 0.5f, 15.0f);
+    if (np < 0 || np > 3) abort();
+    for (int i = 0; i < np; i++) if (!(p[i].score >= 0 && p[i].score <= 1.0f)) abort();
   }
   if (size >= 4) {   // the raw RS decoder on a codeword of any length
     uint8_t cw[255];

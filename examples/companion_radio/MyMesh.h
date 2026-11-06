@@ -451,13 +451,23 @@ private:
   Plane _planes[MAX_PLANES];
   int _n_planes = 0;
   bool _air_active = false, _air_forever = false, _air_listening = false;
-  uint8_t _fsk_owner = 0;            // whose FSK listen the radio's queued packets came from: 1 weather, 2 aircraft
+  uint8_t _fsk_owner = 0;            // whose FSK listen the radio's queued packets came from: 1 weather, 2 aircraft, 3 radar
   uint32_t _air_next = 0, _air_heard = 0, _air_bad = 0, _air_fixed = 0, _air_shown = 0, _air_listen_ms = 0, _air_since = 0;
   uint32_t _air_heard_1090 = 0;
   uint16_t _air_band = 978;          // the band of the current (or last) listen
   uint32_t _air_digest_at = 0, _air_digest_from = 0;
   bool adsbPosition(Plane& p, const adsb::Message& m, uint32_t now, uat::Report* r);
   bool aircraftWanted(const Plane& p, uint32_t* dist) const;
+  // radar sweep detector (MyMeshRadar.cpp): its own listen while it runs (_fsk_owner 3)
+  bool _radar_active = false, _radar_listening = false;
+  uint32_t _radar_start = 0, _radar_end = 0, _radar_pulses = 0;
+  uint16_t _radar_secs = 0;
+  int8_t _radar_thresh = 0;           // dB over the noise (> 0), or dBm (< 0)
+  float _radar_freq = 1030.0f;
+  char _radar_result[150] = "";
+  void radarLoop();
+  void radarReport();
+  bool handleRadarCommand(const char* command, char* reply);
   void postAircraftDigest(uint32_t now);
   void applyAircraft();
   void aircraftLoop();

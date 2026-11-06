@@ -260,7 +260,21 @@ int16_t CustomLR2021::fskStart(float fMHz, float kbps, float devKHz, float rxbwK
   return state;
 }
 
-int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uint8_t gain) {
+int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uint8_t gain, int8_t threshDbm) {
+  // 2 Mchip/s: 1 Mbit/s of Manchester-coded data, as the chip counts it. 11 data bytes then the
+  // 3-byte parity (CRC-24, polynomial 0xFFF409, init 0), checked by the chip. The detector: the
+  // 8 µs preamble 1010000101000000 (0.5 µs chips, first chip in the LSB), no repeats, falling edge.
+  return ookStart(fMHz, 2000000UL, rxbwKHz, 0x0285, 16, 11, 3, RADIOLIB_LR2021_OOK_MANCHESTER_ON_INV, threshDb, gain, threshDbm);
+}
+
+int16_t CustomLR2021::pulseStart(float fMHz, float rxbwKHz, uint8_t threshDb, uint8_t gain, int8_t threshDbm) {
+  // 1 µs chips; any pulse above the threshold followed by a quiet chip ("10", first chip in the LSB)
+  // ends a 1-byte packet: one RxDone per pulse, nothing decoded
+  return ookStart(fMHz, 1000000UL, rxbwKHz, 0x0001, 2, 1, 0, RADIOLIB_LR2021_OOK_MANCHESTER_OFF, threshDb, gain, threshDbm);
+}
+
+int16_t CustomLR2021::ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits, uint8_t pktLen,
+                               uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm) {
   int16_t state = standby();
   if (state != RADIOLIB_ERR_NONE) return state;
   state = calibrateFor(fMHz);
@@ -268,21 +282,18 @@ int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uin
   _fsk_active = true;
   _fsk_ook = true;
   state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_OOK);
-  // 2 Mchip/s: 1 Mbit/s of Manchester-coded data, as the chip counts it
   if (state == RADIOLIB_ERR_NONE) {
-    state = setOokModulationParams(2000000UL, RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE, gfskRxBwCode(rxbwKHz), 0);
+    state = setOokModulationParams(bps, RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE, gfskRxBwCode(rxbwKHz), 0);
   }
   // after the modulation params: the DC-DC workaround retunes to the mesh frequency (see fskStart)
   if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(fMHz * 1000000.0f + 0.5f));
-  // 11 data bytes then the 3-byte parity (CRC-24, polynomial 0xFFF409, init 0), checked by the chip
   if (state == RADIOLIB_ERR_NONE) {
     state = setOokPacketParams(16, RADIOLIB_LR2021_GFSK_OOK_ADDR_FILT_DISABLED, RADIOLIB_LR2021_GFSK_OOK_PACKET_FORMAT_FIXED,
-                               11, 3, RADIOLIB_LR2021_OOK_MANCHESTER_ON_INV);
+                               pktLen, crcLen, manchester);
   }
-  if (state == RADIOLIB_ERR_NONE) state = setOokCrcParams(0x1FFF409UL, 0);
+  if (state == RADIOLIB_ERR_NONE && crcLen) state = setOokCrcParams(0x1FFF409UL, 0);
   if (state == RADIOLIB_ERR_NONE) state = setOokSyncword(NULL, 0, true);
-  // the 8 µs preamble 1010000101000000 (0.5 µs chips, first chip in the LSB), no repeats, falling edge
-  if (state == RADIOLIB_ERR_NONE) state = setOokDetector(0x0285, 15, 0, false, false, 0);
+  if (state == RADIOLIB_ERR_NONE) state = setOokDetector(pattern, patBits - 1, 0, false, false, 0);
   if (state == RADIOLIB_ERR_NONE && gain) state = setGain(gain > 13 ? 13 : gain);
   if (state == RADIOLIB_ERR_NONE) state = setDioIrqConfig(irqDioNum, RADIOLIB_LR2021_IRQ_RX_DONE);
   if (state == RADIOLIB_ERR_NONE) {
@@ -290,11 +301,20 @@ int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uin
     this->mod->setRfSwitchState(Module::MODE_RX);
     state = setRx(RADIOLIB_LR2021_RX_TIMEOUT_INF);
     if (state == RADIOLIB_ERR_NONE) {
-      delayMicroseconds(500);
-      float noise = 0;
-      if (getRssiInst(&noise) == RADIOLIB_ERR_NONE && noise < 0) _ook_noise = noise;
+      // the median of 16 readings: one alone varies by +-5 dB, and may catch a pulse
+      delayMicroseconds(300);
+      float r[16];
+      int nr = 0;
+      for (int i = 0; i < 16; i++) {
+        float v = 0;
+        if (getRssiInst(&v) == RADIOLIB_ERR_NONE && v < 0) r[nr++] = v;
+        delayMicroseconds(100);
+      }
+      for (int i = 1; i < nr; i++) for (int j = i; j > 0 && r[j] < r[j - 1]; j--) { float t = r[j]; r[j] = r[j - 1]; r[j - 1] = t; }
+      if (nr) _ook_noise = r[nr / 2];
       LR2021::standby();
-      if (_ook_noise < 0) setOokDetectionThreshold((int16_t)(_ook_noise + (threshDb ? threshDb : 10)));
+      if (threshDbm < 0) setOokDetectionThreshold(threshDbm);
+      else if (_ook_noise < 0) setOokDetectionThreshold((int16_t)(_ook_noise + (threshDb ? threshDb : 10)));
     }
   }
   if (state == RADIOLIB_ERR_NONE) {

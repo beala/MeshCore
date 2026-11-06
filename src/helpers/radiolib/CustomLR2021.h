@@ -55,6 +55,8 @@ private:
   struct { uint32_t packets, len_err, preambles, sync_ok, sync_fail; } _fsk_stats_raw = {};
   struct { uint32_t packets, crc_err, len_err; } _ook_stats_raw = {};
   int16_t fskStopInternal();
+  int16_t ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits, uint8_t pktLen,
+                   uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm);
   int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);
   static bool bwCode(float bw, uint8_t* code);
 
@@ -338,7 +340,10 @@ private:
     // inverted Manchester, 11 data bytes, the 24-bit parity checked by the chip (bad ones dropped).
     // threshDb: detection threshold above the noise measured at the start (0 = 10 dB).
     // gain: fixed receiver gain step 1-13 (0 = automatic). fskRead/fskStop/fskRearm work the same.
-    int16_t adsbStart(float freqMHz, float rxbwKHz, uint8_t threshDb = 0, uint8_t gain = 0);
+    int16_t adsbStart(float freqMHz, float rxbwKHz, uint8_t threshDb = 0, uint8_t gain = 0, int8_t threshDbm = 0);
+    // Pulses (eg. radar interrogations at 1030 MHz): every pulse above the threshold ends a 1-byte
+    // packet, so each RxDone marks one; the caller just counts them. fskRearm/fskStop as above.
+    int16_t pulseStart(float freqMHz, float rxbwKHz, uint8_t threshDb = 0, uint8_t gain = 0, int8_t threshDbm = 0);
     float adsbNoise() const { return _ook_noise; }
     struct OokStats { uint32_t packets, crc_err, len_err; };
     OokStats ookStats() const {

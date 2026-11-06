@@ -332,7 +332,7 @@ public:
   bool startFskListen(const FskListen& cfg, uint32_t ms) override {
     if (cfg.pkt_len == 0 || cfg.pkt_len > FSK_MAX_LEN) return false;
     if (cfg.modem == MODEM_GFSK && (cfg.sync_len == 0 || cfg.sync_len > 8)) return false;
-    if (cfg.modem > MODEM_ADSB) return false;
+    if (cfg.modem > MODEM_PULSE) return false;
     if (_fsk_state == FSK_LISTENING) endFskListen();
     _fsk_cfg = cfg;
     _fsk_end = millis() + ms;
@@ -496,7 +496,9 @@ public:
         if (!isInRecvMode() || isIrqPending() || r->isReceiving()) return;
         if ((int32_t)(_fsk_hold_until - now) > 0) return;
         int16_t st = _fsk_cfg.modem == MODEM_ADSB
-          ? r->adsbStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain)
+          ? r->adsbStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain, _fsk_cfg.thresh_dbm)
+          : _fsk_cfg.modem == MODEM_PULSE
+          ? r->pulseStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain, _fsk_cfg.thresh_dbm)
           : r->fskStart(_fsk_cfg.freq, _fsk_cfg.kbps, _fsk_cfg.dev_khz, _fsk_cfg.rxbw_khz,
                         _fsk_cfg.sync, _fsk_cfg.sync_len, _fsk_cfg.pkt_len, _fsk_cfg.sync_bits,
                         _fsk_cfg.no_preamble, _fsk_cfg.pre_det_bits);
@@ -526,7 +528,15 @@ public:
         FskPacket p;
         float rssi = 0;
         p.len = _fsk_cfg.pkt_len;
-        int16_t rs = r->fskRead(p.data, p.len, &rssi);
+        int16_t rs;
+        if (_fsk_cfg.modem == MODEM_PULSE) {   // only when: no need to read the chip's byte
+          uint32_t t = millis();
+          memcpy(p.data, &t, 4);
+          p.len = 4;
+          rs = RADIOLIB_ERR_NONE;
+        } else {
+          rs = r->fskRead(p.data, p.len, &rssi);
+        }
         if (rs == RADIOLIB_ERR_CRC_MISMATCH) _fsk_bad++;
         if (rs == RADIOLIB_ERR_NONE) {
           p.rssi = (int16_t)rssi;

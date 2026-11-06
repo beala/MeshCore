@@ -399,6 +399,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 **Notes:**
 - Aircraft reporting on UAT (978 MHz) and 1090 MHz ADS-B show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
+- `radar [seconds] [threshold] [MHz]`, `get radar`, `get radar.bursts`, `radar stop`: listen on 1030 MHz and work out how fast the radars around turn (LR2021). See [Radar sweep detector](radar.md).
 
 ---
 

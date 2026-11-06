@@ -124,8 +124,11 @@ public:
     uint8_t modem;         // MODEM_GFSK or MODEM_ADSB
     uint8_t thresh_db;     // ADS-B: detection threshold above the noise (0 = the radio's default)
     uint8_t gain;          // ADS-B: fixed receiver gain step (0 = automatic)
+    int8_t thresh_dbm;     // OOK (ADS-B, pulses): a fixed detection threshold in dBm instead (0 = relative)
   };
-  enum { MODEM_GFSK = 0, MODEM_ADSB = 1 };
+  // MODEM_PULSE: every pulse above the threshold is one "packet" of 4 bytes: when it was heard,
+  // in ms (millis(), little-endian). freq, rxbw_khz, thresh_db and gain apply.
+  enum { MODEM_GFSK = 0, MODEM_ADSB = 1, MODEM_PULSE = 2 };
   /**
    * \brief  Some radios can step away from the mesh for a moment to receive FSK packets, then come
    *         back. The listen starts as soon as the radio isn't busy with a mesh packet, and lasts
