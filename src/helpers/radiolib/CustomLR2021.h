@@ -268,6 +268,7 @@ private:
     // the chip may be tuned to the other network or in the middle of a CAD: stop the scan, which
     // puts MeshCore's settings back, before anything is staged.
     int16_t stageMode(RadioModeType_t mode, RadioModeConfig_t* cfg) override {
+      resetActivity();                      // staging clears the IRQ flags isReceiving() follows
       if (_fsk_active) fskStopInternal();   // a transmit ends an FSK listen
       if (_scan_running) {
         scanStop();
@@ -369,6 +370,27 @@ private:
     void linkStats(uint32_t* packets, uint32_t* crc_err) const { *packets = _link_stats.packets; *crc_err = _link_stats.crc_err + _link_stats.len_err; }
     bool isFskActive() const { return _fsk_active; }
 
+    // MeshCore only sends LoRa, and asks for airtimes at any moment, including during an FSK/OOK
+    // listen or the FLRC link. RadioLib answers for the chip's current packet type: 0 for OOK (the
+    // Dispatcher's send timeout then cut every transmit short) and a huge number for GFSK set up
+    // outside RadioLib (its send budget then held every transmit for hours). Always LoRa, from the
+    // cached settings.
+    RadioLibTime_t getTimeOnAir(size_t len) override {
+      return LRxxxx::getToA(len, ModemType_t::RADIOLIB_MODEM_LORA);
+    }
+    // The chip's status word and IRQ flags, read without a command (datasheet 6.1, table 6-38), and
+    // the packet type; mode: 0 sleep, 1 standby RC, 2 standby XOSC, 3 FS, 4 Rx, 5 Tx
+    uint32_t chipStatus(uint8_t* mode, uint8_t* pkt) {
+      uint8_t buff[6] = { 0 };
+      Module::BitWidth_t w = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS];
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = Module::BITS_0;
+      mod->SPItransferStream(NULL, 0, false, NULL, buff, sizeof(buff), true);
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = w;
+      if (mode) *mode = buff[1] & 0x07;
+      if (pkt) getPacketType(pkt);
+      return ((uint32_t)buff[2] << 24) | ((uint32_t)buff[3] << 16) | ((uint32_t)buff[4] << 8) | buff[5];
+    }
+
     int16_t setRxBoostedGainMode(uint8_t level) {
       int16_t state = LR2021::setRxBoostedGainMode(level);
       if (state == RADIOLIB_ERR_NONE) _rx_boosted = level > 0;
@@ -382,6 +404,12 @@ private:
       // include the PREAMBLE_DETECTED irq bit in reported flags
       return LR2021::startReceive(RADIOLIB_LR2021_RX_TIMEOUT_INF, RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_IRQ_PREAMBLE_DETECTED), RADIOLIB_IRQ_RX_DEFAULT_MASK, 0);
     }
+
+    // isReceiving() follows one packet through the IRQ flags; when the flags are cleared (a new
+    // receive or transmit, a packet read, the end of a listen), that packet is over. Without this, a
+    // header seen long ago made the next packet's header look stuck, and clearing it then made
+    // RadioLib reject that packet as damaged.
+    void resetActivity() { _activityAt = 0; _headerSeen = false; }
 
     bool isReceiving() {
       uint32_t irq = getIrqStatus();

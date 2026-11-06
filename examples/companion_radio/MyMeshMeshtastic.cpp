@@ -149,6 +149,9 @@ bool MyMesh::handleMeshtasticCommand(const char* command, char* reply) {
     arg = &command[7];
   }
   if (arg) {
+    if (listensBusy(reply)) return true;
+    char off[64] = "";
+    if (on) listenOthersOff(LISTEN_MT, off, sizeof(off));
     _prefs.mt.en = on ? 1 : 0;
     applyMeshtastic();
     applyRadioPrefs();
@@ -157,7 +160,8 @@ bool MyMesh::handleMeshtasticCommand(const char* command, char* reply) {
       strcpy(reply, "Error: this radio can't listen to Meshtastic (needs an LR2021)");
     } else {
       savePrefs();
-      strcpy(reply, on ? "OK - Meshtastic channel on. Reconnect the app to see it" : "OK - Meshtastic off");
+      if (on) sprintf(reply, "OK - Meshtastic channel on%s. Reconnect the app to see it", off);
+      else strcpy(reply, "OK - Meshtastic off");
     }
     return true;
   }
@@ -210,7 +214,10 @@ bool MyMesh::handleMeshtasticCommand(const char* command, char* reply) {
     return false;
   }
   savePrefs();
-  if (_prefs.mt.en) applyMeshtastic();
+  if (_prefs.mt.en && !_listens_paused) {
+    applyMeshtastic();
+    applyRadioPrefs();
+  }
   strcpy(reply, "OK");
   return true;
 }

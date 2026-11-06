@@ -356,6 +356,10 @@ void MyMesh::findLoop() {
 
 void MyMesh::runRanging(bool manager, uint32_t addr) {
 #ifdef HAS_RANGING
+  // ranging runs as it was built and tested: no listen, and Semtech's patch in the chip rather than
+  // the Meshtastic scanner
+  bool paused_here = !_listens_paused;
+  pauseListens();
   LR2021Ranging rng(radio_driver);
   int16_t st = rng.begin(manager, addr, _range_ext);
   if (st != RADIOLIB_ERR_NONE) {
@@ -422,5 +426,6 @@ void MyMesh::runRanging(bool manager, uint32_t addr) {
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
   rng.restartRx();   // otherwise the radio stays deaf until it next transmits
+  if (paused_here) resumeListens();
 #endif
 }

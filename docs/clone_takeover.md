@@ -28,8 +28,9 @@ The new radio keeps its own transmit power, receiver gain, BLE PIN and GPS setti
 contacts come along, so if the two radios are in different places the copy learns its own as
 messages fail.
 
-Both radios leave the mesh while the copy runs. `clone stop` ends it early, and `clone` shows
-progress. Both radios need an LR2021.
+Both radios leave the mesh while the copy runs, and Meshtastic, weather or aircraft, whichever is
+on, pauses until it's over. `clone stop` ends it early, and `clone` shows progress. Both radios need
+an LR2021.
 
 ### How the copy is protected
 

@@ -328,7 +328,10 @@ int16_t CustomLR2021::ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t
 int16_t CustomLR2021::fskRearm() {
   int16_t state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
   if (state == RADIOLIB_ERR_NONE) state = clearRxFifo();
-  if (state == RADIOLIB_ERR_NONE) state = setRx(RADIOLIB_LR2021_RX_TIMEOUT_INF);
+  // continuous Rx stays in Rx after each packet, and SetRx then is refused (CMD_ERROR): only start it
+  uint8_t mode = 0;
+  chipStatus(&mode, NULL);
+  if (state == RADIOLIB_ERR_NONE && mode != 4) state = setRx(RADIOLIB_LR2021_RX_TIMEOUT_INF);
   return state;
 }
 
@@ -437,6 +440,7 @@ int CustomLR2021::linkRead(uint8_t* buf, uint8_t max, float* rssi) {
 
 int16_t CustomLR2021::fskStopInternal() {
   _fsk_active = false;
+  resetActivity();   // the IRQ bits meant other things in GFSK/OOK/FLRC
   uint16_t rx = 0, crc = 0, len = 0, pre = 0, sok = 0, sfail = 0, to = 0;
   if (_fsk_link) {
     _fsk_link = false;

@@ -1510,6 +1510,10 @@ void MyMesh::begin() {
                        _crypto_seq, _prefs.crypto_seq);
   }
 
+  // one listen at a time (MyMeshListens.cpp); settings from before that may have several on: keep
+  // the first of Meshtastic, Weather, Aircraft (the order of their channels)
+  if (_prefs.mt.en) _prefs.wx.en = _prefs.air.en = 0;
+  else if (_prefs.wx.en) _prefs.air.en = 0;
   applyMeshtastic();   // may load the on-chip scanner, which restarts the radio: settings come next
   applyRadioPrefs();
   applyWeather();

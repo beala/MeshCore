@@ -236,7 +236,7 @@ void MyMesh::aircraftLoop() {
 
   uint8_t buf[uat::LONG_BYTES];
   float rssi = 0;
-  for (int k = 0; k < 4 && _fsk_owner == 2; k++) {
+  for (int k = 0; k < 4; k++) {
     int len = _radio->recvFsk(buf, sizeof(buf), &rssi);
     if (len <= 0) break;
     _air_heard++;
@@ -326,18 +326,18 @@ void MyMesh::aircraftLoop() {
     else i++;
   }
 
-  // the radio's listen: weather's tracked windows come first
+  // the radio's listen
   int st = _radio->fskListenState();
   if (_air_listening) {
-    if (st == 0 || _fsk_owner != 2) {
-      if (_fsk_owner == 2) _air_listen_ms += _radio->lastFskListenMillis();
+    if (st == 0) {
+      _air_listen_ms += _radio->lastFskListenMillis();
       _air_listening = false;
       uint32_t gap = _air_forever ? 0 : (uint32_t) AIR_WINDOW_MS * (100 - _prefs.air.duty) / (_prefs.air.duty ? _prefs.air.duty : 1);
       _air_next = now + gap;
     }
     return;
   }
-  if (st != 0 || _wx_win_open) return;
+  if (st != 0) return;
   if ((int32_t)(now - _air_next) < 0) return;
   // take turns between the bands
   uint8_t bands = _prefs.air.bands & 3 ? _prefs.air.bands & 3 : 1;
@@ -345,7 +345,6 @@ void MyMesh::aircraftLoop() {
   mesh::Radio::FskListen cfg = band == 1090 ? adsbListen() : uatListen(_prefs.air.freq);
   if (_radio->startFskListen(cfg, _air_forever ? AIR_FOREVER_MS : AIR_WINDOW_MS)) {
     _air_band = band;
-    _fsk_owner = 2;
     _air_listening = true;
   }
 }
@@ -432,6 +431,9 @@ bool MyMesh::handleAircraftCommand(const char* command, char* reply) {
   if (strncmp(command, "air ", 4) == 0 && airOnOff(&command[4], &on)) arg = &command[4];
   else if (strncmp(command, "set air ", 8) == 0 && airOnOff(&command[8], &on)) arg = &command[8];
   if (arg) {
+    if (listensBusy(reply)) return true;
+    char off[64] = "";
+    if (on) listenOthersOff(LISTEN_AIR, off, sizeof(off));
     _prefs.air.en = on ? 1 : 0;
     applyAircraft();
     if (on && !_air_active) {
@@ -439,7 +441,8 @@ bool MyMesh::handleAircraftCommand(const char* command, char* reply) {
       strcpy(reply, "Error: this radio can't listen to aircraft (needs an LR2021)");
     } else {
       savePrefs();
-      strcpy(reply, on ? "OK - Aircraft on. Reconnect the app to see the channel" : "OK - Aircraft off");
+      if (on) sprintf(reply, "OK - Aircraft on%s. Reconnect the app to see the channel", off);
+      else strcpy(reply, "OK - Aircraft off");
     }
     return true;
   }

@@ -30,6 +30,17 @@ public:
   };
   static const int RX_GAIN_HISTORY = 8;
 
+  // What the radio did lately, for 'get radio.log': T sent, R heard, E heard with an error,
+  // X a transmit started (arg: header byte << 8 | length; x: failed),
+  // S couldn't start receiving, L a listen started (arg: modem + 1), l it ended (arg: ms), C a transmit
+  // cut it short, H it was skipped for mesh traffic
+  struct RadioEvent {
+    uint32_t at_millis;
+    char what;
+    uint16_t arg;
+  };
+  static const int RADIO_LOG = 24;
+
 private:
   // IRQ bits that mean a transmit went wrong (a missing TX_DONE is also a fault)
   static constexpr uint32_t TX_FAULT_IRQS = RADIOLIB_LR2021_IRQ_EOL | RADIOLIB_LR2021_IRQ_PA_OCP_OVP |
@@ -212,10 +223,25 @@ public:
     return ((CustomLR2021 *)_radio)->isReceiving();
   }
 
+  // Before a transmit: is the mesh channel busy? During an FSK listen or the clone link the radio is
+  // on another frequency and modem, where the IRQ flags and RSSI say nothing about the mesh, and a
+  // noisy band held transmits back. Nothing of the mesh can be heard then: send (it ends the listen).
+  bool isReceiving() override {
+    if (_link_up || ((CustomLR2021 *)_radio)->isFskActive()) return false;
+    return RadioLibWrapper::isReceiving();
+  }
+
   float getCurrentRSSI() override {
     float rssi = -110;
     ((CustomLR2021 *)_radio)->getRssiInst(&rssi);
     return rssi;
+  }
+
+  bool startSendRaw(const uint8_t* bytes, int len) override {
+    bool ok = RadioLibWrapper::startSendRaw(bytes, len);
+    _last_tx_len = len;
+    logEvent(ok ? 'X' : 'x', (uint16_t)((len > 0 ? bytes[0] : 0) << 8 | (len & 0xFF)));   // header byte, length
+    return ok;
   }
 
   void onSendFinished() override {
@@ -228,7 +254,8 @@ public:
     #endif
     }
     RadioLibWrapper::onSendFinished();
-    _fsk_hold_until = millis() + FSK_TX_HOLD_MS;   // stay on the mesh for the repeats of what was sent
+    logEvent('T', 0);
+    holdForRepeats(_last_tx_len, true);   // stay on the mesh for the repeats of what was sent
     _radio->setPreambleLength(preambleLengthForSF(getSpreadingFactor())); // overcomes weird issues with small and big pkts
     if (_fsk_side_pending) {   // the transmit ended an FSK listen
       _fsk_side_pending = false;
@@ -244,9 +271,16 @@ public:
       if (_fsk_state == FSK_LISTENING) return 0;
     }
     bool scan_pkt = r->isScanning() && isIrqPending();
+    uint32_t errs = getPacketsRecvErrors();
+    bool was_rx = isInRecvMode();
+    bool had_irq = isIrqPending();
     int len = RadioLibWrapper::recvRaw(bytes, sz);
+    if (had_irq) r->resetActivity();   // that packet is over: its flags were cleared with the read
+    if (len > 0) logEvent('R', len);
+    else if (getPacketsRecvErrors() != errs) logEvent('E', 0);
+    if (!isInRecvMode() && !was_rx) logEvent('S', 0);
     _scan_cached = false;
-    if (len > 0) _fsk_hold_until = millis() + FSK_RX_HOLD_MS;   // more copies (repeats) may follow
+    if (len > 0) holdForRepeats(len, false);   // more copies (repeats) may follow
     if (len > 0 || scan_pkt) {
       uint8_t step = 0;
       if (len > 0 && r->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
@@ -423,6 +457,32 @@ public:
       formatRxGains(reply);
       return true;
     }
+    if (strcmp(command, "get radio.log") == 0) {   // newest first, ms before now
+      uint32_t now = millis();
+      int n = sprintf(reply, ">");
+      for (int i = 0; i < _radio_log.count(); i++) {
+        const RadioEvent& e = _radio_log.get(i);
+        char entry[24];
+        int k = e.arg ? sprintf(entry, " %lu%c%u", (unsigned long)(now - e.at_millis), e.what, (unsigned)e.arg)
+                      : sprintf(entry, " %lu%c", (unsigned long)(now - e.at_millis), e.what);
+        if (n + k > REPLY_MAX) break;
+        strcpy(&reply[n], entry);
+        n += k;
+      }
+      return true;
+    }
+    if (strcmp(command, "get radio.chip") == 0) {
+      uint8_t mode = 0, pkt = 0xFF;
+      uint32_t irq = ((CustomLR2021 *)_radio)->chipStatus(&mode, &pkt);
+      static const char* modes[] = { "sleep", "standby RC", "standby XOSC", "FS", "Rx", "Tx", "?", "?" };
+      int32_t hold = (int32_t)(_fsk_hold_until - millis());
+      float rssi = 0;
+      ((CustomLR2021 *)_radio)->getRssiInst(&rssi);
+      sprintf(reply, "> chip %s, packet type %u, irq %08lx, %d dBm; wrapper %s%s, listen %u, hold %ld ms",
+              modes[mode & 7], pkt, (unsigned long)irq, (int)rssi, isInRecvMode() ? "rx" : "not rx", isIrqPending() ? " +irq" : "",
+              _fsk_state, (long)(hold > 0 ? hold : 0));
+      return true;
+    }
     if (strcmp(command, "get radio.counts") == 0) {
       sprintf(reply, "> rx %lu ok %lu errors, tx %lu, other network %lu",
               (unsigned long)getPacketsRecv(), (unsigned long)getPacketsRecvErrors(), (unsigned long)getPacketsSent(),
@@ -497,10 +557,24 @@ public:
     enum { FSK_IDLE = 0, FSK_WAITING = 1, FSK_LISTENING = 2 };
     static const int FSK_MAX_LEN = 48;   // the longest: a UAT long message
     static const int FSK_QUEUE = 4;
-    // after a transmit, repeaters echo it within a few seconds; after a packet is heard, other copies
-    // follow. FSK listens wait this long (a listen whose time runs out meanwhile is skipped).
+    // After a transmit, repeaters echo it, and repeaters further away echo those; after a packet is
+    // heard, other copies follow. FSK listens wait (a listen whose time runs out meanwhile is skipped).
+    // A repeater forwards within about 1 s + 8 airtimes (as flood retry waits for an echo,
+    // Mesh::getFloodRetryWait): after a transmit, wait for two hops of that, at least 5 s; after a
+    // packet, half a hop, at least 1.5 s. A hold only ever grows: a repeat heard right after a
+    // transmit used to cut the transmit's hold short, so the farther repeats were missed.
     static const uint32_t FSK_TX_HOLD_MS = 5000, FSK_RX_HOLD_MS = 1500;
     uint32_t _fsk_hold_until = 0, _fsk_held = 0;
+    int _last_tx_len = 0;
+    void holdForRepeats(int len, bool sent) {
+      uint32_t hop = 1000 + 8 * getEstAirtimeFor(len + 1);
+      uint32_t ms = sent ? 2 * hop : hop / 2;
+      uint32_t least = sent ? FSK_TX_HOLD_MS : FSK_RX_HOLD_MS;
+      if (ms < least) ms = least;
+      if (ms > 30000) ms = 30000;
+      uint32_t until = millis() + ms;
+      if ((int32_t)(until - _fsk_hold_until) > 0) _fsk_hold_until = until;
+    }
     struct FskPacket {
       uint8_t len;
       int16_t rssi;
@@ -521,6 +595,7 @@ public:
       if (_fsk_state == FSK_WAITING) {
         if ((int32_t)(_fsk_end - now) <= 20) {   // never got the radio: too late now
           _fsk_held++;
+          logEvent('H', 0);
           _fsk_state = FSK_IDLE;
           _fsk_ran = 0;
           return;
@@ -548,11 +623,13 @@ public:
         _fsk_state = FSK_LISTENING;
         _fsk_started = now;
         _fsk_listens++;
+        logEvent('L', _fsk_cfg.modem + 1);
         return;
       }
       if (_fsk_state != FSK_LISTENING) return;
       if (!r->isFskActive()) {   // a transmit (or a reset) took the radio back: leave it alone
         _fsk_cut++;
+        logEvent('C', 0);
         finishFsk(now, false);
         _fsk_side_pending = true;   // side detectors again once the transmit is over
         return;
@@ -595,11 +672,17 @@ public:
 
     void finishFsk(uint32_t now, bool restart) {
       _fsk_ran = now - _fsk_started;
+      if (restart) logEvent('l', (uint16_t)(_fsk_ran > 60000 ? 60000 : _fsk_ran));
       if (_fsk_ran == 0) _fsk_ran = 1;
       _fsk_total_ms += _fsk_ran;
       _fsk_state = FSK_IDLE;
-      clearIrqPending();
-      if (restart) applySideDetectorConfig();   // back in LoRa: side detectors again, then receive (via idle())
+      if (restart) {   // back in LoRa: side detectors again, then receive (via idle())
+        clearIrqPending();
+        applySideDetectorConfig();
+      }
+      // cut short by a transmit: leave the IRQ flag alone. It may be the transmit's own TX_DONE, and
+      // clearing it could leave the Dispatcher waiting for a transmit that had ended. A stale RX_DONE
+      // from the listen was already cleared when the transmit started (startSendRaw)
     }
     bool _fsk_side_pending = false;
     bool _link_up = false;
@@ -698,6 +781,8 @@ public:
     }
 
     int _last_gain_step = -1;
+    RecentHistory<RadioEvent, RADIO_LOG> _radio_log;
+    void logEvent(char what, uint16_t arg) { _radio_log.add({ (uint32_t)millis(), what, arg }); }
     RecentHistory<TxFault, TX_FAULT_HISTORY> _tx_faults;
     RecentHistory<RxGain, RX_GAIN_HISTORY> _rx_gains;
     LR2021LoRaSideDetector_t _sideDet[3];

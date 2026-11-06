@@ -40,6 +40,8 @@ This uses the LR2021's round-trip time-of-flight mode (RTToF). The command seque
 3. The finder hears the reply, switches to RTToF manager, and runs up to 32 exchanges in 2.5 seconds. Each exchange is given up after 100 ms.
 4. Both radios return to normal LoRa: standby, packet type LoRa, sync word, then the usual frequency, bandwidth, SF, CR, preamble and side-detector settings.
 
+Meshtastic, weather or aircraft, whichever is on, pauses on both radios for the session (the Meshtastic scanner comes out of the chip, which has Semtech's patch back), and comes back after it.
+
 The settings are:
 - SF9, BW 500 kHz, CR 4/5, preamble 12, explicit header, CRC, on the current frequency.
 - 15 response symbols, normal mode.

@@ -109,7 +109,7 @@ void MyMesh::weatherLoop() {
   // packets heard
   uint8_t buf[WX_PKT_LEN];
   float rssi = 0;
-  for (int k = 0; k < 4 && _fsk_owner == 1; k++) {
+  for (int k = 0; k < 4; k++) {
     int n = _radio->recvFsk(buf, sizeof(buf), &rssi);
     if (n <= 0) break;
     _wx_heard++;
@@ -176,7 +176,6 @@ void MyMesh::weatherLoop() {
   if (_wx.nextWindow(now, &w) && (int32_t)(w.start - now) <= 0 && w.len > 0) {
     if (_radio->startFskListen(weatherListen(w.proto), w.len)) {
       _wx_rx_proto = w.proto;
-      _fsk_owner = 1;
       _wx_win = w;
       _wx_win_open = true;
       _wx_win_got = false;
@@ -278,6 +277,9 @@ bool MyMesh::handleWeatherCommand(const char* command, char* reply) {
   if (strncmp(command, "wx ", 3) == 0 && wxOnOff(&command[3], &on)) arg = &command[3];
   else if (strncmp(command, "set wx ", 7) == 0 && wxOnOff(&command[7], &on)) arg = &command[7];
   if (arg) {
+    if (listensBusy(reply)) return true;
+    char off[64] = "";
+    if (on) listenOthersOff(LISTEN_WX, off, sizeof(off));
     _prefs.wx.en = on ? 1 : 0;
     applyWeather();
     if (on && !_wx_active) {
@@ -285,8 +287,8 @@ bool MyMesh::handleWeatherCommand(const char* command, char* reply) {
       strcpy(reply, "Error: this radio can't listen to weather sensors (needs an LR2021)");
     } else {
       savePrefs();
-      if (on) sprintf(reply, "OK - Weather on, scanning for sensors for %d s. Reconnect the app to see the channel",
-                      85 * _wx.protocolCount());
+      if (on) sprintf(reply, "OK - Weather on%s, scanning for sensors for %d s. Reconnect the app to see the channel",
+                      off, 85 * _wx.protocolCount());
       else strcpy(reply, "OK - Weather off");
     }
     return true;

@@ -13,6 +13,10 @@ Aircraft), so turning one on or off never moves another; a slot whose feature is
 Its messages read `Name: text`, with the sender's long name once their NodeInfo has been heard
 (`!a1b2c3d4` until then).
 
+Meshtastic is one listen at a time with weather and aircraft: `mt on` turns those off (the reply
+says so). `radar`, copying a radio and `find range` pause it (the scanner comes out of the chip) until they
+finish.
+
 ## Settings
 
 | Command | |

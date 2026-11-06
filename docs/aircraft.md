@@ -92,9 +92,15 @@ reference, both velocity kinds) and check CPR round trips around the world.
 
 ### Sharing the radio with the mesh
 
-A listen never starts while a mesh packet is arriving, for 5 s after this radio transmits (so the
-repeats of what you sent are heard) or for 1.5 s after a mesh packet is heard (other copies follow).
-Listens that run out of time meanwhile are skipped (`get radio.fsk`: "skipped for mesh traffic").
+A listen never starts while a mesh packet is arriving, after this radio transmits (for two
+repeater hops' worth of time, at least 5 s, so the repeats of what you sent are heard) or after a
+mesh packet is heard (at least 1.5 s: other copies follow). A packet heard never shortens a wait
+already running. A transmit ends a listen at once. Listens that run out of time meanwhile are
+skipped (`get radio.fsk`: "skipped for mesh traffic"). The same holds with `air scan on`: the mesh
+can't be heard between those waits, but what you send still goes out and its repeats come back.
+
+Aircraft is one listen at a time with Meshtastic and weather: `air on` turns those off (the reply
+says so). `radar`, copying a radio and `find range` pause it until they finish.
 
 ### A RadioLib detail that matters
 

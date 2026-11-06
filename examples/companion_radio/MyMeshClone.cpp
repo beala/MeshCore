@@ -233,7 +233,9 @@ bool MyMesh::handleCloneTransferCommand(const char* command, char* reply) {
   }
   strcpy(xfer_code, code);
 
+  pauseListens();   // the link has the radio to itself: no Meshtastic scanner, no other listens
   if (!_radio->linkStart(mhz, CLONE_TX_DBM)) {
+    resumeListens();
     strcpy(reply, "Error: this radio can't copy (needs an LR2021)");
     return true;
   }
@@ -286,6 +288,7 @@ void MyMesh::cloneFinish() {
   _radio->linkStop();
   radio_driver.setTxPower(_prefs.tx_power_dbm);
   _xfer_on = false;
+  resumeListens();
   char msg[200];
   uint32_t kb = (xfer.total() + 1023) / 1024;
   uint32_t ms = xfer.finishedAt() - xfer.startedAt();

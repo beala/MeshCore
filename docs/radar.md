@@ -15,7 +15,8 @@ Radar, 1030 MHz, 30 s: 3751 pulses, 8 bursts. one turning every 4.81 s (heard 5 
 ```
 
 The radio does nothing else while it listens: the mesh isn't heard (sending still works, and ends
-the listen for a moment).
+the listen until the repeats of what was sent are in), and Meshtastic, weather or aircraft, whichever
+is on, pauses until the result is in.
 
 | Command | |
 |---|---|

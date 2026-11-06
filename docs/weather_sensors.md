@@ -55,9 +55,15 @@ the moment its next packet is due:
    batteries), is hunted: 0.4 s listens at random gaps of 1.5–4.5 s until it's heard twice.
 
 Mesh traffic comes first. A listen doesn't start while a mesh packet is coming in or waiting to
-be read, and a mesh transmit ends a listen at once. After a transmit no listen starts for 5 s, so
-the repeats of a message you send are heard, even during a scan; after a mesh packet is heard, none
-for 1.5 s, as other copies follow. The time a listen misses isn't held against the sensor.
+be read, and a mesh transmit ends a listen at once (it doesn't wait for the band to go quiet: the
+radio can't hear the mesh from there anyway). After a transmit no listen starts for two repeater
+hops' worth of time (1 s + 8 airtimes each, the wait flood retry uses for an echo; at least 5 s), so
+the repeats of a message you send are heard, even during a scan; after a mesh packet is heard,
+none for half a hop (at least 1.5 s), as other copies follow. A packet heard never shortens a wait
+already running. The time a listen misses isn't held against the sensor.
+
+Weather is one listen at a time with Meshtastic and aircraft: `wx on` turns those off (the reply
+says so). `radar`, copying a radio and `find range` pause it until they finish.
 
 On the chip, a listen is a switch of packet type from LoRa to GFSK with raw commands. Its
 frequency is set after the modulation parameters: RadioLib's DC-DC workaround in
@@ -65,7 +71,7 @@ frequency is set after the modulation parameters: RadioLib's DC-DC workaround in
 the other way round sits on the mesh's frequency. (Before that was fixed, only a radio whose mesh
 was on the sensors' frequency could hear them.) (17.24 kbit/s,
 153.8 kHz receiver bandwidth, sync word 0x2DD4, 32 bytes fixed length, no CRC), and back to LoRa
-with RadioLib's cached MeshCore settings. No reset, so the Meshtastic scanner blob stays loaded.
+with RadioLib's cached MeshCore settings.
 
 ## Sensors
 

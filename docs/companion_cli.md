@@ -351,6 +351,18 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+#### See what the radio did lately (LR2021 only)
+**Usage:**
+- `get radio.log`: the last 24 radio events, newest first, as milliseconds ago and a letter: `X` a transmit started (then the header byte × 256 + length), `T` it ended, `R` a packet heard (its length), `E` one heard with an error, `S` receive couldn't start, `L` a weather/aircraft/radar listen started (modem + 1), `l` it ended (ms it ran), `C` a transmit cut it short, `H` it was skipped for mesh traffic
+- `get radio.chip`: the chip's mode, packet type (0 LoRa, 2 GFSK, 10 OOK), IRQ flags and RSSI now; whether the firmware has it receiving; the listen state (0 none, 1 waiting, 2 listening) and how long listens still wait for repeats
+
+**Example reply:** `> 685R37 2448T 2662X5413` (a 37-byte channel message sent 2.7 s ago, a 37-byte repeat heard 0.7 s ago)
+
+**Notes:**
+- For checking how listens and the mesh share the radio, e.g. whether a repeat was missed because a listen had the radio.
+
+---
+
 #### Listen to a Meshtastic channel (LR2021 only)
 **Usage:**
 - `mt on`, `mt off`
@@ -367,6 +379,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - The radio also listens to a Meshtastic channel, and its texts show in the app as one more channel, "Meshtastic LongFast", after your own. Receive only: text typed there is not sent. See [Meshtastic channel](meshtastic_channel.md).
 - Settings are saved. Reconnect the app after `mt on` so it lists the new channel.
+- Meshtastic (`mt`), weather (`wx`) and aircraft (`air`) are one at a time: turning one on turns the others off (the reply says which). `radar`, copying a radio (`clone`) and `find range` pause whichever is on until they finish. A radio updated from firmware that let several be on keeps the first of Meshtastic, Weather, Aircraft.
 
 #### Weather sensors (LR2021 only)
 **Usage:**
@@ -387,6 +400,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - Ecowitt, Ambient Weather, other Fine Offset and La Crosse View sensors show in the app as one more channel, "Weather", after your own and the Meshtastic slot. Receive only. See [Weather sensors](weather_sensors.md).
 - Settings are saved. Reconnect the app after `wx on` so it lists the new channel.
+- One at a time with `mt` and `air` (see above).
 
 #### Aircraft on 978 MHz (LR2021 only)
 **Usage:**
@@ -399,7 +413,8 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 **Notes:**
 - Aircraft reporting on UAT (978 MHz) and 1090 MHz ADS-B show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
-- `radar [seconds] [threshold] [MHz]`, `get radar`, `get radar.bursts`, `radar stop`: listen on 1030 MHz and work out how fast the radars around turn (LR2021). See [Radar sweep detector](radar.md).
+- One at a time with `mt` and `wx` (see above).
+- `radar [seconds] [threshold] [MHz]`, `get radar`, `get radar.bursts`, `radar stop`: listen on 1030 MHz and work out how fast the radars around turn (LR2021). See [Radar sweep detector](radar.md). Meshtastic, weather or aircraft pause meanwhile.
 
 #### Copy this radio to another
 **Usage:**

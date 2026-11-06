@@ -48,7 +48,7 @@ void MyMesh::radarLoop() {
   uint8_t buf[8];
   float rssi = 0;
   int nbins = (int)(_radar_secs * 1000 / radar::BIN_MS);
-  for (int k = 0; k < 16 && _fsk_owner == 3; k++) {
+  for (int k = 0; k < 16; k++) {
     int len = _radio->recvFsk(buf, sizeof(buf), &rssi);
     if (len <= 0) break;
     if (len != 4) continue;
@@ -62,14 +62,14 @@ void MyMesh::radarLoop() {
   if ((int32_t)(now - _radar_end) >= 0) {
     _radio->stopFskListen();
     _radar_active = false;
-    _fsk_owner = 0;
+    drainFsk();
+    resumeListens();
     radarReport();
     return;
   }
-  if (_radar_listening && (st == 0 || _fsk_owner != 3)) _radar_listening = false;   // cut short (a transmit)
+  if (_radar_listening && st == 0) _radar_listening = false;   // cut short (a transmit)
   if (!_radar_listening && st == 0) {
     if (_radio->startFskListen(pulseListen(_radar_freq, _radar_thresh), _radar_end - now)) {
-      _fsk_owner = 3;
       _radar_listening = true;
     }
   }
@@ -107,12 +107,15 @@ bool MyMesh::handleRadarCommand(const char* command, char* reply) {
     return true;
   }
   if (_radar_active) { strcpy(reply, "Error: already listening ('get radar', 'radar stop')"); return true; }
+  if (listensBusy(reply)) return true;
   // probe: only radios that can listen away from the mesh
   if (!_radio->startFskListen(pulseListen((float) mhz, 0), 1)) {
     strcpy(reply, "Error: this radio can't listen for radar (needs an LR2021)");
     return true;
   }
   _radio->stopFskListen();
+  const char* paused = _prefs.mt.en ? " Meshtastic" : _prefs.wx.en ? " Weather" : _prefs.air.en ? " Aircraft" : "";
+  pauseListens();
   memset(radar_bins, 0, sizeof(radar_bins));
   _radar_secs = (uint16_t) secs;
   _radar_thresh = (int8_t) th;
@@ -123,6 +126,7 @@ bool MyMesh::handleRadarCommand(const char* command, char* reply) {
   _radar_active = true;
   _radar_listening = false;
   _radar_result[0] = 0;
-  sprintf(reply, "OK - listening on %ld MHz for %ld s; the mesh can't be heard meanwhile. The result shows here", mhz, secs);
+  sprintf(reply, "OK - listening on %ld MHz for %ld s; the mesh%s%s can't be heard meanwhile. The result shows here", mhz, secs,
+          paused[0] ? " and" : "", paused);
   return true;
 }
