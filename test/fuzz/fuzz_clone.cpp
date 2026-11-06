@@ -17,13 +17,21 @@ struct Fuzz {
   bool more() const { return i < n; }
 };
 
+// a frame's last byte in the queue: the link mode it went in (stripped on delivery)
 struct Pipe : Io {
   std::deque<std::vector<uint8_t>>* out;
   uint32_t seed;
+  uint8_t have = (1 << M_GFSK) | (1 << M_FLRC);
+  uint8_t mode = M_GFSK;
   bool send(const uint8_t* f, int len) override {
-    if (out->size() < 256) out->push_back(std::vector<uint8_t>(f, f + len));
+    if (out->size() < 256) {
+      out->push_back(std::vector<uint8_t>(f, f + len));
+      out->back().push_back(mode);
+    }
     return true;
   }
+  uint8_t modes() override { return have; }
+  bool setMode(uint8_t m) override { if (!(have & (1 << m))) return false; mode = m; return true; }
   void random(uint8_t* buf, int len) override {
     for (int i = 0; i < len; i++) { seed = seed * 1103515245u + 12345u; buf[i] = (uint8_t)(seed >> 16); }
   }
@@ -73,7 +81,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   BundleSink sink;
   sink.init(&dst_files, 1 << 16);
   static Session tx, rx;   // large: keep them off the stack
-  const char* code = in.byte() & 1 ? "123456" : "654321";
+  uint8_t setup = in.byte();
+  const char* code = setup & 1 ? "123456" : "654321";
+  if (setup & 2) a.have = 1 << M_GFSK;   // an SX1262 at either end, or both
+  if (setup & 4) b.have = 1 << M_GFSK;
   rx.startReceive(&b, &sink, "123456", 0, 60000);
   tx.startSend(&a, &src, code, 0);
   uint32_t now = 0;
@@ -81,15 +92,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     for (int side = 0; side < 2; side++) {
       auto& q = side ? to_a : to_b;
       Session& s = side ? tx : rx;
+      Pipe& p = side ? a : b;
       if (q.empty()) continue;
       std::vector<uint8_t> f = q.front();
       q.pop_front();
+      uint8_t sent_mode = f.back();
+      f.pop_back();
+      if (sent_mode != p.mode) continue;   // not listening in that mode
       uint8_t op = in.more() ? in.byte() : 0;
       float rssi = -40;
       switch (op & 7) {
         case 1: continue;                                           // dropped
         case 2: if (!f.empty()) f[in.byte() % f.size()] ^= (uint8_t)(1 << (op >> 5)); break;
-        case 3: q.push_front(f); break;                             // delivered twice
+        case 3: q.push_front(f); q.front().push_back(sent_mode); break;   // delivered twice
         case 4: f.resize(in.byte() % (f.size() + 1)); break;        // cut short
         case 5: {                                                   // the input's own bytes instead
           size_t len = in.byte();

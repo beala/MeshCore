@@ -151,16 +151,27 @@ public:
   virtual int recvFsk(uint8_t* bytes, int sz, float* rssi) { return 0; }
 
   /**
-   * \brief  A fast point-to-point link away from the mesh, for copying a radio (FLRC on the LR2021).
-   *         While it's up the radio does nothing else: the caller stops calling the mesh loop, and
-   *         calls linkStop() to return to the mesh. Packets are 7..255 bytes.
+   * \brief  A fast point-to-point link away from the mesh, for copying a radio. It starts in GFSK
+   *         (250 kbps, the same framing on every chip that has it); linkSetMode() moves it to a
+   *         faster mode both ends have (FLRC between two LR2021s). While it's up the radio does
+   *         nothing else: the caller stops calling the mesh loop, and calls linkStop() to return
+   *         to the mesh. Packets are 7..255 bytes.
    * \returns  false if this radio can't do it.
    */
+  enum { LINK_GFSK = 0, LINK_FLRC = 1 };
+  /** \returns  the link modes this radio has, a bit per mode (0 = no link) */
+  virtual uint8_t linkModes() const { return 0; }
   virtual bool linkStart(float freq, int8_t dbm) { return false; }
+  virtual bool linkSetMode(uint8_t mode) { return false; }
+  /** nothing heard when an answer was due: a radio that can go deaf sets its receiver up again */
+  virtual void linkStalled() { }
   virtual bool linkSend(const uint8_t* bytes, int len) { return false; }
   /** \returns  length of the next packet received (0 = none), with its RSSI */
   virtual int linkRecv(uint8_t* bytes, int sz, float* rssi) { return 0; }
   virtual void linkStop() { }
+  /** the link's packets received, those that failed their CRC, and the times receive had stopped
+   *  without a packet and was started again, since boot */
+  virtual void linkStats(uint32_t* ok, uint32_t* bad, uint32_t* restarts) const { *ok = 0; *bad = 0; *restarts = 0; }
 };
 
 /**

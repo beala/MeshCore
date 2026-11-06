@@ -1,6 +1,12 @@
 #pragma once
 // Copies one radio onto another nearby (key, contacts, channels, settings) over a fast point-to-point
-// link away from the mesh: FLRC on the LR2021. See docs/clone_takeover.md.
+// link away from the mesh. See docs/clone_takeover.md.
+//
+// The link starts in GFSK, which every radio that can copy has (SX126x and LR2021 alike, with the same
+// framing), and HELLO / HELLO_ACK say which faster modes each end has. Once the receiver has checked
+// the sender's CONFIRM, both move to the fastest mode they share (FLRC between two LR2021s) for the
+// data; CONFIRM itself always goes in GFSK, so a receiver that missed it still hears the repeat.
+// The mode bytes are part of CPace's associated data, so they can't be changed in flight.
 //
 // The receiving radio shows a 6-digit code; the user types it on the sending radio. The radios run
 // CPace (draft-irtf-cfrg-cpace, X25519/SHA-512; helpers/CPace) with the code as the password, so a
@@ -10,10 +16,11 @@
 // frames heard weaker than MIN_RSSI are ignored: the radios must be next to each other.
 //
 //   sender (initiator)                     receiver (responder)
-//   HELLO   (sid, Ya)                   ->
-//                                       <- HELLO_ACK (Yb, Tb)
-//   CONFIRM (Ta)                        ->
-//   DATA x up to WINDOW, POLL           ->
+//   HELLO   (sid, Ya, modes)            ->                              (GFSK)
+//                                       <- HELLO_ACK (Yb, Tb, modes)    (GFSK)
+//   CONFIRM (Ta)                        ->                              (GFSK)
+//   --- both switch to the data mode ---
+//   DATA x up to WINDOW, POLL           ->       (in GFSK, POLL also carries CONFIRM's tag until the first ACK)
 //                                       <- ACK (next chunk needed, which of the window it has)
 //   ... until every chunk is acknowledged ...
 //   DONE (length, SHA-256 of it all)    ->
@@ -39,6 +46,10 @@ static const int CONFIRM_LEN = 16;      // CPace key-confirmation tags, truncate
 static const int CODE_LEN = 6;          // digits
 static const float MIN_RSSI = -70.0f;   // dBm: "next to each other" (default; setMinRssi)
 
+// link modes, by number (Io::setMode) and as bits (Io::modes)
+enum Mode : uint8_t { M_GFSK = 0, M_FLRC = 1 };
+static const uint8_t MODES_KNOWN = (1 << M_GFSK) | (1 << M_FLRC);
+
 enum Type : uint8_t { T_HELLO = 1, T_HELLO_ACK, T_DATA, T_POLL, T_ACK, T_DONE, T_DONE_ACK, T_ABORT, T_CONFIRM };
 
 enum State : uint8_t { IDLE = 0, WAITING, TRANSFER, FINISHING, DONE_OK, FAILED };
@@ -60,6 +71,11 @@ const char* failText(Fail f);
 struct Io {
   virtual bool send(const uint8_t* frame, int len) = 0;
   virtual void random(uint8_t* buf, int len) = 0;   // cryptographic randomness
+  // the link modes this radio has (bit per Mode); GFSK always. The link starts in GFSK.
+  virtual uint8_t modes() { return 1 << M_GFSK; }
+  virtual bool setMode(uint8_t mode) { return mode == M_GFSK; }
+  // nothing heard when an answer was due (before each retry), or 2 s of silence mid-copy
+  virtual void stalled() { }
   virtual ~Io() { }
 };
 
@@ -99,6 +115,8 @@ public:
   uint32_t finishedAt() const { return _t_done; }
   float weakest() const { return _weak_rssi; }     // the strongest frame heard below MIN_RSSI (0 = none)
   float peerRssi() const { return _peer_rssi; }
+  uint8_t dataMode() const { return _data_mode; }  // once the handshake is done
+  uint8_t mode() const { return _cur_mode; }       // the radio's mode now
 
 private:
   Io* _io;
@@ -117,6 +135,9 @@ private:
   bool _confirmed;            // receiver: the sender's CPace tag checked out
   uint32_t _t_start, _t_deadline, _t_last_tx, _t_last_rx, _t_link, _t_done;
   float _weak_rssi, _peer_rssi, _min_rssi;
+  uint8_t _modes_a, _modes_b;  // what each end has (bits)
+  uint8_t _data_mode, _cur_mode;
+  uint8_t _ad_a[10], _ad_b[12];   // CPace ADa / ADb: "v2 sender" / "v2 receiver", then that end's modes
 
   // sender
   uint32_t _total;
@@ -127,6 +148,8 @@ private:
   bool _got_ack;              // the receiver has answered a POLL: it has our CONFIRM
   uint8_t _tries;
   uint32_t _resent;
+  uint32_t _t_stall;          // receiver: the last stalled() for silence
+  bool _restamp;              // the last send took a while (a burst, DONE's hash): time retries from the next tick
 
   // receiver
   uint16_t _rbase;
@@ -138,6 +161,9 @@ private:
   uint8_t _done_ack;          // 0xFF = no DONE yet; else the status sent
 
   void failWith(Fail f, bool tell_peer);
+  void setAds();
+  bool useMode(uint8_t m);
+  uint32_t retryMs() const;
   void header(uint8_t* f, uint8_t type) const;
   bool sendFrame(const uint8_t* f, int len);
   void sendHello();

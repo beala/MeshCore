@@ -31,7 +31,7 @@ public:
   static const int RX_GAIN_HISTORY = 8;
 
   // What the radio did lately, for 'get radio.log': T sent, R heard, E heard with an error,
-  // X a transmit started (arg: header byte << 8 | length; x: failed),
+  // X a transmit started (arg: header byte << 8 | length; x: failed), K/k a copy link frame sent/heard,
   // S couldn't start receiving, L a listen started (arg: modem + 1), l it ended (arg: ms), C a transmit
   // cut it short, H it was skipped for mesh traffic
   struct RadioEvent {
@@ -395,7 +395,12 @@ public:
     return len;
   }
 
-  // ---- FLRC link (copying a radio) ----
+  // ---- link (copying a radio): GFSK, then FLRC if the other end is an LR2021 too ----
+  uint8_t linkModes() const override { return (1 << LINK_GFSK) | (1 << LINK_FLRC); }
+  bool linkSetMode(uint8_t mode) override {
+    if (!_link_up) return false;
+    return ((CustomLR2021 *)_radio)->linkSetMode(mode) == RADIOLIB_ERR_NONE;
+  }
   bool linkStart(float freq, int8_t dbm) override {
     stopFskListen();
     CustomLR2021* r = (CustomLR2021 *)_radio;
@@ -408,17 +413,26 @@ public:
     return true;
   }
 
+  // the link's frames other than data go in the radio log too: K sent, k heard (arg: type << 8 | length)
   bool linkSend(const uint8_t* bytes, int len) override {
     if (!_link_up || len < 6 || len > 255) return false;
-    return ((CustomLR2021 *)_radio)->linkSend(bytes, (uint8_t)len, 20) == RADIOLIB_ERR_NONE;
+    bool ok = ((CustomLR2021 *)_radio)->linkSend(bytes, (uint8_t)len, 20) == RADIOLIB_ERR_NONE;
+    if (bytes[2] != 3 || !ok) logEvent(ok ? 'K' : 'F', (uint16_t)(bytes[2] << 8 | (len & 0xFF)));
+    return ok;
   }
 
   int linkRecv(uint8_t* bytes, int sz, float* rssi) override {
     if (!_link_up) return 0;
     int n = ((CustomLR2021 *)_radio)->linkRead(bytes, (uint8_t)(sz > 255 ? 255 : sz), rssi);
+    if (n > 2 && bytes[2] != 3) logEvent('k', (uint16_t)(bytes[2] << 8 | (n & 0xFF)));
+    else if (n < 0) logEvent('E', 0);
     return n > 0 ? n : 0;
   }
 
+  void linkStats(uint32_t* ok, uint32_t* bad, uint32_t* restarts) const override {
+    ((CustomLR2021 *)_radio)->linkStats(ok, bad);
+    *restarts = ((CustomLR2021 *)_radio)->linkRearms();
+  }
   void linkStop() override {
     if (!_link_up) return;
     _link_up = false;

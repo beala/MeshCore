@@ -3,6 +3,8 @@
 #include "CustomLR2021.h"
 #include "lr20xx_pram_lr2021.h"
 #include "lr2021_scan_blob.h"
+#include "LinkGfsk.h"
+#include <Dispatcher.h>
 
 // PRAM write window, from Semtech's LR20xx driver (LR20XX_PRAM_BASE_ADDRESS).
 // RadioLib has the same value in LR2021_registers.h, which LR2021.h doesn't include.
@@ -354,7 +356,14 @@ int16_t CustomLR2021::fskRead(uint8_t* buf, uint8_t len, float* rssi) {
 
 static const uint32_t LINK_SYNC = 0x4D43434CUL;   // "MCCL"
 
+
 int16_t CustomLR2021::linkPacketParams(uint8_t len) {
+  if (_link_mode == mesh::Radio::LINK_GFSK) {
+    // preamble detector 16 bits; no address; 8-bit length (SX126x compatible); CRC-16 inverted; whitened.
+    // The length is the packet's in TX, the most accepted in RX.
+    return setGfskPacketParams(LINK_GFSK_PBL_BITS, 16, false, false, RADIOLIB_LR2021_GFSK_OOK_ADDR_FILT_DISABLED,
+                               RADIOLIB_LR2021_GFSK_OOK_PACKET_FORMAT_VARIABLE_8BIT, len, RADIOLIB_LR2021_GFSK_OOK_CRC16_INV, 1);
+  }
   // agc_pbl_len 7 = 32 bits of preamble; sync word 1 (4 bytes), sent and matched; variable length;
   // CRC 3 = 32 bits. The length is the packet's in TX, the most accepted in RX.
   return setFlrcPacketParams(0x07, 4, 1, 0x01, false, 0x03, len);
@@ -371,6 +380,49 @@ int16_t CustomLR2021::linkRx() {
   return state;
 }
 
+// packet type and its settings for the link's mode, in standby
+int16_t CustomLR2021::linkConfig(uint8_t mode) {
+  _link_mode = mode;
+  int16_t state;
+  if (mode == mesh::Radio::LINK_GFSK) {
+    state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_GFSK);
+    if (state == RADIOLIB_ERR_NONE) {
+      state = setGfskModulationParams((uint32_t)(LINK_GFSK_KBPS * 1000.0f + 0.5f), RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_GAUSS_BT_0_5,
+                                      gfskRxBwCode(LINK_GFSK_RXBW_KHZ), (uint32_t)(LINK_GFSK_DEV_KHZ * 1000.0f + 0.5f));
+    }
+    if (state == RADIOLIB_ERR_NONE) {
+      uint8_t buff[9] = { 0 };   // right-aligned, then MSB first and the length in bits (see fskStart)
+      memcpy(&buff[RADIOLIB_LR2021_GFSK_SYNC_WORD_LEN - 4], LINK_SYNC_BYTES, 4);
+      buff[8] = 0x80 | 32;
+      state = SPIcommand(RADIOLIB_LR2021_CMD_SET_GFSK_SYNCWORD, true, buff, sizeof(buff));
+    }
+    if (state == RADIOLIB_ERR_NONE) state = setGfskWhiteningParams(0, LINK_GFSK_WHITEN);   // 0: SX126x's
+    if (state == RADIOLIB_ERR_NONE) state = setGfskCrcParams(LINK_GFSK_CRC_POLY, LINK_GFSK_CRC_INIT);
+  } else if (mode == mesh::Radio::LINK_FLRC) {
+    state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_FLRC);
+    if (state == RADIOLIB_ERR_NONE) {
+      state = setFlrcModulationParams(RADIOLIB_LR2021_FLRC_BR_1300, RADIOLIB_LR2021_FLRC_CR_3_4,
+                                      RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_GAUSS_BT_0_5);
+    }
+    if (state == RADIOLIB_ERR_NONE) state = setFlrcSyncWord(1, LINK_SYNC);
+  } else {
+    return RADIOLIB_ERR_WRONG_MODEM;
+  }
+  // after the modulation params: the DC-DC workaround retunes to the mesh frequency (see fskStart)
+  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(_link_mhz * 1000000.0f + 0.5f));
+  return state;
+}
+
+// adds the chip's receive counts for the mode it's leaving (they start again with each packet type)
+void CustomLR2021::linkCollectStats() {
+  uint16_t rx = 0, crc = 0, len = 0, pre = 0, sok = 0, sfail = 0, to = 0;
+  int16_t st = _link_mode == mesh::Radio::LINK_FLRC ? getFlrcRxStats(&rx, &crc, &len)
+                                                    : getGfskRxStats(&rx, &crc, &len, &pre, &sok, &sfail, &to);
+  if (st == RADIOLIB_ERR_NONE) {
+    _link_stats.packets += rx; _link_stats.crc_err += crc; _link_stats.len_err += len;
+  }
+}
+
 int16_t CustomLR2021::linkStart(float fMHz, int8_t dbm) {
   int16_t state = standby();
   if (state != RADIOLIB_ERR_NONE) return state;
@@ -378,14 +430,8 @@ int16_t CustomLR2021::linkStart(float fMHz, int8_t dbm) {
   if (state != RADIOLIB_ERR_NONE) return state;
   _fsk_active = true;
   _fsk_link = true;
-  state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_FLRC);
-  if (state == RADIOLIB_ERR_NONE) {
-    state = setFlrcModulationParams(RADIOLIB_LR2021_FLRC_BR_1300, RADIOLIB_LR2021_FLRC_CR_3_4,
-                                    RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_GAUSS_BT_0_5);
-  }
-  // after the modulation params: the DC-DC workaround retunes to the mesh frequency (see fskStart)
-  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(fMHz * 1000000.0f + 0.5f));
-  if (state == RADIOLIB_ERR_NONE) state = setFlrcSyncWord(1, LINK_SYNC);
+  _link_mhz = fMHz;
+  state = linkConfig(mesh::Radio::LINK_GFSK);
   if (state == RADIOLIB_ERR_NONE) state = LR2021::setOutputPower(dbm);
   // after each packet in or out, keep the synthesizer running (datasheet 6.3.7): quicker turnarounds
   if (state == RADIOLIB_ERR_NONE) state = setRxTxFallbackMode(RADIOLIB_LR2021_FALLBACK_MODE_FS);
@@ -398,9 +444,19 @@ int16_t CustomLR2021::linkStart(float fMHz, int8_t dbm) {
   return state;
 }
 
+int16_t CustomLR2021::linkSetMode(uint8_t mode) {
+  if (!isLinkActive()) return RADIOLIB_ERR_WRONG_MODEM;
+  if (mode == _link_mode) return RADIOLIB_ERR_NONE;
+  int16_t state = LR2021::standby();
+  linkCollectStats();
+  if (state == RADIOLIB_ERR_NONE) state = linkConfig(mode);
+  if (state == RADIOLIB_ERR_NONE) state = linkRx();
+  return state;
+}
+
 int16_t CustomLR2021::linkSend(const uint8_t* buf, uint8_t len, uint32_t timeoutMs) {
   if (!isLinkActive()) return RADIOLIB_ERR_WRONG_MODEM;
-  if (len < 6) return RADIOLIB_ERR_PACKET_TOO_LONG;   // variable-length FLRC: 6 bytes at least
+  if (len < 6) return RADIOLIB_ERR_PACKET_TOO_LONG;   // variable-length FLRC: 6 bytes at least (GFSK: kept the same)
   int16_t state = LR2021::standby();
   if (state == RADIOLIB_ERR_NONE) state = linkPacketParams(len);
   if (state == RADIOLIB_ERR_NONE) state = clearTxFifo();
@@ -423,14 +479,27 @@ int16_t CustomLR2021::linkSend(const uint8_t* buf, uint8_t len, uint32_t timeout
 int CustomLR2021::linkRead(uint8_t* buf, uint8_t max, float* rssi) {
   if (!isLinkActive()) return 0;
   uint32_t irq = getIrqStatus();
-  if (!(irq & (RADIOLIB_LR2021_IRQ_RX_DONE | RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR))) return 0;
+  if (!(irq & (RADIOLIB_LR2021_IRQ_RX_DONE | RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR))) {
+    // every 50 ms: still receiving? A single Rx that ended without a packet leaves the chip in FS, deaf
+    if (millis() - _link_check_at >= 50) {
+      _link_check_at = millis();
+      uint8_t mode = 4;
+      uint32_t now_irq = chipStatus(&mode, NULL);
+      if (mode != 4 && !(now_irq & (RADIOLIB_LR2021_IRQ_RX_DONE | RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR))) {
+        _link_rearms++;
+        linkRx();
+      }
+    }
+    return 0;
+  }
   if (irq & (RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR)) {
     linkRx();
     return -1;
   }
   uint16_t len = 0;
   float avg = 0, sync = 0;
-  getFlrcPacketStatus(&len, &avg, &sync, NULL);
+  if (_link_mode == mesh::Radio::LINK_GFSK) getGfskPacketStatus(&len, &avg, &sync, NULL, NULL, NULL);
+  else getFlrcPacketStatus(&len, &avg, &sync, NULL);
   int n = len > max ? max : len;
   if (n > 0) readRadioRxFifo(buf, n);
   if (rssi) *rssi = sync;
@@ -444,10 +513,7 @@ int16_t CustomLR2021::fskStopInternal() {
   uint16_t rx = 0, crc = 0, len = 0, pre = 0, sok = 0, sfail = 0, to = 0;
   if (_fsk_link) {
     _fsk_link = false;
-    uint16_t lrx = 0, lcrc = 0, llen = 0;
-    if (getFlrcRxStats(&lrx, &lcrc, &llen) == RADIOLIB_ERR_NONE) {
-      _link_stats.packets += lrx; _link_stats.crc_err += lcrc; _link_stats.len_err += llen;
-    }
+    linkCollectStats();
     setRxTxFallbackMode(RADIOLIB_LR2021_FALLBACK_MODE_STBY_RC);   // RadioLib's setting
   } else if (_fsk_ook) {
     _fsk_ook = false;

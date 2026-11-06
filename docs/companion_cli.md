@@ -418,12 +418,14 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 #### Copy this radio to another
 **Usage:**
-- `clone receive [MHz]`: on the new radio. It shows a 6-digit code and waits 5 minutes.
-- `clone send <code> [MHz]`: on the radio to copy, next to it.
+- `clone receive [MHz] [gfsk]`: on the new radio. It shows a 6-digit code and waits 5 minutes.
+- `clone send <code> [MHz] [gfsk]`: on the radio to copy, next to it.
+- `gfsk` keeps two LR2021s in GFSK instead of moving to FLRC.
+- `get radio.link` (SX1262): the copy link's last events, oldest first: T sent, R heard, E failed its CRC (each with IRQ flags / frame type / length), and the chip's own packet counts.
 - `clone stop`, `clone`
 
 **Notes:**
-- Copies the key, contacts, channels, encryption policies and settings. The copy restarts as a backup of the radio it came from (see [Several radios with one key](clone_takeover.md#copy-a-radio)). LR2021 radios only.
+- Copies the key, contacts, channels, encryption policies and settings. The copy restarts as a backup of the radio it came from (see [Several radios with one key](clone_takeover.md#copy-a-radio)). LR2021 and SX1262 radios, in any mix: GFSK between them, FLRC between two LR2021s.
 
 ---
 

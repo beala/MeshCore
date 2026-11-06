@@ -1,9 +1,11 @@
 // Copying this radio to another one next to it (docs/clone_takeover.md): its key, contacts,
-// channels, encryption policies and settings, over a fast FLRC link away from the mesh
-// (src/helpers/CloneTransfer, CPace). The copy restarts as a backup of this radio (CloneCoordinator).
+// channels, encryption policies and settings, over a fast link away from the mesh
+// (src/helpers/CloneTransfer, CPace): GFSK, which the LR2021 and SX1262 share, moving to FLRC when
+// both radios are LR2021s. The copy restarts as a backup of this radio (CloneCoordinator).
 //
 //   on the new radio:   clone receive        -> shows a 6-digit code, waits 5 minutes
 //   on this radio:      clone send <code>
+//   either can add 'gfsk' to keep to GFSK (eg. to test it between two LR2021s)
 //
 // Both radios are off the mesh while it runs (a few seconds once they've found each other).
 
@@ -19,7 +21,10 @@
 #ifndef CLONE_MIN_RSSI
   #define CLONE_MIN_RSSI   clonelink::MIN_RSSI // dBm: closer than this (bench builds on dummy loads: lower)
 #endif
-#define CLONE_GAP_US       600                 // after each frame sent: time for the receiver to re-arm
+#define CLONE_GAP_US       600                 // after each frame sent: time for the receiver to re-arm (FLRC)
+#define CLONE_GAP_GFSK_US  2000                // ...in GFSK, where an SX1262 on an ESP32 re-arms slower
+#define CLONE_TURN_GFSK_US 10000               // GFSK: before answering a frame, time for its sender to
+                                               // get back to receive (an SX1262 on an ESP32 took > 4 ms)
 #define CLONE_MAX_FILE     (256UL * 1024)
 #define CLONE_COMMIT_MS    1500                // receiver: answer repeats of DONE this long, then commit
 
@@ -35,16 +40,32 @@ static uint8_t xfer_identity[96];    // the identity, sent or received (kept in 
 static int xfer_identity_len = 0;
 static bool xfer_absent[8];          // receiver: the sender has none of this file
 static uint32_t xfer_rx = 0, xfer_tx = 0, xfer_tx_fail = 0;   // frames, for 'clone' while it runs
+static uint8_t xfer_modes = 0xFF;    // the link modes this copy may use ('gfsk': GFSK only)
+static uint32_t xfer_rx_us = 0;      // when the last frame came in
+#ifdef CLONE_TEST_DROP_ACK
+static uint8_t xfer_test_acks = 0;
+#endif
+
+static_assert((int)clonelink::M_GFSK == (int)mesh::Radio::LINK_GFSK && (int)clonelink::M_FLRC == (int)mesh::Radio::LINK_FLRC,
+              "link mode numbers");
+
+static const char* modeName(uint8_t m) { return m == clonelink::M_FLRC ? "FLRC" : "GFSK"; }
 
 struct CloneIo : clonelink::Io {
   MyMesh* mesh;
   bool send(const uint8_t* f, int len) override {
+    if (xfer.mode() != clonelink::M_FLRC) {
+      while (micros() - xfer_rx_us < CLONE_TURN_GFSK_US) { }
+    }
     bool ok = mesh->_radio->linkSend(f, len);
     if (ok) xfer_tx++; else xfer_tx_fail++;
-    delayMicroseconds(CLONE_GAP_US);
+    delayMicroseconds(xfer.mode() == clonelink::M_FLRC ? CLONE_GAP_US : CLONE_GAP_GFSK_US);
     return ok;
   }
   void random(uint8_t* buf, int len) override { EntropyPool::generate(buf, len); }
+  uint8_t modes() override { return (mesh->_radio->linkModes() & xfer_modes) | (1 << clonelink::M_GFSK); }
+  bool setMode(uint8_t m) override { return mesh->_radio->linkSetMode(m); }
+  void stalled() override { mesh->_radio->linkStalled(); }
 };
 
 // where each file lives: the identity in RAM, prefs on the main filesystem, the rest with the contacts
@@ -164,10 +185,13 @@ bool MyMesh::handleCloneTransferCommand(const char* command, char* reply) {
   bool send = strncmp(command, "clone send", 10) == 0 && (command[10] == 0 || command[10] == ' ');
   if (_xfer_on && (strcmp(command, "clone") == 0 || strcmp(command, "get clone") == 0)) {
     static const char* st[] = { "idle", "waiting", "copying", "finishing", "done", "failed" };
-    snprintf(reply, 160, "Copy %s (%s, code %s, %.1f MHz): %lu bytes, %lu resent, frames in %lu, out %lu, bad %lu, weakest %.0f, peer %.0f dBm",
-             st[xfer.state()], _xfer_sender ? "sending" : "receiving", xfer_code, _xfer_freq,
+    uint32_t ok = 0, bad = 0, restarts = 0;
+    _radio->linkStats(&ok, &bad, &restarts);
+    // reply holds 160 (MyMesh's reply_buf is 166)
+    snprintf(reply, 160, "Copy %s (%s, code %s, %.1f MHz %s): %lu bytes, %lu resent, frames %lu/%lu, failed %lu, CRC %lu, restarts %lu, weakest %.0f, peer %.0f dBm",
+             st[xfer.state()], _xfer_sender ? "sending" : "receiving", xfer_code, _xfer_freq, modeName(xfer.mode()),
              (unsigned long)xfer.done(), (unsigned long)xfer.resent(), (unsigned long)xfer_rx, (unsigned long)xfer_tx,
-             (unsigned long)xfer_tx_fail, xfer.weakest(), xfer.peerRssi());
+             (unsigned long)xfer_tx_fail, (unsigned long)bad, (unsigned long)restarts, xfer.weakest(), xfer.peerRssi());
     return true;
   }
   if (strcmp(command, "clone stop") == 0) {
@@ -180,6 +204,7 @@ bool MyMesh::handleCloneTransferCommand(const char* command, char* reply) {
   if (!recv && !send) return false;
   if (_xfer_on) { strcpy(reply, "A copy is already running ('clone stop' ends it)."); return true; }
   if (_radar_active) { strcpy(reply, "Error: the radar listen is running ('radar stop')."); return true; }
+  if (_radio->linkModes() == 0) { strcpy(reply, "Error: this radio can't copy (it needs an LR2021 or SX1262)"); return true; }
   // the CPace scalars and the code come from the DRBG; nothing is collected at boot when the key is
   // just loaded, so add the hardware RNG now (as 'get entropy' does)
   if (EntropyPool::hardwareStatus() == 0) EntropyPool::addHardware();
@@ -194,12 +219,14 @@ bool MyMesh::handleCloneTransferCommand(const char* command, char* reply) {
     while (args[i] >= '0' && args[i] <= '9' && i < 15) { code[i] = args[i]; i++; }
     code[i] = 0;
     if (i != clonelink::CODE_LEN || (args[i] != 0 && args[i] != ' ')) {
-      strcpy(reply, "Usage: clone send <the 6-digit code shown by 'clone receive' on the other radio> [MHz]");
+      strcpy(reply, "Usage: clone send <the 6-digit code shown by 'clone receive' on the other radio> [MHz] [gfsk]");
       return true;
     }
     args += i;
     while (*args == ' ') args++;
   }
+  xfer_modes = 0xFF;
+  if (strstr(args, "gfsk")) xfer_modes = 1 << clonelink::M_GFSK;
   if (*args) mhz = (float)atof(args);
   if (mhz == 0) mhz = linkFreq(_prefs.freq);
   if (mhz < 150.0f || mhz > 960.0f) { strcpy(reply, "Error: frequency out of range"); return true; }
@@ -236,11 +263,14 @@ bool MyMesh::handleCloneTransferCommand(const char* command, char* reply) {
   pauseListens();   // the link has the radio to itself: no Meshtastic scanner, no other listens
   if (!_radio->linkStart(mhz, CLONE_TX_DBM)) {
     resumeListens();
-    strcpy(reply, "Error: this radio can't copy (needs an LR2021)");
+    strcpy(reply, "Error: couldn't start the radio link");
     return true;
   }
   _xfer_on = true;
   xfer_rx = xfer_tx = xfer_tx_fail = 0;
+#ifdef CLONE_TEST_DROP_ACK
+  xfer_test_acks = 0;
+#endif
   _xfer_sender = send;
   _xfer_freq = mhz;
   _xfer_ok_at = 0;
@@ -261,17 +291,28 @@ bool MyMesh::handleCloneTransferCommand(const char* command, char* reply) {
 void MyMesh::cloneLoop() {
   uint8_t buf[256];
   float rssi = 0;
-  // while frames keep coming (a burst), stay here: the radio receives one at a time
-  uint32_t last = millis();
-  for (int i = 0; i < 64; i++) {
+  // while frames keep coming (a burst), stay here: the radio holds one at a time. The receiver waits
+  // out the gaps between a burst's frames (~1 ms apart in FLRC, ~9-15 ms in GFSK) by time, not by count:
+  // a fast loop's polls would give up long before the next frame. At most 1 s, for the rest of the loop.
+  uint32_t start = millis(), last = start;
+  for (;;) {
     int n = _radio->linkRecv(buf, sizeof(buf), &rssi);
     if (n > 0) {
       xfer_rx++;
+      xfer_rx_us = micros();
+#ifdef CLONE_TEST_DROP_ACK
+      // test builds: the sender acts as if its 2nd ACK was lost on air, once
+      if (_xfer_sender && buf[2] == clonelink::T_ACK && ++xfer_test_acks == 2) continue;
+#endif
       xfer.onFrame(buf, n, rssi, millis());
       last = millis();
+      if (millis() - start >= 1000) break;
       continue;
     }
-    if (_xfer_sender || xfer.state() != clonelink::TRANSFER || millis() - last >= 6) break;
+    if (_xfer_sender || xfer.state() != clonelink::TRANSFER) break;
+    // the gap between frames; and right after our ACK, the time until the next burst starts
+    uint32_t gap = xfer.mode() == clonelink::M_FLRC ? 6 : 60;
+    if (millis() - last >= gap || millis() - start >= 1000) break;
   }
   xfer.tick(millis());
 
@@ -293,9 +334,9 @@ void MyMesh::cloneFinish() {
   uint32_t kb = (xfer.total() + 1023) / 1024;
   uint32_t ms = xfer.finishedAt() - xfer.startedAt();
   if (xfer.state() == clonelink::DONE_OK && _xfer_sender) {
-    snprintf(msg, sizeof(msg), "Copied to the other radio: %lu KB in %lu.%lu s (%lu chunks resent). It restarts as a "
+    snprintf(msg, sizeof(msg), "Copied to the other radio: %lu KB in %lu.%lu s over %s (%lu chunks resent). It restarts as a "
              "backup of this one, which is now the main radio.", (unsigned long)kb, (unsigned long)(ms / 1000),
-             (unsigned long)(ms % 1000 / 100), (unsigned long)xfer.resent());
+             (unsigned long)(ms % 1000 / 100), modeName(xfer.dataMode()), (unsigned long)xfer.resent());
     consoleNote(msg);
     sendClaim();   // in case another radio with this key is about: this one is main
   } else if (xfer.state() == clonelink::DONE_OK) {

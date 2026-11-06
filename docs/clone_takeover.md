@@ -21,16 +21,16 @@ channels, encryption policies and settings, and restarts as a backup of the radi
    Everything on the new radio is replaced by the copy.
 3. Connect the app to the radio you're copying and send `clone send 482913`.
 
-A few seconds later the console says "Copied to the other radio: 17 KB in 1.5 s". The new radio
-restarts with your key, as a backup. The radio you copied from becomes the main radio.
+A few seconds later the console says "Copied to the other radio: 17 KB in 1.5 s over FLRC". The new
+radio restarts with your key, as a backup. The radio you copied from becomes the main radio.
 
 The new radio keeps its own transmit power, receiver gain, BLE PIN and GPS settings. Routes to
 contacts come along, so if the two radios are in different places the copy learns its own as
 messages fail.
 
 Both radios leave the mesh while the copy runs, and Meshtastic, weather or aircraft, whichever is
-on, pauses until it's over. `clone stop` ends it early, and `clone` shows progress. Both radios need
-an LR2021.
+on, pauses until it's over. `clone stop` ends it early, and `clone` shows progress. Each radio needs
+an LR2021 or an SX1262, in any mix: an LR2021 can be copied to an SX1262 and the other way round.
 
 ### How the copy is protected
 
@@ -52,10 +52,24 @@ an LR2021.
 
 ### Link
 
-The copy uses the LR2021's FLRC mode: 1.3 Mbps with 3/4 error correction, 32-bit CRC, on 920 MHz in
-the US band (clear of the mesh, Meshtastic, weather sensors and LoRaWAN), or on the mesh's own
-frequency elsewhere. Give a frequency to both commands to use another. Data goes in chunks of 200
-bytes, 32 at a time. The new radio checks off what it has after each 32, and missing chunks are sent
+The copy runs on 920 MHz in the US band (clear of the mesh, Meshtastic, weather sensors and LoRaWAN),
+or on the mesh's own frequency elsewhere. Give a frequency to both commands to use another.
+
+The radios start in GFSK, which both chips have: 250 kbps, 62.5 kHz deviation, a 16-bit CRC, framed
+the same way on both. Each radio's opening message says which faster modes it has, and once the code
+has checked out both move to the fastest one they share:
+
+| Radios | Data goes over |
+|---|---|
+| LR2021 and LR2021 | FLRC: 1.3 Mbps with 3/4 error correction, 32-bit CRC |
+| LR2021 and SX1262, either way | GFSK |
+| SX1262 and SX1262 | GFSK |
+
+The list of modes is part of the key exchange, so nobody in between can change it to slow a copy
+down. Add `gfsk` to both commands (`clone receive gfsk`, `clone send 482913 gfsk`) to keep two LR2021s
+in GFSK.
+
+Data goes in chunks of 200 bytes, 32 at a time. The new radio checks off what it has after each 32, and missing chunks are sent
 again. It keeps the copy in temporary files and only replaces its own once the whole copy has
 checked out, so a copy that fails leaves the new radio as it was.
 
@@ -106,8 +120,8 @@ again when it hears that radio reply.
 | `yes` | Accept the takeover the console just offered |
 | `clone` | Role, messages a backup left unanswered since it became one, and when another radio was last heard |
 | `clone off` | Answer as normal again |
-| `clone receive [MHz]` | Wait 5 minutes to become a copy of another radio; shows the code |
-| `clone send <code> [MHz]` | Copy this radio to the one showing the code |
+| `clone receive [MHz] [gfsk]` | Wait 5 minutes to become a copy of another radio; shows the code |
+| `clone send <code> [MHz] [gfsk]` | Copy this radio to the one showing the code |
 | `clone stop` | End a copy that's running |
 
 ## Limits
@@ -155,6 +169,15 @@ loads leave only -74 dBm between them).
 | Wrong code | both said "Copy failed: wrong code"; the XIAO unchanged |
 | `clone stop` while waiting | "Copy failed: stopped. This radio is unchanged." |
 | Opening messages at -90 dBm with the normal limit | ignored: no copy |
+
+Mixed radios: the AB Labs XIAO (LR2021) and a Heltec V4 (SX1262), on dummy loads with the same bench
+build, plus the NiceRF for LR2021 pairs.
+
+| Test | Result |
+|---|---|
+| XIAO to Heltec and Heltec to XIAO, 50 copies of 35 KB, alternating | all arrived; 6.6-7.6 s each over GFSK |
+| The same, 30 copies, with the sender ignoring one ACK per copy (test build) | all arrived |
+| NiceRF to XIAO | 40 KB in 3.1-3.3 s over FLRC; with `gfsk`, 4.3 s; nothing resent |
 
 On the PC (`pio test -e native_clone`): CPace and X25519 against the draft's and RFC 7748's test
 vectors, and copies over a simulated link that loses, repeats, corrupts or cuts frames. The fuzzer

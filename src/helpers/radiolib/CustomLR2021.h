@@ -46,9 +46,14 @@ private:
   int16_t loadScanBlob();
 
   bool _fsk_active = false;     // in GFSK for an FSK listen; LoRa comes back with fskStop()
-  bool _fsk_link = false;       // ...or in FLRC for a link (linkStart)
+  bool _fsk_link = false;       // ...or in GFSK / FLRC for a link (linkStart)
+  uint8_t _link_mode = 0;       // mesh::Radio::LINK_GFSK / LINK_FLRC
+  float _link_mhz = 0;
+  uint32_t _link_check_at = 0, _link_rearms = 0;
+  int16_t linkConfig(uint8_t mode);
   int16_t linkPacketParams(uint8_t len);
   int16_t linkRx();
+  void linkCollectStats();
   bool _fsk_ook = false;        // the listen is the OOK ADS-B receiver (adsbStart), not GFSK
   float _ook_noise = 0;         // noise level measured at the last ADS-B listen start, dBm
   // Front-end calibration covering an FSK listen frequency. The chip keeps calibrations for up to 3
@@ -57,7 +62,7 @@ private:
   int16_t calibrateFor(float fskMHz);
   struct { uint32_t packets, len_err, preambles, sync_ok, sync_fail; } _fsk_stats_raw = {};
   struct { uint32_t packets, crc_err, len_err; } _ook_stats_raw = {};
-  struct { uint32_t packets, crc_err, len_err; } _link_stats = {};   // FLRC link, all time
+  struct { uint32_t packets, crc_err, len_err; } _link_stats = {};   // the link, all time
   int16_t fskStopInternal();
   int16_t ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits, uint8_t pktLen,
                    uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm);
@@ -359,10 +364,16 @@ private:
     int16_t fskRead(uint8_t* buf, uint8_t len, float* rssi);
     // Back to LoRa with MeshCore's settings, in standby. The caller starts receive again.
     int16_t fskStop() { return _fsk_active ? fskStopInternal() : RADIOLIB_ERR_NONE; }
-    // FLRC point-to-point link (copying a radio): 1.3 Mbps, coding rate 3/4 (975 kbps of data),
-    // Gaussian BT 0.5, 32-bit sync word and CRC, variable length 6..255 bytes (datasheet 18).
-    // Receives until linkSend(), which transmits and receives again. fskStop() ends it.
+    // Point-to-point link (copying a radio). It starts in GFSK, framed as on the SX126x so either
+    // chip hears the other: 250 kbps, 62.5 kHz deviation, Gaussian BT 0.5, 64-bit preamble, the
+    // 32-bit sync word "MCCL", an 8-bit length, CRC-16 (CCITT, init 0x1D0F, inverted) and SX126x
+    // whitening (datasheet 11.3). linkSetMode(LINK_FLRC) moves it to FLRC: 1.3 Mbps, coding rate 3/4
+    // (975 kbps of data), Gaussian BT 0.5, 32-bit sync word and CRC, variable length 6..255 bytes
+    // (datasheet 18). Receives until linkSend(), which transmits and receives again. fskStop() ends it.
     int16_t linkStart(float fMHz, int8_t dbm);
+    int16_t linkSetMode(uint8_t mode);
+    uint8_t linkMode() const { return _link_mode; }
+    uint32_t linkRearms() const { return _link_rearms; }
     int16_t linkSend(const uint8_t* buf, uint8_t len, uint32_t timeoutMs);
     // > 0: a packet's length; 0: none yet; < 0: one failed its CRC
     int linkRead(uint8_t* buf, uint8_t max, float* rssi);

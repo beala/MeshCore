@@ -8,17 +8,26 @@ namespace clonelink {
 
 static const uint32_t HELLO_EVERY_MS = 200;
 static const uint32_t SEND_WAIT_MS = 20000;   // sender: how long to look for the receiver
-static const uint32_t RETRY_MS = 400;         // POLL / DONE without an answer
+static const uint32_t RETRY_MS = 400;         // POLL / DONE without an answer (FLRC)
+static const uint32_t RETRY_GFSK_MS = 1000;   // ...in GFSK: an ESP32 receiver takes ~0.7 s to store a window
 static const uint8_t MAX_TRIES = 10;
 static const uint32_t SILENCE_MS = 10000;     // receiver: nothing heard mid-transfer
+static const uint32_t STALL_MS = 2000;        // receiver: Io::stalled() after each 2 s of silence (missed retries)
 static const uint32_t DONE_SEQ = 0xFFFFFFFFUL;
 
-// CPace inputs: channel identifier and associated data (the protocol version, and who is who)
+// CPace inputs: channel identifier and associated data (the protocol version, who is who, and the
+// link modes that end has: setAds)
 static const uint8_t CI[] = { 'M', 'e', 's', 'h', 'C', 'o', 'r', 'e', ' ', 'c', 'l', 'o', 'n', 'e' };
-static const uint8_t AD_A[] = { 'v', '1', ' ', 's', 'e', 'n', 'd', 'e', 'r' };
-static const uint8_t AD_B[] = { 'v', '1', ' ', 'r', 'e', 'c', 'e', 'i', 'v', 'e', 'r' };
+static const char AD_A[] = "v2 sender";
+static const char AD_B[] = "v2 receiver";
 static const uint8_t HKDF_INFO[] = { 'M', 'e', 's', 'h', 'C', 'o', 'r', 'e', ' ', 'c', 'l', 'o', 'n', 'e', ' ',
-                                     'v', '1', ' ', 'd', 'a', 't', 'a' };
+                                     'v', '2', ' ', 'd', 'a', 't', 'a' };
+static_assert(sizeof(AD_A) == 10 && sizeof(AD_B) == 12, "ADa / ADb sizes");
+
+// the fastest mode both ends have
+static uint8_t pickMode(uint8_t a, uint8_t b) {
+  return (a & b & (1 << M_FLRC)) ? M_FLRC : M_GFSK;
+}
 
 const char* failText(Fail f) {
   switch (f) {
@@ -51,11 +60,33 @@ void Session::reset() {
   wipe();
   _t_start = _t_deadline = _t_last_tx = _t_last_rx = _t_link = _t_done = 0;
   _weak_rssi = 0; _peer_rssi = 0; _min_rssi = MIN_RSSI;
+  _modes_a = _modes_b = 1 << M_GFSK;
+  _data_mode = _cur_mode = M_GFSK;
+  setAds();
   _total = 0; _chunks = 0; _base = 0; _acked = 0; _sent = 0; _need_burst = false; _tries = 0; _resent = 0;
   _got_ack = false;
+  _restamp = false;
+  _t_stall = 0;
   _rbase = 0; _written = 0; _have = 0;
   memset(_slot_len, 0, sizeof(_slot_len));
   _done_ack = 0xFF;
+}
+
+void Session::setAds() {
+  memcpy(_ad_a, AD_A, sizeof(AD_A) - 1);
+  _ad_a[sizeof(AD_A) - 1] = _modes_a;
+  memcpy(_ad_b, AD_B, sizeof(AD_B) - 1);
+  _ad_b[sizeof(AD_B) - 1] = _modes_b;
+}
+
+uint32_t Session::retryMs() const { return _data_mode == M_FLRC ? RETRY_MS : RETRY_GFSK_MS; }
+
+// puts the radio in mode m, if it isn't already
+bool Session::useMode(uint8_t m) {
+  if (m == _cur_mode) return true;
+  if (!_io->setMode(m)) return false;
+  _cur_mode = m;
+  return true;
 }
 
 void Session::wipe() {
@@ -80,6 +111,8 @@ void Session::startSend(Io* io, Source* src, const char* code, uint32_t now) {
   _io = io; _src = src; _sender = true;
   strncpy(_code, code ? code : "", CODE_LEN);
   if (io) {
+    _modes_a = (io->modes() & MODES_KNOWN) | (1 << M_GFSK);
+    setAds();
     io->random(_sid_full, SID_LEN);
     _sid = getU32(_sid_full);
     makeShare(io, _code, _sid_full, _y, _Ya);
@@ -97,6 +130,7 @@ void Session::startReceive(Io* io, Sink* sink, const char* code, uint32_t now, u
   reset();
   _io = io; _sink = sink; _sender = false;
   strncpy(_code, code ? code : "", CODE_LEN);
+  if (io) _modes_b = (io->modes() & MODES_KNOWN) | (1 << M_GFSK);
   _t_start = now;
   _t_deadline = now + wait_ms;
   _hash.reset();
@@ -132,7 +166,7 @@ bool Session::sendFrame(const uint8_t* f, int len) {
 // CPace's ISK from our scalar and the peer's share; then the data key (HKDF-SHA256, salt = sid).
 // false: the peer's share is a low-order point (CPace: abort).
 bool Session::deriveKeys(const uint8_t* peer_Y) {
-  if (!cpace::isk(_isk, _y, peer_Y, _sid_full, SID_LEN, _Ya, AD_A, sizeof(AD_A), _Yb, AD_B, sizeof(AD_B))) return false;
+  if (!cpace::isk(_isk, _y, peer_Y, _sid_full, SID_LEN, _Ya, _ad_a, sizeof(_ad_a), _Yb, _ad_b, sizeof(_ad_b))) return false;
   hkdf<SHA256>(_key, sizeof(_key), _isk, sizeof(_isk), _sid_full, SID_LEN, HKDF_INFO, sizeof(HKDF_INFO));
   memset(_y, 0, sizeof(_y));
   return true;
@@ -141,8 +175,8 @@ bool Session::deriveKeys(const uint8_t* peer_Y) {
 // CPace key confirmation (draft section 10.4): Ta for the sender's side, Tb for the receiver's
 void Session::tag(uint8_t* out, bool sender_side) const {
   uint8_t full[64];
-  if (sender_side) cpace::confirmTag(full, _isk, _sid_full, SID_LEN, _Ya, AD_A, sizeof(AD_A));
-  else cpace::confirmTag(full, _isk, _sid_full, SID_LEN, _Yb, AD_B, sizeof(AD_B));
+  if (sender_side) cpace::confirmTag(full, _isk, _sid_full, SID_LEN, _Ya, _ad_a, sizeof(_ad_a));
+  else cpace::confirmTag(full, _isk, _sid_full, SID_LEN, _Yb, _ad_b, sizeof(_ad_b));
   memcpy(out, full, CONFIRM_LEN);
 }
 
@@ -180,10 +214,11 @@ bool Session::open(const uint8_t* f, int hdr_len, uint32_t seq, int ct_len, uint
 // ---- sender ----
 
 void Session::sendHello() {
-  uint8_t f[HDR_LEN + SID_LEN + POINT_LEN];
+  uint8_t f[HDR_LEN + SID_LEN + POINT_LEN + 1];
   header(f, T_HELLO);
   memcpy(&f[HDR_LEN], _sid_full, SID_LEN);
   memcpy(&f[HDR_LEN + SID_LEN], _Ya, POINT_LEN);
+  f[HDR_LEN + SID_LEN + POINT_LEN] = _modes_a;
   sendFrame(f, sizeof(f));
 }
 
@@ -207,11 +242,18 @@ bool Session::sendData(uint16_t seq) {
   return true;
 }
 
+// In GFSK, until the first ACK, POLL carries CONFIRM's tag too: a retry is then one frame, not
+// CONFIRM and POLL a few ms apart, of which a receiver slow to re-arm heard only the first.
 void Session::sendPoll() {
-  uint8_t f[HDR_LEN + 2];
+  uint8_t f[HDR_LEN + 2 + CONFIRM_LEN];
   header(f, T_POLL);
   putU16(&f[HDR_LEN], _base);
-  sendFrame(f, sizeof(f));
+  int len = HDR_LEN + 2;
+  if (!_got_ack && _data_mode == M_GFSK) {
+    tag(&f[len], true);
+    len += CONFIRM_LEN;
+  }
+  sendFrame(f, len);
 }
 
 void Session::sendDone() {
@@ -240,12 +282,15 @@ void Session::onSender(const uint8_t* f, int len, float rssi, uint32_t now) {
       failWith(f[HDR_LEN] == F_NONE ? F_ABORTED : (Fail)f[HDR_LEN], false);
       return;
     }
-    if (type != T_HELLO_ACK || len != HDR_LEN + POINT_LEN + CONFIRM_LEN) return;
+    if (type != T_HELLO_ACK || len != HDR_LEN + POINT_LEN + CONFIRM_LEN + 1) return;
     if (rssi < _min_rssi) {
       if (_weak_rssi == 0 || rssi > _weak_rssi) _weak_rssi = rssi;
       return;
     }
     memcpy(_Yb, &f[HDR_LEN], POINT_LEN);
+    _modes_b = f[HDR_LEN + POINT_LEN + CONFIRM_LEN];   // checked by the tag (it's in ADb)
+    setAds();
+    _data_mode = pickMode(_modes_a, _modes_b);
     uint8_t want[CONFIRM_LEN];
     if (!deriveKeys(_Yb)) { failWith(F_WRONG_CODE, true); return; }
     tag(want, false);
@@ -279,6 +324,7 @@ void Session::onSender(const uint8_t* f, int len, float rssi, uint32_t now) {
       _state = FINISHING;
       _tries = 1;
       _t_last_tx = now;
+      _restamp = true;
       sendDone();
     } else {
       _need_burst = true;
@@ -298,10 +344,11 @@ void Session::onSender(const uint8_t* f, int len, float rssi, uint32_t now) {
 // ---- receiver ----
 
 void Session::sendHelloAck() {
-  uint8_t f[HDR_LEN + POINT_LEN + CONFIRM_LEN];
+  uint8_t f[HDR_LEN + POINT_LEN + CONFIRM_LEN + 1];
   header(f, T_HELLO_ACK);
   memcpy(&f[HDR_LEN], _Yb, POINT_LEN);
   tag(&f[HDR_LEN + POINT_LEN], false);
+  f[HDR_LEN + POINT_LEN + CONFIRM_LEN] = _modes_b;
   sendFrame(f, sizeof(f));
 }
 
@@ -337,7 +384,7 @@ void Session::onReceiver(const uint8_t* f, int len, float rssi, uint32_t now) {
   uint8_t type = f[2];
   uint32_t sid = getU32(&f[3]);
   if (_state == WAITING) {
-    if (type != T_HELLO || len != HDR_LEN + SID_LEN + POINT_LEN) return;
+    if (type != T_HELLO || len != HDR_LEN + SID_LEN + POINT_LEN + 1) return;
     if (getU32(&f[HDR_LEN]) != sid) return;
     if (rssi < _min_rssi) {
       if (_weak_rssi == 0 || rssi > _weak_rssi) _weak_rssi = rssi;
@@ -347,6 +394,9 @@ void Session::onReceiver(const uint8_t* f, int len, float rssi, uint32_t now) {
     memcpy(_sid_full, &f[HDR_LEN], SID_LEN);
     _sid = sid;
     memcpy(_Ya, &f[HDR_LEN + SID_LEN], POINT_LEN);
+    _modes_a = f[HDR_LEN + SID_LEN + POINT_LEN];   // checked by the sender's tag (it's in ADa)
+    setAds();
+    _data_mode = pickMode(_modes_a, _modes_b);
     makeShare(_io, _code, _sid_full, _y, _Yb);
     if (!deriveKeys(_Ya)) { failWith(F_WRONG_CODE, true); return; }
     _peer_rssi = rssi;
@@ -366,14 +416,17 @@ void Session::onReceiver(const uint8_t* f, int len, float rssi, uint32_t now) {
     if (!_confirmed) sendHelloAck();
     return;
   }
-  if (_state == TRANSFER && type == T_CONFIRM && len == HDR_LEN + CONFIRM_LEN) {
-    if (_confirmed) return;
+  const uint8_t* ta = NULL;   // CONFIRM's tag: in CONFIRM, or in a POLL that carries it
+  if (type == T_CONFIRM && len == HDR_LEN + CONFIRM_LEN) ta = &f[HDR_LEN];
+  if (type == T_POLL && len == HDR_LEN + 2 + CONFIRM_LEN) ta = &f[HDR_LEN + 2];
+  if (_state == TRANSFER && ta && !_confirmed) {
     uint8_t want[CONFIRM_LEN];
     tag(want, true);
-    if (!cpace::equal(want, &f[HDR_LEN], CONFIRM_LEN)) { failWith(F_WRONG_CODE, true); return; }
+    if (!cpace::equal(want, ta, CONFIRM_LEN)) { failWith(F_WRONG_CODE, true); return; }
     _confirmed = true;
-    return;
+    if (!useMode(_data_mode)) { failWith(F_LOST, false); return; }   // the data comes in that mode
   }
+  if (type == T_CONFIRM) return;
   if (_state == TRANSFER && !_confirmed) return;   // nothing counts before the sender proved the code
   if (_state == TRANSFER && type == T_DATA && len > HDR_LEN + 2 + TAG_LEN && len <= MAX_FRAME) {
     uint16_t seq = getU16(&f[HDR_LEN]);
@@ -387,7 +440,7 @@ void Session::onReceiver(const uint8_t* f, int len, float rssi, uint32_t now) {
     _have |= 1UL << i;
     return;
   }
-  if (_state == TRANSFER && type == T_POLL && len == HDR_LEN + 2) {
+  if (_state == TRANSFER && type == T_POLL && (len == HDR_LEN + 2 || len == HDR_LEN + 2 + CONFIRM_LEN)) {
     if (!flush()) { failWith(F_WRITE, true); return; }
     sendAck();
     return;
@@ -435,13 +488,24 @@ void Session::tick(uint32_t now) {
     return;
   }
   if (!_sender) {
-    if (_state == TRANSFER && now - _t_last_rx >= SILENCE_MS) failWith(F_LOST, false);
+    if (_state == TRANSFER && now - _t_last_rx >= SILENCE_MS) { failWith(F_LOST, false); return; }
+    if (_state == TRANSFER && now - _t_last_rx >= STALL_MS && now - _t_stall >= STALL_MS) {
+      _t_stall = now;
+      _io->stalled();
+    }
     return;
   }
+  // a burst (or DONE, which hashes the files first) can take longer than RETRY_MS in GFSK: wait from
+  // when it ended, not from the 'now' it started with
+  if (_restamp) { _restamp = false; _t_last_tx = now; }
   if (_state == TRANSFER) {
     if (_need_burst) {
       _need_burst = false;
-      if (!_got_ack) sendConfirm();
+      if (!_got_ack) {   // CONFIRM in GFSK, where the receiver still is if it missed the last one
+        if (!useMode(M_GFSK)) { failWith(F_LOST, false); return; }
+        sendConfirm();
+      }
+      if (!useMode(_data_mode)) { failWith(F_LOST, false); return; }
       for (int i = 0; i < WINDOW && _base + i < _chunks; i++) {
         uint32_t bit = 1UL << i;
         if (_acked & bit) continue;
@@ -452,19 +516,29 @@ void Session::tick(uint32_t now) {
       sendPoll();
       _tries = 1;
       _t_last_tx = now;
-    } else if (now - _t_last_tx >= RETRY_MS) {
+      _restamp = true;
+    } else if (now - _t_last_tx >= retryMs()) {
       if (_tries >= MAX_TRIES) { failWith(F_LOST, false); return; }
       _tries++;
       _t_last_tx = now;
-      if (!_got_ack) sendConfirm();   // it may have been the CONFIRM that was lost
+      _io->stalled();
+      // it may have been the CONFIRM that was lost: in FLRC send it again (in GFSK) first; in GFSK
+      // the POLL carries its tag until the first ACK
+      if (!_got_ack && _data_mode != M_GFSK) {
+        if (!useMode(M_GFSK)) { failWith(F_LOST, false); return; }
+        sendConfirm();
+      }
+      if (!useMode(_data_mode)) { failWith(F_LOST, false); return; }
       sendPoll();
     }
     return;
   }
-  if (_state == FINISHING && now - _t_last_tx >= RETRY_MS) {
+  if (_state == FINISHING && now - _t_last_tx >= retryMs()) {
     if (_tries >= MAX_TRIES) { failWith(F_LOST, false); return; }
     _tries++;
     _t_last_tx = now;
+    _restamp = true;
+    _io->stalled();
     sendDone();
   }
 }
