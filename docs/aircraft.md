@@ -46,12 +46,32 @@ Nearby: N713SA 5,300 ft 2.1 mi N; N25430 6,100 ft 4.0 mi NE (+12 higher or farth
 | `set air.duty <percent>` | share of the time spent listening when not scanning all the time (default 10) |
 | `air`, `get air` | the settings |
 | `get air.planes` | aircraft heard in the last 5 minutes |
+| `get air.list [start]` | the same for apps, as numbers, a page at a time (below) |
 | `get air.stats` | messages (and how many on 1090; UAT ones corrected by Reed-Solomon, and beyond repair), aircraft, posts, time listening |
 | `get radio.fsk`, `get radio.fsk.rx`, `get radio.ook.rx` | the radio's listens, and its receiver counters (UAT, 1090) |
 | `air adsb <dB> <gain> <bw Hz>` | 1090 receiver experiments: threshold over the noise, fixed gain step, bandwidth (0 = default; not saved) |
 
 Settings saved before these defaults existed keep their values: a radio that had `air.range 0`
 still shows any distance until `set air.range 10`.
+
+### On a map
+
+The [fluxcore app](https://fluxcore.party/app/) connects to the radio over Bluetooth (Chrome or Edge
+on a computer or Android, Bluefy on iPhone and iPad) and shows every aircraft the radio holds on a
+map, with its trail, every 2 seconds. It reads them with `get air.list`:
+
+```
+get air.list        > 3 0 a1b2c3,N123AB,4012345,-10512345,5800,79,299,-500,6,-92,1;a6ae97,,,,5475,,,,24,-84,2
+get air.list 2      > 3 2 acbc30,,,,,,,,8,-84,2
+```
+
+The reply is the number of aircraft, the index of the first one in this reply, then one record per
+aircraft, as many as fit: ICAO address (hex), callsign, latitude and longitude (degrees × 100000),
+altitude in feet (`G` on the ground), speed in knots, track in degrees, vertical speed in feet per
+minute, seconds since last heard, RSSI, and flags (1 heard on 978 MHz, 2 on 1090 MHz, 4 relayed by
+radar, TIS-B). An empty field isn't known yet. Ask again from the next index until it reaches the
+count. Test builds with `-DAIR_TEST` add `air test <n>` (and `air test off`): n made-up aircraft
+circling the radio, for trying apps out with nothing on the air.
 
 ## How it works
 

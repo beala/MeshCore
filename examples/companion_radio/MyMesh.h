@@ -465,6 +465,11 @@ private:
   uint32_t _air_heard_1090 = 0;
   uint16_t _air_band = 978;          // the band of the current (or last) listen
   uint32_t _air_digest_at = 0, _air_digest_from = 0;
+#ifdef AIR_TEST
+  int _air_test_n = 0;               // 'air test': made-up aircraft (test builds)
+  uint32_t _air_test_at = 0;
+  void aircraftTestTick(uint32_t now);
+#endif
   bool adsbPosition(Plane& p, const adsb::Message& m, uint32_t now, uat::Report* r);
   bool aircraftWanted(const Plane& p, uint32_t* dist) const;
   // radar sweep detector (MyMeshRadar.cpp): its own listen while it runs

@@ -12,6 +12,7 @@
 #define AIR_WINDOW_MS   300      // one listen, when sharing the radio with the mesh
 #define AIR_FOREVER_MS  5000     // one listen when listening all the time
 #define AIR_REPLY_MAX   140
+#define AIR_LIST_MAX    158      // 'get air.list' (reply_buf is 166)
 #define AIR_GONE_MS     (5 * 60000UL)   // an aircraft not heard for this long is dropped
 
 // 'air dbg' overrides for receiver experiments (not saved): sync bits, preamble detect, rx bw, deviation, kbps
@@ -230,9 +231,58 @@ void MyMesh::postAircraftDigest(uint32_t now) {
   _air_shown++;
 }
 
+#ifdef AIR_TEST
+// 'air test': made-up aircraft on circles around this radio, moved once a second
+void MyMesh::aircraftTestTick(uint32_t now) {
+  if (_air_test_n == 0 || (_air_test_at && now - _air_test_at < 1000)) return;
+  _air_test_at = now;
+  bool here = _prefs.node_lat != 0 || _prefs.node_lon != 0;
+  float lat0 = here ? _prefs.node_lat : 39.8561f, lon0 = here ? _prefs.node_lon : -104.6737f;
+  for (int k = 0; k < _air_test_n; k++) {
+    uint32_t addr = 0xF0F000 + k;
+    Plane* p = NULL;
+    for (int i = 0; i < _n_planes; i++) if (_planes[i].address == addr) { p = &_planes[i]; break; }
+    if (!p) {
+      if (_n_planes >= MAX_PLANES) return;
+      p = &_planes[_n_planes++];
+      memset(p, 0, sizeof(*p));
+      p->address = addr;
+      p->first_at = now;
+      if (k % 3 != 2) sprintf(p->callsign, "TEST%02d", k);   // some without a callsign
+    }
+    float r_mi = 2.0f + 3.0f * k;                       // circle radius
+    float kt = 90.0f + 40.0f * k;                       // speed
+    float period_s = 2 * (float) M_PI * r_mi / (kt * 1.15f / 3600);   // one turn
+    int dir = k % 2 ? -1 : 1;
+    float a = dir * 2 * (float) M_PI * (now / 1000.0f) / period_s + k;
+    uat::Report& r = p->last;
+    r.address = addr;
+    r.qualifier = k == 4 ? 2 : 0;
+    r.has_pos = true;
+    r.lat_e5 = (int32_t)((lat0 + r_mi / 69.0f * cosf(a)) * 1e5f);
+    r.lon_e5 = (int32_t)((lon0 + r_mi / (69.0f * cosf(lat0 * (float) M_PI / 180)) * sinf(a)) * 1e5f);
+    r.ag_state = k == 5 ? 2 : 0;
+    r.has_alt = true;
+    r.alt_ft = 1500 + 1700 * k;
+    r.has_speed = true;
+    r.speed_kt = (uint16_t) kt;
+    r.track_deg = (uint16_t)(((int)(a * 180 / (float) M_PI) + (dir > 0 ? 90 : -90) + 3600) % 360);
+    r.has_vs = true;
+    r.vs_fpm = k % 3 == 0 ? 800 : k % 3 == 1 ? -600 : 0;
+    p->bands = k % 2 ? 2 : 1;
+    p->rssi = -70 - 4 * k;
+    p->heard_at = now;
+    p->count++;
+  }
+}
+#endif
+
 void MyMesh::aircraftLoop() {
   if (!_air_active) return;
   uint32_t now = millis();
+#ifdef AIR_TEST
+  aircraftTestTick(now);
+#endif
 
   uint8_t buf[uat::LONG_BYTES];
   float rssi = 0;
@@ -379,6 +429,52 @@ bool MyMesh::handleAircraftCommand(const char* command, char* reply) {
     strcpy(reply, line);
     return true;
   }
+  // For apps (the fluxcore web app's map): every aircraft as numbers, a page at a time.
+  // "> <count> <start> <record>;<record>..." where a record is
+  // address,callsign,lat_e5,lon_e5,alt_ft,kt,track,vs_fpm,age_s,rssi,flags
+  // An empty field isn't known; altitude G = on the ground; flags: 1 heard on 978, 2 on 1090, 4 via
+  // radar. Ask again with 'get air.list <start + records in this reply>' until that reaches count.
+  if (strncmp(command, "get air.list", 12) == 0 && (command[12] == 0 || command[12] == ' ')) {
+    int start = command[12] ? atoi(&command[13]) : 0;
+    if (start < 0) start = 0;
+    uint32_t now = millis();
+    int n = snprintf(reply, AIR_LIST_MAX, "> %d %d", _n_planes, start);
+    for (int i = start; i < _n_planes; i++) {
+      const Plane& p = _planes[i];
+      const uat::Report& r = p.last;
+      char pos[24] = ",", alt[12] = "", spd[16] = ",", vs[8] = "", rec[96];
+      if (r.has_pos) snprintf(pos, sizeof(pos), "%ld,%ld", (long) r.lat_e5, (long) r.lon_e5);
+      if (r.ag_state == 2) strcpy(alt, "G");
+      else if (r.has_alt) snprintf(alt, sizeof(alt), "%ld", (long) r.alt_ft);
+      if (r.has_speed) snprintf(spd, sizeof(spd), "%u,%u", r.speed_kt, r.track_deg);
+      if (r.has_vs) snprintf(vs, sizeof(vs), "%d", r.vs_fpm);
+      int flags = (p.bands & 3) | (r.qualifier == 2 || r.qualifier == 3 ? 4 : 0);
+      int w = snprintf(rec, sizeof(rec), "%06lx,%s,%s,%s,%s,%s,%lu,%d,%d", (unsigned long) p.address, p.callsign,
+                       pos, alt, spd, vs, (unsigned long)((now - p.heard_at) / 1000), p.rssi, flags);
+      if (w < 0 || w >= (int) sizeof(rec) || n + 1 + w >= AIR_LIST_MAX) break;
+      reply[n++] = i == start ? ' ' : ';';
+      memcpy(&reply[n], rec, w + 1);
+      n += w;
+    }
+    return true;
+  }
+#ifdef AIR_TEST
+  // test builds only: 'air test <n>' makes up n aircraft circling this radio (or Denver airport), for
+  // testing apps without anything on 978/1090 MHz; 'air test off' takes them away
+  if (strncmp(command, "air test", 8) == 0) {
+    if (!_air_active) { strcpy(reply, "Error: aircraft is off ('air on')"); return true; }
+    int n = strcmp(&command[8], " off") == 0 ? 0 : command[8] ? atoi(&command[9]) : 6;
+    if (n < 0 || n > MAX_PLANES) { strcpy(reply, "Error: 0-16 aircraft"); return true; }
+    for (int i = 0; i < _n_planes;) {   // take away the old ones
+      if ((_planes[i].address & 0xFFFF00) == 0xF0F000) _planes[i] = _planes[--_n_planes];
+      else i++;
+    }
+    _air_test_n = n;
+    _air_test_at = 0;
+    sprintf(reply, "OK - %d test aircraft", n);
+    return true;
+  }
+#endif
   if (strcmp(command, "get air.planes") == 0) {
     if (_n_planes == 0) { strcpy(reply, "> none heard in the last 5 min"); return true; }
     int n = sprintf(reply, ">");

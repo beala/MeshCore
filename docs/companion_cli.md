@@ -408,6 +408,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - `air scan on`, `air scan off`: listen all the time, with a console note for each new aircraft (not saved)
 - `set air.every <minutes>` between digests (default 10; 0 = each aircraft once), `set air.range <miles>` (default 10; 0 = any), `set air.below <feet>` (default 10000; 0 = any), `set air.band 978|1090|both` (default both), `set air.duty <percent>` (default 10)
 - `air` or `get air`, `get air.planes`, `get air.stats`
+- `get air.list [start]`: every aircraft as numbers, a page at a time, for apps (the [fluxcore app](https://fluxcore.party/app/)'s map). See [Aircraft](aircraft.md#on-a-map)
 
 **Example reply:** `> N501EL: 6,200 ft, 2.1 mi SW, 88 kt heading 214 (6s)`
 
