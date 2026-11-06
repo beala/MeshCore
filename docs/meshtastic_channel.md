@@ -8,7 +8,8 @@ one more channel. The app is unchanged; nothing is sent on either network.
 mt on                       # LongFast on its default US frequency, default key
 ```
 
-Reconnect the app, and a channel named "Meshtastic LongFast" appears after your own channels.
+Reconnect the app, and a channel named "Meshtastic LongFast" appears after your own channels. The synthetic channels keep fixed slots (Meshtastic, Weather,
+Aircraft), so turning one on or off never moves another; a slot whose feature is off is empty.
 Its messages read `Name: text`, with the sender's long name once their NodeInfo has been heard
 (`!a1b2c3d4` until then).
 

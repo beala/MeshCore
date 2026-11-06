@@ -1567,7 +1567,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     out_frame[i++] = RESP_CODE_DEVICE_INFO;
     out_frame[i++] = FIRMWARE_VER_CODE;
     out_frame[i++] = MAX_CONTACTS / 2;   // v3+
-    out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; the last ones are Meshtastic's and Weather's
+    out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft)
     memcpy(&out_frame[i], &_prefs.ble_pin, 4);
     i += 4;
     memset(&out_frame[i], 0, 12);
@@ -2303,7 +2303,7 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_GET_CHANNEL && len >= 2) {
     uint8_t channel_idx = cmd_frame[1];
     ChannelDetails channel;
-    bool found = isMeshtasticChannel(channel_idx) || isWeatherChannel(channel_idx) || isAircraftChannel(channel_idx);
+    bool found = isVirtualChannelSlot(channel_idx);
     if (isMeshtasticChannel(channel_idx)) {
       getMeshtasticChannel(channel);
     } else if (isWeatherChannel(channel_idx)) {
@@ -2315,6 +2315,8 @@ void MyMesh::handleCmdFrame(size_t len) {
       const char* tag = "aircraft channel";
       mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
       memcpy(channel.channel.secret, h, 16);
+    } else if (found) {
+      memset(&channel, 0, sizeof(channel));   // a synthetic slot whose feature is off: empty
     } else {
       found = getChannel(channel_idx, channel);
     }
@@ -2334,7 +2336,7 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 32) {
     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD); // not supported (yet)
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 16 &&
-             (isMeshtasticChannel(cmd_frame[1]) || isWeatherChannel(cmd_frame[1]) || isAircraftChannel(cmd_frame[1]))) {
+             isVirtualChannelSlot(cmd_frame[1])) {
     writeErrFrame(ERR_CODE_ILLEGAL_ARG);   // set with 'set mt.*' / 'set wx.*' instead
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2 + 32 + 16) {
     uint8_t channel_idx = cmd_frame[1];

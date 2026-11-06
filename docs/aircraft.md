@@ -12,8 +12,8 @@ air scan on                 # or all the time (the mesh isn't heard meanwhile); 
                             # shows in the Radio console the moment it's heard
 ```
 
-Reconnect the app after `air on`; the channel comes after your own (and after Meshtastic's and
-Weather's, if those are on). Near a big airport 1090 MHz hears dozens of airliners an hour, so the
+Reconnect the app after `air on`; the channel comes after your own, in a fixed slot after the
+Meshtastic and Weather ones (empty if those are off). Near a big airport 1090 MHz hears dozens of airliners an hour, so the
 channel gets one digest every 10 minutes of the aircraft heard since the last one, closest first,
 and only those within 10 miles and below 10,000 ft (local traffic: arrivals, departures,
 training flights):

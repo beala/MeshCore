@@ -36,6 +36,8 @@ env:
     Heltec_v3_companion_radio_usb Heltec_v3_companion_radio_ble
     heltec_v4_companion_radio_usb heltec_v4_companion_radio_ble
     AB_Xiao_nrf52_LR2021_companion_radio_usb AB_Xiao_nrf52_LR2021_companion_radio_ble
+    ab_labs_wisblock_nicerf_LoRa2021F33-2G4_companion_radio_usb ab_labs_wisblock_nicerf_LoRa2021F33-2G4_companion_radio_ble
+    meshnology_w12_companion_radio_usb meshnology_w12_companion_radio_ble
     RAK_3401_repeater
   KEEP_RELEASES: 10  # older beala-* releases (and their tags) are deleted
 

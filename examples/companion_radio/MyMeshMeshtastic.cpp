@@ -19,7 +19,7 @@ const char* MyMesh::meshtasticChannelName() const {
 
 bool MyMesh::isMeshtasticChannel(int idx) const {
 #ifdef MAX_GROUP_CHANNELS
-  return _mt_active && idx == MAX_GROUP_CHANNELS;
+  return _mt_active && idx == MAX_GROUP_CHANNELS + VCH_MESHTASTIC;
 #else
   (void)idx;
   return false;
@@ -98,7 +98,7 @@ void MyMesh::showMeshtasticText(const meshtastic::Message& m, float snr) {
     memcpy(&msg[n], text, cut);
     n += cut;
     msg[n] = 0;
-    pushChannelText(MAX_GROUP_CHANNELS, getRTCClock()->getCurrentTimeUnique(), snr_x4, hops, msg, n);
+    pushChannelText(MAX_GROUP_CHANNELS + VCH_MESHTASTIC, getRTCClock()->getCurrentTimeUnique(), snr_x4, hops, msg, n);
     text += cut;
     left -= cut;
     while (left > 0 && (*text == ' ' || *text == '\n')) { text++; left--; }

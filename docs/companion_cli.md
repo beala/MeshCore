@@ -385,7 +385,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Example reply:** `> WH65 5a x39 every 15s -108dBm 0s ago; WH31 ch2 x10 every 60s -107dBm 51s ago`
 
 **Notes:**
-- Ecowitt, Ambient Weather, other Fine Offset and La Crosse View sensors show in the app as one more channel, "Weather", after your own (and after Meshtastic's). Receive only. See [Weather sensors](weather_sensors.md).
+- Ecowitt, Ambient Weather, other Fine Offset and La Crosse View sensors show in the app as one more channel, "Weather", after your own and the Meshtastic slot. Receive only. See [Weather sensors](weather_sensors.md).
 - Settings are saved. Reconnect the app after `wx on` so it lists the new channel.
 
 #### Aircraft on 978 MHz (LR2021 only)

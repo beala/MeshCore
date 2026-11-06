@@ -16,8 +16,9 @@ WH65 5a: -108 dBm, heard 6 times
 LTV-TH a1b2c3: -96 dBm, heard 3 times
 ```
 
-Reconnect the app, and a channel named "Weather" appears after your own channels (and after the
-Meshtastic one, if that's on). Each sensor posts its first reading, then one every 30 minutes:
+Reconnect the app, and a channel named "Weather" appears after your own channels, in its own slot
+(regular channels, then Meshtastic, Weather, Aircraft: each always in the same place, so turning
+one on or off never moves another). Each sensor posts its first reading, then one every 30 minutes:
 
 ```
 WH65 5a: 68.0F 50% wind 6 N gust 10 mph rain 1.00 in UV 0.0 1234 lux

@@ -427,7 +427,12 @@ private:
   bool handleWeatherCommand(const char* command, char* reply);
   bool isWeatherChannel(int idx) const;
   void getWeatherChannel(ChannelDetails& ch);
-  int virtualChannelCount() const { return (_mt_active ? 1 : 0) + (_wx_active ? 1 : 0) + (_air_active ? 1 : 0); }
+  // The synthetic channels have fixed slots after the regular ones, whichever are on, so a client
+  // never sees one move: Meshtastic, then Weather, then Aircraft. A slot whose feature is off reads
+  // as an empty channel.
+  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2 };
+  int virtualChannelCount() const { return _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0; }
+  bool isVirtualChannelSlot(int idx) const;
 
   // Aircraft heard on 978 MHz (UAT), shown as one more receive-only channel after Weather's
   // (MyMeshAircraft.cpp, docs/aircraft.md)
