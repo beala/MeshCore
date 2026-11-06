@@ -349,10 +349,103 @@ int16_t CustomLR2021::fskRead(uint8_t* buf, uint8_t len, float* rssi) {
   return readRadioRxFifo(buf, len);
 }
 
+static const uint32_t LINK_SYNC = 0x4D43434CUL;   // "MCCL"
+
+int16_t CustomLR2021::linkPacketParams(uint8_t len) {
+  // agc_pbl_len 7 = 32 bits of preamble; sync word 1 (4 bytes), sent and matched; variable length;
+  // CRC 3 = 32 bits. The length is the packet's in TX, the most accepted in RX.
+  return setFlrcPacketParams(0x07, 4, 1, 0x01, false, 0x03, len);
+}
+
+int16_t CustomLR2021::linkRx() {
+  this->mod->setRfSwitchState(Module::MODE_RX);
+  int16_t state = linkPacketParams(255);
+  if (state == RADIOLIB_ERR_NONE) state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
+  if (state == RADIOLIB_ERR_NONE) state = clearRxFifo();
+  // single Rx (timeout 0, datasheet 6.3.5): one packet, then the fallback mode (FS) until re-armed,
+  // so the FIFO only ever holds the packet being read
+  if (state == RADIOLIB_ERR_NONE) state = setRx(0);
+  return state;
+}
+
+int16_t CustomLR2021::linkStart(float fMHz, int8_t dbm) {
+  int16_t state = standby();
+  if (state != RADIOLIB_ERR_NONE) return state;
+  state = calibrateFor(fMHz);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  _fsk_active = true;
+  _fsk_link = true;
+  state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_FLRC);
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setFlrcModulationParams(RADIOLIB_LR2021_FLRC_BR_1300, RADIOLIB_LR2021_FLRC_CR_3_4,
+                                    RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_GAUSS_BT_0_5);
+  }
+  // after the modulation params: the DC-DC workaround retunes to the mesh frequency (see fskStart)
+  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(fMHz * 1000000.0f + 0.5f));
+  if (state == RADIOLIB_ERR_NONE) state = setFlrcSyncWord(1, LINK_SYNC);
+  if (state == RADIOLIB_ERR_NONE) state = LR2021::setOutputPower(dbm);
+  // after each packet in or out, keep the synthesizer running (datasheet 6.3.7): quicker turnarounds
+  if (state == RADIOLIB_ERR_NONE) state = setRxTxFallbackMode(RADIOLIB_LR2021_FALLBACK_MODE_FS);
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setDioIrqConfig(irqDioNum, RADIOLIB_LR2021_IRQ_RX_DONE | RADIOLIB_LR2021_IRQ_TX_DONE |
+                                       RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = linkRx();
+  if (state != RADIOLIB_ERR_NONE) fskStopInternal();
+  return state;
+}
+
+int16_t CustomLR2021::linkSend(const uint8_t* buf, uint8_t len, uint32_t timeoutMs) {
+  if (!isLinkActive()) return RADIOLIB_ERR_WRONG_MODEM;
+  if (len < 6) return RADIOLIB_ERR_PACKET_TOO_LONG;   // variable-length FLRC: 6 bytes at least
+  int16_t state = LR2021::standby();
+  if (state == RADIOLIB_ERR_NONE) state = linkPacketParams(len);
+  if (state == RADIOLIB_ERR_NONE) state = clearTxFifo();
+  if (state == RADIOLIB_ERR_NONE) state = writeRadioTxFifo(buf, len);
+  if (state == RADIOLIB_ERR_NONE) state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
+  if (state == RADIOLIB_ERR_NONE) {
+    this->mod->setRfSwitchState(Module::MODE_TX);
+    state = setTx(0);   // no timeout: the packet ends it
+  }
+  if (state == RADIOLIB_ERR_NONE) {
+    uint32_t start = millis();
+    while (!(getIrqStatus() & RADIOLIB_LR2021_IRQ_TX_DONE)) {
+      if (millis() - start > timeoutMs) { state = RADIOLIB_ERR_TX_TIMEOUT; break; }
+    }
+  }
+  int16_t rx = linkRx();
+  return state != RADIOLIB_ERR_NONE ? state : rx;
+}
+
+int CustomLR2021::linkRead(uint8_t* buf, uint8_t max, float* rssi) {
+  if (!isLinkActive()) return 0;
+  uint32_t irq = getIrqStatus();
+  if (!(irq & (RADIOLIB_LR2021_IRQ_RX_DONE | RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR))) return 0;
+  if (irq & (RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR)) {
+    linkRx();
+    return -1;
+  }
+  uint16_t len = 0;
+  float avg = 0, sync = 0;
+  getFlrcPacketStatus(&len, &avg, &sync, NULL);
+  int n = len > max ? max : len;
+  if (n > 0) readRadioRxFifo(buf, n);
+  if (rssi) *rssi = sync;
+  linkRx();
+  return n;
+}
+
 int16_t CustomLR2021::fskStopInternal() {
   _fsk_active = false;
   uint16_t rx = 0, crc = 0, len = 0, pre = 0, sok = 0, sfail = 0, to = 0;
-  if (_fsk_ook) {
+  if (_fsk_link) {
+    _fsk_link = false;
+    uint16_t lrx = 0, lcrc = 0, llen = 0;
+    if (getFlrcRxStats(&lrx, &lcrc, &llen) == RADIOLIB_ERR_NONE) {
+      _link_stats.packets += lrx; _link_stats.crc_err += lcrc; _link_stats.len_err += llen;
+    }
+    setRxTxFallbackMode(RADIOLIB_LR2021_FALLBACK_MODE_STBY_RC);   // RadioLib's setting
+  } else if (_fsk_ook) {
     _fsk_ook = false;
     if (getOokRxStats(&rx, &crc, &len) == RADIOLIB_ERR_NONE) {
       _ook_stats_raw.packets += rx; _ook_stats_raw.crc_err += crc; _ook_stats_raw.len_err += len;

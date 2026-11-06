@@ -149,6 +149,18 @@ public:
    * \returns  length of the next FSK packet received (0 = none), with its RSSI.
    */
   virtual int recvFsk(uint8_t* bytes, int sz, float* rssi) { return 0; }
+
+  /**
+   * \brief  A fast point-to-point link away from the mesh, for copying a radio (FLRC on the LR2021).
+   *         While it's up the radio does nothing else: the caller stops calling the mesh loop, and
+   *         calls linkStop() to return to the mesh. Packets are 7..255 bytes.
+   * \returns  false if this radio can't do it.
+   */
+  virtual bool linkStart(float freq, int8_t dbm) { return false; }
+  virtual bool linkSend(const uint8_t* bytes, int len) { return false; }
+  /** \returns  length of the next packet received (0 = none), with its RSSI */
+  virtual int linkRecv(uint8_t* bytes, int sz, float* rssi) { return 0; }
+  virtual void linkStop() { }
 };
 
 /**

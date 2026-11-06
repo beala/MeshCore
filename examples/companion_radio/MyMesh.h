@@ -468,6 +468,17 @@ private:
   void radarLoop();
   void radarReport();
   bool handleRadarCommand(const char* command, char* reply);
+  // copying this radio to another (MyMeshClone.cpp): the radio is on the FLRC link meanwhile
+  friend struct CloneIo;
+  friend struct CloneFiles;
+  bool _xfer_on = false;
+  bool _xfer_sender = false;
+  uint32_t _xfer_ok_at = 0;          // receiver: when the copy checked out (commit a moment later)
+  float _xfer_freq = 0;
+  void cloneLoop();
+  void cloneFinish();
+  bool cloneCommit();
+  bool handleCloneTransferCommand(const char* command, char* reply);
   void postAircraftDigest(uint32_t now);
   void applyAircraft();
   void aircraftLoop();

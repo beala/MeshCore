@@ -238,6 +238,7 @@ public:
 
   int recvRaw(uint8_t* bytes, int sz) override {
     CustomLR2021* r = (CustomLR2021 *)_radio;
+    if (_link_up) return 0;   // the radio is on the clone link
     if (_fsk_state != FSK_IDLE) {   // the radio is away (or about to go) on an FSK listen
       fskTick();
       if (_fsk_state == FSK_LISTENING) return 0;
@@ -360,7 +361,40 @@ public:
     return len;
   }
 
+  // ---- FLRC link (copying a radio) ----
+  bool linkStart(float freq, int8_t dbm) override {
+    stopFskListen();
+    CustomLR2021* r = (CustomLR2021 *)_radio;
+    if (r->linkStart(freq, dbm) != RADIOLIB_ERR_NONE) {
+      idle();
+      return false;
+    }
+    clearIrqPending();
+    _link_up = true;
+    return true;
+  }
+
+  bool linkSend(const uint8_t* bytes, int len) override {
+    if (!_link_up || len < 6 || len > 255) return false;
+    return ((CustomLR2021 *)_radio)->linkSend(bytes, (uint8_t)len, 20) == RADIOLIB_ERR_NONE;
+  }
+
+  int linkRecv(uint8_t* bytes, int sz, float* rssi) override {
+    if (!_link_up) return 0;
+    int n = ((CustomLR2021 *)_radio)->linkRead(bytes, (uint8_t)(sz > 255 ? 255 : sz), rssi);
+    return n > 0 ? n : 0;
+  }
+
+  void linkStop() override {
+    if (!_link_up) return;
+    _link_up = false;
+    ((CustomLR2021 *)_radio)->fskStop();   // LoRa with MeshCore's settings again
+    clearIrqPending();
+    applySideDetectorConfig();             // side detectors, then receive (via idle())
+  }
+
   void loop() override {
+    if (_link_up) return;
     if (_fsk_state != FSK_IDLE) {
       fskTick();
       if (_fsk_state == FSK_LISTENING) return;   // no noise floor sampling or scan checks meanwhile
@@ -568,6 +602,7 @@ public:
       if (restart) applySideDetectorConfig();   // back in LoRa: side detectors again, then receive (via idle())
     }
     bool _fsk_side_pending = false;
+    bool _link_up = false;
 
     struct SidePacket {
       uint8_t len;

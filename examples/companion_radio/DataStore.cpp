@@ -170,6 +170,15 @@ bool DataStore::removeFile(FILESYSTEM* fs, const char* filename) {
   return fs->remove(filename);
 }
 
+File DataStore::openWriteFile(FILESYSTEM* fs, const char* filename) {
+  return openWrite(fs, filename);
+}
+
+bool DataStore::renameFile(FILESYSTEM* fs, const char* from, const char* to) {
+  if (fs->exists(to)) fs->remove(to);
+  return fs->rename(from, to);
+}
+
 bool DataStore::formatFileSystem() {
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   if (_fsExtra == nullptr) {

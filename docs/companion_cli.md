@@ -401,6 +401,15 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - Aircraft reporting on UAT (978 MHz) and 1090 MHz ADS-B show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
 - `radar [seconds] [threshold] [MHz]`, `get radar`, `get radar.bursts`, `radar stop`: listen on 1030 MHz and work out how fast the radars around turn (LR2021). See [Radar sweep detector](radar.md).
 
+#### Copy this radio to another
+**Usage:**
+- `clone receive [MHz]`: on the new radio. It shows a 6-digit code and waits 5 minutes.
+- `clone send <code> [MHz]`: on the radio to copy, next to it.
+- `clone stop`, `clone`
+
+**Notes:**
+- Copies the key, contacts, channels, encryption policies and settings. The copy restarts as a backup of the radio it came from (see [Several radios with one key](clone_takeover.md#copy-a-radio)). LR2021 radios only.
+
 ---
 
 ### Power

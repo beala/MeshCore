@@ -376,6 +376,11 @@ void MyMesh::takeover(char* reply) {
 }
 
 bool MyMesh::handleCloneCommand(const char* command, char* reply) {
+  if (handleCloneTransferCommand(command, reply)) return true;
+  if (_xfer_on && strcmp(command, "takeover") == 0) {
+    strcpy(reply, "Error: a copy is running ('clone stop' ends it).");
+    return true;
+  }
   if (strcmp(command, "takeover") == 0) {
     takeover(reply);
     return true;
@@ -3518,14 +3523,18 @@ void MyMesh::checkSerialInterface() {
 }
 
 void MyMesh::loop() {
-  BaseChatMesh::loop();
-  findLoop();
-  meshtasticLoop();
-  if (_radar_active) {   // the radar listen has the radio to itself
-    radarLoop();
+  if (_xfer_on) {        // copying this radio: the clone link has the radio to itself
+    cloneLoop();
   } else {
-    weatherLoop();
-    aircraftLoop();
+    BaseChatMesh::loop();
+    findLoop();
+    meshtasticLoop();
+    if (_radar_active) {   // the radar listen has the radio to itself
+      radarLoop();
+    } else {
+      weatherLoop();
+      aircraftLoop();
+    }
   }
 
   if (_crypto_save_pending && (long)(millis() - _crypto_save_at) >= 0) {
@@ -3545,8 +3554,8 @@ void MyMesh::loop() {
 #endif
   }
 
-  // is there are pending dirty contacts write needed?
-  if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
+  // is there are pending dirty contacts write needed? (not while a copy may replace them)
+  if (dirty_contacts_expiry && !_xfer_on && millisHasNowPassed(dirty_contacts_expiry)) {
     saveContacts();
     dirty_contacts_expiry = 0;
   }

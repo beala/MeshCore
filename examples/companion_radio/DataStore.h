@@ -51,6 +51,9 @@ public:
   File openRead(FILESYSTEM* fs, const char* filename);
   bool removeFile(const char* filename);
   bool removeFile(FILESYSTEM* fs, const char* filename);
+  File openWriteFile(FILESYSTEM* fs, const char* filename);   // empty, for writing
+  bool renameFile(FILESYSTEM* fs, const char* from, const char* to);   // replaces 'to'
+  FILESYSTEM* getContactsFS() const { return _getContactsChannelsFS(); }   // contacts, channels, crypto policies
   uint32_t getStorageUsedKb() const;
   uint32_t getStorageTotalKb() const;
 

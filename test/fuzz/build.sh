@@ -7,6 +7,7 @@
 #   .pio/fuzz/fuzz_mesh -max_len=1200 -max_total_time=60 .pio/fuzz/corpus_mesh
 #   .pio/fuzz/fuzz_meshtastic -max_len=1200 -max_total_time=60 .pio/fuzz/corpus_meshtastic
 #   .pio/fuzz/fuzz_wxsensor -max_len=400 -max_total_time=60 .pio/fuzz/corpus_wxsensor
+#   .pio/fuzz/fuzz_clone -max_len=2000 -max_total_time=60 .pio/fuzz/corpus_clone
 set -e
 cd "$(dirname "$0")/../.."
 CRYPTO=.pio/libdeps/native_cli/Crypto
@@ -61,3 +62,11 @@ echo "built .pio/fuzz/fuzz_wxsensor"
 clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
   -I src test/fuzz/fuzz_uat.cpp src/helpers/aircraft/Uat.cpp src/helpers/aircraft/AdsB.cpp src/helpers/aircraft/RadarSweep.cpp -o .pio/fuzz/fuzz_uat
 echo "built .pio/fuzz/fuzz_uat"
+
+# Copying a radio: the clone transfer and CPace, with the real ChaCha20-Poly1305, SHA-2 and HKDF
+clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize=shift-base -fno-sanitize-recover=all \
+  -I src -I $CRYPTO -I lib/ed25519 test/fuzz/fuzz_clone.cpp src/helpers/CloneTransfer.cpp src/helpers/CPace.cpp \
+  $CRYPTO/ChaCha.cpp $CRYPTO/ChaChaPoly.cpp $CRYPTO/Poly1305.cpp $CRYPTO/AuthenticatedCipher.cpp $CRYPTO/Cipher.cpp \
+  $CRYPTO/SHA256.cpp $CRYPTO/SHA512.cpp $CRYPTO/HKDF.cpp $CRYPTO/Hash.cpp $CRYPTO/Crypto.cpp \
+  .pio/fuzz/obj/fe.o -o .pio/fuzz/fuzz_clone
+echo "built .pio/fuzz/fuzz_clone"
