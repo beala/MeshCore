@@ -228,6 +228,7 @@ public:
     #endif
     }
     RadioLibWrapper::onSendFinished();
+    _fsk_hold_until = millis() + FSK_TX_HOLD_MS;   // stay on the mesh for the repeats of what was sent
     _radio->setPreambleLength(preambleLengthForSF(getSpreadingFactor())); // overcomes weird issues with small and big pkts
     if (_fsk_side_pending) {   // the transmit ended an FSK listen
       _fsk_side_pending = false;
@@ -244,6 +245,7 @@ public:
     bool scan_pkt = r->isScanning() && isIrqPending();
     int len = RadioLibWrapper::recvRaw(bytes, sz);
     _scan_cached = false;
+    if (len > 0) _fsk_hold_until = millis() + FSK_RX_HOLD_MS;   // more copies (repeats) may follow
     if (len > 0 || scan_pkt) {
       uint8_t step = 0;
       if (len > 0 && r->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
@@ -328,7 +330,9 @@ public:
 
   // ---- FSK listen (weather sensors) ----
   bool startFskListen(const FskListen& cfg, uint32_t ms) override {
-    if (cfg.pkt_len == 0 || cfg.pkt_len > FSK_MAX_LEN || cfg.sync_len == 0 || cfg.sync_len > 8) return false;
+    if (cfg.pkt_len == 0 || cfg.pkt_len > FSK_MAX_LEN) return false;
+    if (cfg.modem == MODEM_GFSK && (cfg.sync_len == 0 || cfg.sync_len > 8)) return false;
+    if (cfg.modem > MODEM_ADSB) return false;
     if (_fsk_state == FSK_LISTENING) endFskListen();
     _fsk_cfg = cfg;
     _fsk_end = millis() + ms;
@@ -408,10 +412,17 @@ public:
               (unsigned long)f.sync_ok, (unsigned long)f.sync_fail);
       return true;
     }
+    if (strcmp(command, "get radio.ook.rx") == 0) {
+      CustomLR2021::OokStats o = ((CustomLR2021 *)_radio)->ookStats();
+      sprintf(reply, "> ADS-B receiver: %lu packets, %lu parity errors, %lu length errors, noise %d dBm; %lu bad ones read",
+              (unsigned long)o.packets, (unsigned long)o.crc_err, (unsigned long)o.len_err,
+              (int)((CustomLR2021 *)_radio)->adsbNoise(), (unsigned long)_fsk_bad);
+      return true;
+    }
     if (strcmp(command, "get radio.fsk") == 0) {
-      sprintf(reply, "> FSK listens %lu (%lu ms, %lu cut short by a transmit, %lu failed to start), %lu packets, %lu dropped",
+      sprintf(reply, "> FSK listens %lu (%lu ms, %lu cut short by a transmit, %lu failed to start, %lu skipped for mesh traffic), %lu packets, %lu dropped",
               (unsigned long)_fsk_listens, (unsigned long)_fsk_total_ms, (unsigned long)_fsk_cut,
-              (unsigned long)_fsk_fail, (unsigned long)_fsk_packets, (unsigned long)_fsk_dropped);
+              (unsigned long)_fsk_fail, (unsigned long)_fsk_held, (unsigned long)_fsk_packets, (unsigned long)_fsk_dropped);
       return true;
     }
     return false;
@@ -452,6 +463,10 @@ public:
     enum { FSK_IDLE = 0, FSK_WAITING = 1, FSK_LISTENING = 2 };
     static const int FSK_MAX_LEN = 48;   // the longest: a UAT long message
     static const int FSK_QUEUE = 4;
+    // after a transmit, repeaters echo it within a few seconds; after a packet is heard, other copies
+    // follow. FSK listens wait this long (a listen whose time runs out meanwhile is skipped).
+    static const uint32_t FSK_TX_HOLD_MS = 5000, FSK_RX_HOLD_MS = 1500;
+    uint32_t _fsk_hold_until = 0, _fsk_held = 0;
     struct FskPacket {
       uint8_t len;
       int16_t rssi;
@@ -463,6 +478,7 @@ public:
     FskPacket _fsk_q[FSK_QUEUE];
     uint8_t _fsk_head = 0, _fsk_count = 0;
     uint32_t _fsk_listens = 0, _fsk_total_ms = 0, _fsk_cut = 0, _fsk_fail = 0, _fsk_packets = 0, _fsk_dropped = 0;
+    uint32_t _fsk_bad = 0;   // packets the radio flagged as failing their CRC (ADS-B parity)
 
     // Runs the FSK listen: starts it when the radio is free, reads packets, ends it on time.
     void fskTick() {
@@ -470,15 +486,20 @@ public:
       uint32_t now = millis();
       if (_fsk_state == FSK_WAITING) {
         if ((int32_t)(_fsk_end - now) <= 20) {   // never got the radio: too late now
+          _fsk_held++;
           _fsk_state = FSK_IDLE;
           _fsk_ran = 0;
           return;
         }
-        // don't step away from a mesh packet on its way in, or before the last one has been read
+        // don't step away from a mesh packet on its way in, or before the last one has been read, or
+        // while repeats of a packet just sent or heard are still due
         if (!isInRecvMode() || isIrqPending() || r->isReceiving()) return;
-        int16_t st = r->fskStart(_fsk_cfg.freq, _fsk_cfg.kbps, _fsk_cfg.dev_khz, _fsk_cfg.rxbw_khz,
-                                 _fsk_cfg.sync, _fsk_cfg.sync_len, _fsk_cfg.pkt_len, _fsk_cfg.sync_bits,
-                                 _fsk_cfg.no_preamble, _fsk_cfg.pre_det_bits);
+        if ((int32_t)(_fsk_hold_until - now) > 0) return;
+        int16_t st = _fsk_cfg.modem == MODEM_ADSB
+          ? r->adsbStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain)
+          : r->fskStart(_fsk_cfg.freq, _fsk_cfg.kbps, _fsk_cfg.dev_khz, _fsk_cfg.rxbw_khz,
+                        _fsk_cfg.sync, _fsk_cfg.sync_len, _fsk_cfg.pkt_len, _fsk_cfg.sync_bits,
+                        _fsk_cfg.no_preamble, _fsk_cfg.pre_det_bits);
         if (st != RADIOLIB_ERR_NONE) {
           MESH_DEBUG_PRINTLN("LR2021: FSK listen failed to start (%d)", st);
           _fsk_fail++;
@@ -505,7 +526,9 @@ public:
         FskPacket p;
         float rssi = 0;
         p.len = _fsk_cfg.pkt_len;
-        if (r->fskRead(p.data, p.len, &rssi) == RADIOLIB_ERR_NONE) {
+        int16_t rs = r->fskRead(p.data, p.len, &rssi);
+        if (rs == RADIOLIB_ERR_CRC_MISMATCH) _fsk_bad++;
+        if (rs == RADIOLIB_ERR_NONE) {
           p.rssi = (int16_t)rssi;
           _fsk_packets++;
           if (_fsk_count == FSK_QUEUE) {   // full: drop the oldest

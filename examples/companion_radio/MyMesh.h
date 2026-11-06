@@ -31,6 +31,7 @@
 #include <helpers/meshtastic/MeshtasticRx.h>
 #include <helpers/weather/SensorTracker.h>
 #include <helpers/aircraft/Uat.h>
+#include <helpers/aircraft/AdsB.h>
 #include <helpers/IdentityStore.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
@@ -437,6 +438,9 @@ private:
     uint32_t heard_at, posted_at, count, first_at;
     int16_t rssi;
     bool posted;
+    // 1090 MHz: the last even [0] and odd [1] position (CPR) fields, and when the position was last fixed
+    uint32_t cpr_lat[2], cpr_lon[2], cpr_at[2], pos_at;
+    uint8_t bands;   // where it's been heard: 1 = 978, 2 = 1090
   };
   static const int MAX_PLANES = 16;
   Plane _planes[MAX_PLANES];
@@ -444,6 +448,12 @@ private:
   bool _air_active = false, _air_forever = false, _air_listening = false;
   uint8_t _fsk_owner = 0;            // whose FSK listen the radio's queued packets came from: 1 weather, 2 aircraft
   uint32_t _air_next = 0, _air_heard = 0, _air_bad = 0, _air_fixed = 0, _air_shown = 0, _air_listen_ms = 0, _air_since = 0;
+  uint32_t _air_heard_1090 = 0;
+  uint16_t _air_band = 978;          // the band of the current (or last) listen
+  uint32_t _air_digest_at = 0, _air_digest_from = 0;
+  bool adsbPosition(Plane& p, const adsb::Message& m, uint32_t now, uat::Report* r);
+  bool aircraftWanted(const Plane& p, uint32_t* dist) const;
+  void postAircraftDigest(uint32_t now);
   void applyAircraft();
   void aircraftLoop();
   bool handleAircraftCommand(const char* command, char* reply);

@@ -54,8 +54,9 @@ the moment its next packet is due:
    batteries), is hunted: 0.4 s listens at random gaps of 1.5–4.5 s until it's heard twice.
 
 Mesh traffic comes first. A listen doesn't start while a mesh packet is coming in or waiting to
-be read, and a mesh transmit ends a listen at once. The time a listen misses isn't held against
-the sensor.
+be read, and a mesh transmit ends a listen at once. After a transmit no listen starts for 5 s, so
+the repeats of a message you send are heard, even during a scan; after a mesh packet is heard, none
+for 1.5 s, as other copies follow. The time a listen misses isn't held against the sensor.
 
 On the chip, a listen is a switch of packet type from LoRa to GFSK with raw commands. Its
 frequency is set after the modulation parameters: RadioLib's DC-DC workaround in

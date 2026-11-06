@@ -46,11 +46,14 @@ private:
   int16_t loadScanBlob();
 
   bool _fsk_active = false;     // in GFSK for an FSK listen; LoRa comes back with fskStop()
+  bool _fsk_ook = false;        // the listen is the OOK ADS-B receiver (adsbStart), not GFSK
+  float _ook_noise = 0;         // noise level measured at the last ADS-B listen start, dBm
   // Front-end calibration covering an FSK listen frequency. The chip keeps calibrations for up to 3
   // frequencies; RadioLib only ever calibrates the mesh's. Without one, a listen a few MHz away hears nothing.
   float _cal_fsk_mhz = 0, _cal_mesh_mhz = 0;
   int16_t calibrateFor(float fskMHz);
   struct { uint32_t packets, len_err, preambles, sync_ok, sync_fail; } _fsk_stats_raw = {};
+  struct { uint32_t packets, crc_err, len_err; } _ook_stats_raw = {};
   int16_t fskStopInternal();
   int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);
   static bool bwCode(float bw, uint8_t* code);
@@ -328,6 +331,19 @@ private:
       FskStats f = { _fsk_stats_raw.packets, _fsk_stats_raw.len_err, _fsk_stats_raw.preambles,
                      _fsk_stats_raw.sync_ok, _fsk_stats_raw.sync_fail };
       return f;
+    }
+    // ---- ADS-B listen (1090 MHz) ----
+    // Same idea as fskStart, with the chip's OOK receiver set up for Mode S extended squitters as in
+    // the datasheet (SetOokDetector, pattern 0x0285) and RadioLib's ADS-B example: 2 Mchip/s,
+    // inverted Manchester, 11 data bytes, the 24-bit parity checked by the chip (bad ones dropped).
+    // threshDb: detection threshold above the noise measured at the start (0 = 10 dB).
+    // gain: fixed receiver gain step 1-13 (0 = automatic). fskRead/fskStop/fskRearm work the same.
+    int16_t adsbStart(float freqMHz, float rxbwKHz, uint8_t threshDb = 0, uint8_t gain = 0);
+    float adsbNoise() const { return _ook_noise; }
+    struct OokStats { uint32_t packets, crc_err, len_err; };
+    OokStats ookStats() const {
+      OokStats o = { _ook_stats_raw.packets, _ook_stats_raw.crc_err, _ook_stats_raw.len_err };
+      return o;
     }
     int16_t fskRearm();                                    // receive again after a packet
     int16_t fskRead(uint8_t* buf, uint8_t len, float* rssi);

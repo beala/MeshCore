@@ -256,10 +256,12 @@ private:
   class AircraftPrefs : public ConfigSerializer {
   public:
     uint8_t en = 0;
-    uint16_t every = 10;          // minutes between posts about the same aircraft (0 = first sighting only)
-    uint16_t range = 0;           // miles; only aircraft closer than this (0 = all)
+    uint16_t every = 10;          // minutes between digests of the nearby aircraft (0 = a post for each one, once)
+    uint16_t range = 10;          // miles; only aircraft closer than this (0 = all)
+    uint16_t below = 10000;       // feet; only aircraft lower than this (0 = all)
     uint8_t duty = 10;            // % of the time spent listening when not scanning all the time
     float freq = 978.0f;          // MHz (978 for UAT; other values are for bench tests)
+    uint8_t bands = 3;            // 1 = 978 MHz UAT, 2 = 1090 MHz ADS-B, 3 = both (taking turns)
   protected:
     void structure() override {
       def("en", en);
@@ -267,6 +269,8 @@ private:
       def("range", range);
       def("duty", duty);
       def("freq", freq);
+      def("bands", bands);
+      def("below", below);
     }
   };
 public:

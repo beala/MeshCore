@@ -392,13 +392,13 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Usage:**
 - `air on`, `air off`
 - `air scan on`, `air scan off`: listen all the time, with a console note for each new aircraft (not saved)
-- `set air.every <minutes>` (default 10), `set air.range <miles>` (default 0 = any), `set air.duty <percent>` (default 10)
+- `set air.every <minutes>` between digests (default 10; 0 = each aircraft once), `set air.range <miles>` (default 10; 0 = any), `set air.below <feet>` (default 10000; 0 = any), `set air.band 978|1090|both` (default both), `set air.duty <percent>` (default 10)
 - `air` or `get air`, `get air.planes`, `get air.stats`
 
 **Example reply:** `> N501EL: 6,200 ft, 2.1 mi SW, 88 kt heading 214 (6s)`
 
 **Notes:**
-- Aircraft reporting on UAT (978 MHz) show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
+- Aircraft reporting on UAT (978 MHz) and 1090 MHz ADS-B show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
 
 ---
 

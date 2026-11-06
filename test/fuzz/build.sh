@@ -57,7 +57,7 @@ clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-reco
   -o .pio/fuzz/fuzz_wxsensor
 echo "built .pio/fuzz/fuzz_wxsensor"
 
-# UAT aircraft messages
+# Aircraft messages: UAT (978 MHz) and ADS-B (1090 MHz)
 clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
-  -I src test/fuzz/fuzz_uat.cpp src/helpers/aircraft/Uat.cpp -o .pio/fuzz/fuzz_uat
+  -I src test/fuzz/fuzz_uat.cpp src/helpers/aircraft/Uat.cpp src/helpers/aircraft/AdsB.cpp -o .pio/fuzz/fuzz_uat
 echo "built .pio/fuzz/fuzz_uat"

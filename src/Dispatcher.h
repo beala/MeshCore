@@ -119,7 +119,13 @@ public:
     uint8_t sync_bits;   // 0 = sync_len * 8; else the sync word is its last sync_bits bits (eg. 36 for UAT)
     bool no_preamble;    // the transmitter sends no 0101.. preamble: search for the sync word directly
     uint8_t pre_det_bits;  // preamble bits to detect (0 = 16, or none with no_preamble); for experiments
+    // MODEM_ADSB: 1090 MHz Mode S extended squitters (OOK, pulse position), 11 bytes each after the
+    // radio checks their parity; only freq, rxbw_khz, pkt_len, thresh_db and gain apply
+    uint8_t modem;         // MODEM_GFSK or MODEM_ADSB
+    uint8_t thresh_db;     // ADS-B: detection threshold above the noise (0 = the radio's default)
+    uint8_t gain;          // ADS-B: fixed receiver gain step (0 = automatic)
   };
+  enum { MODEM_GFSK = 0, MODEM_ADSB = 1 };
   /**
    * \brief  Some radios can step away from the mesh for a moment to receive FSK packets, then come
    *         back. The listen starts as soon as the radio isn't busy with a mesh packet, and lasts

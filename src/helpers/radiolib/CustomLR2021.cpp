@@ -196,12 +196,13 @@ static uint8_t gfskRxBwCode(float khz) {
     { 185.2f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_185_2 }, { 238.1f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_238_1 },
     { 307.7f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_307_7 }, { 476.2f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_476_2 },
     { 769.2f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_769_2 }, { 1111.0f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_1111 },
-    { 2222.0f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_2222 },
+    { 2222.0f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_2222 }, { 2666.0f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_2666 },
+    { 3076.0f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_3076 },
   };
   for (auto& t : table) {
     if (khz <= t.khz + 0.05f) return t.code;   // the narrowest setting that is wide enough
   }
-  return RADIOLIB_LR2021_GFSK_OOK_RX_BW_2222;
+  return RADIOLIB_LR2021_GFSK_OOK_RX_BW_3076;
 }
 
 static uint16_t feCode(float mhz) {
@@ -259,6 +260,51 @@ int16_t CustomLR2021::fskStart(float fMHz, float kbps, float devKHz, float rxbwK
   return state;
 }
 
+int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uint8_t gain) {
+  int16_t state = standby();
+  if (state != RADIOLIB_ERR_NONE) return state;
+  state = calibrateFor(fMHz);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  _fsk_active = true;
+  _fsk_ook = true;
+  state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_OOK);
+  // 2 Mchip/s: 1 Mbit/s of Manchester-coded data, as the chip counts it
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setOokModulationParams(2000000UL, RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE, gfskRxBwCode(rxbwKHz), 0);
+  }
+  // after the modulation params: the DC-DC workaround retunes to the mesh frequency (see fskStart)
+  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(fMHz * 1000000.0f + 0.5f));
+  // 11 data bytes then the 3-byte parity (CRC-24, polynomial 0xFFF409, init 0), checked by the chip
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setOokPacketParams(16, RADIOLIB_LR2021_GFSK_OOK_ADDR_FILT_DISABLED, RADIOLIB_LR2021_GFSK_OOK_PACKET_FORMAT_FIXED,
+                               11, 3, RADIOLIB_LR2021_OOK_MANCHESTER_ON_INV);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = setOokCrcParams(0x1FFF409UL, 0);
+  if (state == RADIOLIB_ERR_NONE) state = setOokSyncword(NULL, 0, true);
+  // the 8 µs preamble 1010000101000000 (0.5 µs chips, first chip in the LSB), no repeats, falling edge
+  if (state == RADIOLIB_ERR_NONE) state = setOokDetector(0x0285, 15, 0, false, false, 0);
+  if (state == RADIOLIB_ERR_NONE && gain) state = setGain(gain > 13 ? 13 : gain);
+  if (state == RADIOLIB_ERR_NONE) state = setDioIrqConfig(irqDioNum, RADIOLIB_LR2021_IRQ_RX_DONE);
+  if (state == RADIOLIB_ERR_NONE) {
+    // detection threshold: noise + margin (datasheet 22.1: the chip's own is fixed by bandwidth)
+    this->mod->setRfSwitchState(Module::MODE_RX);
+    state = setRx(RADIOLIB_LR2021_RX_TIMEOUT_INF);
+    if (state == RADIOLIB_ERR_NONE) {
+      delayMicroseconds(500);
+      float noise = 0;
+      if (getRssiInst(&noise) == RADIOLIB_ERR_NONE && noise < 0) _ook_noise = noise;
+      LR2021::standby();
+      if (_ook_noise < 0) setOokDetectionThreshold((int16_t)(_ook_noise + (threshDb ? threshDb : 10)));
+    }
+  }
+  if (state == RADIOLIB_ERR_NONE) {
+    this->mod->setRfSwitchState(Module::MODE_RX);
+    state = fskRearm();
+  }
+  if (state != RADIOLIB_ERR_NONE) fskStopInternal();
+  return state;
+}
+
 int16_t CustomLR2021::fskRearm() {
   int16_t state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
   if (state == RADIOLIB_ERR_NONE) state = clearRxFifo();
@@ -270,6 +316,13 @@ int16_t CustomLR2021::fskRead(uint8_t* buf, uint8_t len, float* rssi) {
   if (!_fsk_active) return RADIOLIB_ERR_WRONG_MODEM;
   uint32_t irq = getIrqStatus();
   if (!(irq & RADIOLIB_LR2021_IRQ_RX_DONE)) return RADIOLIB_ERR_RX_TIMEOUT;
+  if (_fsk_ook) {
+    if (irq & (RADIOLIB_LR2021_IRQ_CRC_ERROR | RADIOLIB_LR2021_IRQ_LEN_ERROR)) return RADIOLIB_ERR_CRC_MISMATCH;
+    float high = 0;
+    getOokPacketStatus(NULL, NULL, &high, NULL, NULL, NULL);
+    if (rssi) *rssi = high;
+    return readRadioRxFifo(buf, len);
+  }
   float rssiSync = 0;
   getGfskPacketStatus(NULL, NULL, &rssiSync, NULL, NULL, NULL);
   if (rssi) *rssi = rssiSync;
@@ -279,7 +332,13 @@ int16_t CustomLR2021::fskRead(uint8_t* buf, uint8_t len, float* rssi) {
 int16_t CustomLR2021::fskStopInternal() {
   _fsk_active = false;
   uint16_t rx = 0, crc = 0, len = 0, pre = 0, sok = 0, sfail = 0, to = 0;
-  if (getGfskRxStats(&rx, &crc, &len, &pre, &sok, &sfail, &to) == RADIOLIB_ERR_NONE) {
+  if (_fsk_ook) {
+    _fsk_ook = false;
+    if (getOokRxStats(&rx, &crc, &len) == RADIOLIB_ERR_NONE) {
+      _ook_stats_raw.packets += rx; _ook_stats_raw.crc_err += crc; _ook_stats_raw.len_err += len;
+    }
+    setGain(0);   // automatic gain again
+  } else if (getGfskRxStats(&rx, &crc, &len, &pre, &sok, &sfail, &to) == RADIOLIB_ERR_NONE) {
     _fsk_stats_raw.packets += rx; _fsk_stats_raw.len_err += len; _fsk_stats_raw.preambles += pre;
     _fsk_stats_raw.sync_ok += sok; _fsk_stats_raw.sync_fail += sfail;
   }
