@@ -27,9 +27,19 @@ static SerialBLEInterface* instance = nullptr;
 void SerialBLEInterface::onConnect(uint16_t connection_handle) {
   BLE_DEBUG_PRINTLN("SerialBLEInterface: connected handle=0x%04X", connection_handle);
   if (instance) {
+    if (instance->_conn_handle != BLE_CONN_HANDLE_INVALID && instance->_conn_handle != connection_handle) {
+      // a second phone or computer: one at a time. (Apps on the same phone share its one link and
+      // never get here.) Advertising starts again when it's gone.
+      sd_ble_gap_disconnect(connection_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+      return;
+    }
     instance->_conn_handle = connection_handle;
     instance->_isDeviceConnected = false;
     instance->clearBuffers();
+    // Keep advertising while connected, so a second app on the same phone (the fluxcore app in a
+    // browser, next to the MeshCore app) can find the radio and share the link: a phone only lists
+    // radios that advertise
+    Bluefruit.Advertising.start(0);
   }
 }
 
@@ -136,7 +146,7 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
   #endif
   
   Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
-  Bluefruit.begin();
+  Bluefruit.begin(2, 0);   // 2 links: advertising (connectable) needs a free one while the app is connected
  
   char dev_name[32+16];
   if (strcmp(name, "@@MAC") == 0) {
@@ -359,10 +369,10 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
     return len;
   }
   
-  // Advertising watchdog: periodically check if advertising is running, restart if not
-  // Only run when truly disconnected (no connection handle), not during connection establishment
+  // Advertising watchdog: periodically check if advertising is running, restart if not.
+  // Disconnected, or connected and paired (it advertises then too), not while a connection is set up
   unsigned long now = millis();
-  if (_isEnabled && !isConnected() && _conn_handle == BLE_CONN_HANDLE_INVALID) {
+  if (_isEnabled && (_conn_handle == BLE_CONN_HANDLE_INVALID || isConnected())) {
     if (now - _last_health_check >= BLE_HEALTH_CHECK_INTERVAL) {
       _last_health_check = now;
       

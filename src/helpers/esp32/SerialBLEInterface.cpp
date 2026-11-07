@@ -106,7 +106,17 @@ void SerialBLEInterface::onConnect(BLEServer* pServer) {
 
 void SerialBLEInterface::onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) {
   BLE_DEBUG_PRINTLN("onConnect(), conn_id=%d, mtu=%d", param->connect.conn_id, pServer->getPeerMTU(param->connect.conn_id));
+  if (has_conn && param->connect.conn_id != last_conn_id) {
+    // a second phone or computer: one at a time. (Apps on the same phone share its one link and
+    // never get here.)
+    pServer->disconnect(param->connect.conn_id);
+    return;
+  }
+  has_conn = true;
   last_conn_id = param->connect.conn_id;
+  // Keep advertising while connected, so a second app on the same phone (the fluxcore app in a
+  // browser, next to the MeshCore app) can find the radio and share the link
+  adv_restart_time = millis() + ADVERT_RESTART_DELAY;
 }
 
 void SerialBLEInterface::onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
@@ -114,11 +124,16 @@ void SerialBLEInterface::onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param
 }
 
 void SerialBLEInterface::onDisconnect(BLEServer* pServer) {
-  BLE_DEBUG_PRINTLN("onDisconnect()");
-  deviceConnected = false;
+}
+
+void SerialBLEInterface::onDisconnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) {
+  BLE_DEBUG_PRINTLN("onDisconnect(), conn_id=%d", param->disconnect.conn_id);
   if (_isEnabled) {
     adv_restart_time = millis() + ADVERT_RESTART_DELAY;
   }
+  if (!has_conn || param->disconnect.conn_id != last_conn_id) return;   // one that was turned away
+  has_conn = false;
+  deviceConnected = false;
 }
 
 // -------- BLECharacteristicCallbacks methods
@@ -182,6 +197,7 @@ void SerialBLEInterface::disable() {
   pService->stop();
   pFluxService->stop();
   oldDeviceConnected = deviceConnected = false;
+  has_conn = false;
   adv_restart_time = 0;
 }
 
@@ -246,18 +262,14 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
 
       adv_restart_time = millis() + ADVERT_RESTART_DELAY;
     } else {
-      BLE_DEBUG_PRINTLN("SerialBLEInterface -> stopping advertising");
       BLE_DEBUG_PRINTLN("SerialBLEInterface -> connecting...");
-      // connecting
-      // do stuff here on connecting
-      pServer->getAdvertising()->stop();
-      adv_restart_time = 0;
+      // still advertising (see onConnect)
     }
     oldDeviceConnected = deviceConnected;
   }
 
   if (adv_restart_time && millis() >= adv_restart_time) {
-    if (pServer->getConnectedCount() == 0) {
+    if (_isEnabled) {   // also while connected: see onConnect
       BLE_DEBUG_PRINTLN("SerialBLEInterface -> re-starting advertising");
       pServer->getAdvertising()->start();  // re-Start advertising
     }

@@ -16,6 +16,7 @@ class SerialBLEInterface : public BaseSerialInterface, BLESecurityCallbacks, BLE
   bool oldDeviceConnected;
   bool _isEnabled;
   uint16_t last_conn_id;
+  bool has_conn = false;        // last_conn_id is the one link in use
   uint32_t _pin_code;
   unsigned long _last_write;
   unsigned long adv_restart_time;
@@ -56,6 +57,7 @@ protected:
   void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) override;
   void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) override;
   void onDisconnect(BLEServer* pServer) override;
+  void onDisconnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) override;
 
   // BLECharacteristicCallbacks methods
   void onWrite(BLECharacteristic* pCharacteristic, esp_ble_gatts_cb_param_t* param) override;

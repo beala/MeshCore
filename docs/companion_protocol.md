@@ -72,7 +72,11 @@ one link to the radio, the MeshCore app and a browser like Bluefy can both stay 
 None of these change the MeshCore app's session: the protocol version it asked for, its contact sync and
 its message queue stay as they are, and nothing is pushed on this service. It needs the same pairing
 (PIN) as the UART service. It isn't advertised: find the radio by the UART service, then ask for this
-one (in Web Bluetooth, list it in `optionalServices`). A phone or computer that was paired with the
+one (in Web Bluetooth, list it in `optionalServices`).
+
+The radio keeps advertising while an app is connected, so a second app on the same phone can still
+find it in a scan (a phone only lists radios that advertise) and share the link. It takes one phone or
+computer at a time: a second one that connects is disconnected straight away. A phone or computer that was paired with the
 radio before it had this service may keep the old service list: forget the radio in its Bluetooth
 settings and pair again.
 
