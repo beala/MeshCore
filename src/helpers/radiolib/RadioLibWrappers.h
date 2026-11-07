@@ -23,6 +23,10 @@ protected:
   uint16_t _num_floor_samples;
   int32_t _floor_sample_sum;
   uint8_t _preamble_sf;
+  uint8_t* _dmg_buf = nullptr;   // keepDamaged(): where a packet that failed its CRC goes
+  int _dmg_sz = 0, _dmg_len = 0;
+  float _dmg_snr = 0, _dmg_rssi = 0;
+  uint32_t _last_rx_sum = 0;     // of the last packet read, good or not
 
   void idle();
   void startRecv();
@@ -43,6 +47,13 @@ public:
   void begin() override;
   virtual void powerOff() { _radio->sleep(); }
   int recvRaw(uint8_t* bytes, int sz) override;
+  void keepDamaged(uint8_t* buf, int sz) override { _dmg_buf = buf; _dmg_sz = buf ? sz : 0; _dmg_len = 0; }
+  int takeDamaged(float* snr, float* rssi) override {
+    int n = _dmg_len;
+    _dmg_len = 0;
+    if (n > 0) { *snr = _dmg_snr; *rssi = _dmg_rssi; }
+    return n;
+  }
   uint32_t getEstAirtimeFor(int len_bytes) override;
   bool startSendRaw(const uint8_t* bytes, int len) override;
   bool isSendComplete() override;

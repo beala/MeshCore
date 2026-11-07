@@ -273,12 +273,22 @@ private:
       def("below", below);
     }
   };
+  // Packets that fail their CRC check: read what came through and show it in an extra channel
+  class DamagedPrefs : public ConfigSerializer {
+  public:
+    uint8_t en = 0;
+  protected:
+    void structure() override {
+      def("en", en);
+    }
+  };
 public:
   FloodRetryPrefs flood_retry;
   ClonePrefs clone;
   MeshtasticPrefs mt;
   WeatherPrefs wx;
   AircraftPrefs air;
+  DamagedPrefs dmg;
 private:
 
   class CompanionPrefs : public ConfigSerializer {
@@ -383,6 +393,7 @@ protected:
     def("mt", mt);
     def("wx", wx);
     def("air", air);
+    def("dmg", dmg);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif

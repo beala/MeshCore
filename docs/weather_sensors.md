@@ -17,7 +17,7 @@ LTV-TH a1b2c3: -96 dBm, heard 3 times
 ```
 
 Reconnect the app, and a channel named "Weather" appears after your own channels, in its own slot
-(regular channels, then Meshtastic, Weather, Aircraft: each always in the same place, so turning
+(regular channels, then Meshtastic, Weather, Aircraft, Damaged: each always in the same place, so turning
 one on or off never moves another). Each sensor posts its first reading, then one every 30 minutes:
 
 ```

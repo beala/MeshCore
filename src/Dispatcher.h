@@ -80,6 +80,16 @@ public:
   virtual float getLastSNR() const { return 0; }
 
   /**
+   * \brief  keep the bytes of the latest packet that failed the CRC check in buf (sz bytes), for reading
+   *          what came through (helpers/DamagedRx). NULL stops it.
+   */
+  virtual void keepDamaged(uint8_t* buf, int sz) { (void)buf; (void)sz; }
+  /**
+   * \returns  the length of a damaged packet kept since the last call (0 if none), with its SNR and RSSI
+   */
+  virtual int takeDamaged(float* snr, float* rssi) { (void)snr; (void)rssi; return 0; }
+
+  /**
    * \returns  the receiver gain step used for the last received packet, or -1 if the radio can't report it.
    */
   virtual int getLastGainStep() const { return -1; }

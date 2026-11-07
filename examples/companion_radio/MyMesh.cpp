@@ -721,6 +721,7 @@ uint8_t MyMesh::getExtraAckTransmitCount() const {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  damagedNoteIntact(raw, len);
   // Apps only understand v1: show them v2 packets we can decrypt in their v1 form, so they still
   // recognise echoes of their own messages ("heard N repeats").
   uint8_t legacy[MAX_TRANS_UNIT];
@@ -1518,6 +1519,7 @@ void MyMesh::begin() {
   applyRadioPrefs();
   applyWeather();
   applyAircraft();
+  applyDamaged();
   radio_driver.setTxLedEnabled(!_prefs.led_off);
   loadFindAllow();
 
@@ -1680,7 +1682,8 @@ void MyMesh::handleCmdFrame(size_t len) {
 
     if (txt_type != TXT_TYPE_PLAIN) {
       writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
-    } else if (isMeshtasticChannel(channel_idx) || isWeatherChannel(channel_idx) || isAircraftChannel(channel_idx)) {   // receive only
+    } else if (isMeshtasticChannel(channel_idx) || isWeatherChannel(channel_idx) || isAircraftChannel(channel_idx) ||
+               isDamagedChannel(channel_idx)) {   // receive only
       writeOKFrame();
       ChatRef to;
       memset(&to, 0, sizeof(to));
@@ -1688,6 +1691,7 @@ void MyMesh::handleCmdFrame(size_t len) {
       to.channel_idx = channel_idx;
       postToChat(to, isWeatherChannel(channel_idx) ? "Not sent: the Weather channel is receive-only"
                      : isAircraftChannel(channel_idx) ? "Not sent: the Aircraft channel is receive-only"
+                     : isDamagedChannel(channel_idx) ? "Not sent: the Damaged channel is receive-only"
                                                       : "Not sent: the Meshtastic channel is receive-only");
     } else {
       ChannelDetails channel;
@@ -2262,6 +2266,8 @@ void MyMesh::handleCmdFrame(size_t len) {
       getMeshtasticChannel(channel);
     } else if (isWeatherChannel(channel_idx)) {
       getWeatherChannel(channel);
+    } else if (isDamagedChannel(channel_idx)) {
+      getDamagedChannel(channel);
     } else if (isAircraftChannel(channel_idx)) {
       memset(&channel, 0, sizeof(channel));
       strcpy(channel.name, "Aircraft");
@@ -2736,6 +2742,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (handleMeshtasticCommand(command, reply)) return true;
   if (handleWeatherCommand(command, reply)) return true;
   if (handleAircraftCommand(command, reply)) return true;
+  if (handleDamagedCommand(command, reply)) return true;
   if (handleRadarCommand(command, reply)) return true;
 
   // hook for variant-specific CLI processing
@@ -3444,7 +3451,7 @@ int MyMesh::fillDeviceInfo(uint8_t* out_frame) {
   out_frame[i++] = RESP_CODE_DEVICE_INFO;
   out_frame[i++] = FIRMWARE_VER_CODE;
   out_frame[i++] = MAX_CONTACTS / 2;   // v3+
-  out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft)
+  out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft, Damaged)
   memcpy(&out_frame[i], &_prefs.ble_pin, 4);
   i += 4;
   memset(&out_frame[i], 0, 12);
@@ -3586,6 +3593,7 @@ void MyMesh::loop() {
       weatherLoop();
       aircraftLoop();
     }
+    damagedLoop();
   }
 
   if (_crypto_save_pending && (long)(millis() - _crypto_save_at) >= 0) {

@@ -147,6 +147,17 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
       if (err == RADIOLIB_ERR_NONE && !lastRxHadCRC()) {
         err = RADIOLIB_ERR_LORA_HEADER_DAMAGED;  // header says no CRC, so the payload was never checked
       }
+      // A sum of what was read, good or not: after a bad header (no new packet) some radios report
+      // the last packet's length and leave its bytes in the buffer, so those aren't kept as damaged
+      uint32_t sum = 2166136261u ^ (uint32_t)len;
+      for (int i = 0; i < len; i++) sum = (sum ^ bytes[i]) * 16777619u;
+      if (err == RADIOLIB_ERR_CRC_MISMATCH && _dmg_buf && sum != _last_rx_sum && len <= _dmg_sz) {
+        memcpy(_dmg_buf, bytes, len);
+        _dmg_len = len;
+        _dmg_snr = getLastSNR();
+        _dmg_rssi = getLastRSSI();
+      }
+      _last_rx_sum = sum;
       if (err != RADIOLIB_ERR_NONE) {
         MESH_DEBUG_PRINTLN("RadioLibWrapper: error: readData(%d)", err);
         len = 0;

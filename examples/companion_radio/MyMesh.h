@@ -28,6 +28,7 @@
 #include <RTClib.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/BaseSerialInterface.h>
+#include <helpers/DamagedRx.h>
 #include <helpers/meshtastic/MeshtasticRx.h>
 #include <helpers/weather/SensorTracker.h>
 #include <helpers/aircraft/Uat.h>
@@ -430,7 +431,7 @@ private:
   // The synthetic channels have fixed slots after the regular ones, whichever are on, so a client
   // never sees one move: Meshtastic, then Weather, then Aircraft. A slot whose feature is off reads
   // as an empty channel.
-  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2 };
+  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3 };
   // One listen at a time: Meshtastic, weather and aircraft each take the radio away from the mesh
   // in their own way, so turning one on turns the others off. 'radar' and copying a radio pause
   // whichever is on while they run.
@@ -441,7 +442,7 @@ private:
   bool _listens_paused = false;
   bool listensBusy(char* reply) const;
   void drainFsk();                   // drop packets queued by a listen that's over   // paused: an error in reply, and true
-  int virtualChannelCount() const { return _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0; }
+  int virtualChannelCount() const { return _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0; }
   bool isVirtualChannelSlot(int idx) const;
 
   // Aircraft heard on 978 MHz (UAT), shown as one more receive-only channel after Weather's
@@ -501,6 +502,50 @@ private:
   int fillSelfInfo(uint8_t* out);
   int fillBattAndStorage(uint8_t* out);
   void handleSideFrame(uint8_t* frame, size_t len);
+public:
+  // Packets that failed their CRC check, read as far as they go and shown in one more receive-only
+  // channel after Aircraft's (MyMeshDamaged.cpp, docs/damaged_packets.md)
+  struct DamagedMsg {
+    uint32_t at;                 // millis() when first heard; 0 = a free slot
+    uint8_t kind;                // damaged::Kind
+    char name[32];               // the channel's or the contact's
+    uint8_t secret[PUB_KEY_SIZE];
+    damaged::Copy c;             // the pieces, merged from copies
+    int8_t snr_x4;
+    uint8_t copies;
+  };
+  struct DamagedSeen {
+    uint32_t at;                 // millis() | 1; 0 = empty
+    damaged::Fingerprint print;
+  };
+private:
+  static const int DMG_PENDING = 3, DMG_SEEN = 12;
+  uint8_t _dmg_raw[MAX_TRANS_UNIT + 1];
+  DamagedMsg _dmg_pending[DMG_PENDING] = {};
+  DamagedSeen _dmg_seen[DMG_SEEN] = {};
+  uint8_t _dmg_seen_next = 0;
+  struct DamagedEvent {          // for 'get dmg.log'
+    uint32_t at;
+    uint8_t len, n;
+    uint16_t good;
+    char what;                   // '-' nothing read, 'i' an intact copy was heard, 'j' joined, 'w' waiting
+    uint8_t slot;
+  };
+  static const int DMG_LOG = 8;
+  DamagedEvent _dmg_log[DMG_LOG] = {};
+  uint8_t _dmg_log_next = 0;
+  uint32_t _dmg_heard = 0, _dmg_read = 0, _dmg_shown = 0, _dmg_fixed = 0, _dmg_joined = 0, _dmg_dupes = 0;
+  bool isDamagedChannel(int idx) const;
+  void getDamagedChannel(ChannelDetails& ch);
+  void applyDamaged();
+  void damagedLoop();
+  void damagedNoteIntact(const uint8_t* raw, int len);
+  bool damagedHadIntact(const uint8_t* raw, int len, const damaged::Result& r) const;
+  bool damagedRead(uint8_t* raw, int len, DamagedMsg& best);
+  bool damagedMerge(DamagedMsg& m, const DamagedMsg& in);
+  void damagedPost(DamagedMsg& m);
+  void damagedFinish(DamagedMsg& m);
+  bool handleDamagedCommand(const char* command, char* reply);
   bool isAircraftChannel(int idx) const;
   void describePlane(const Plane& p, char* out, size_t n);
   bool weatherShown(const wxsensor::Reading& r) const;

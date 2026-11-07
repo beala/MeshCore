@@ -417,6 +417,18 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - One at a time with `mt` and `wx` (see above).
 - `radar [seconds] [threshold] [MHz]`, `get radar`, `get radar.bursts`, `radar stop`: listen on 1030 MHz and work out how fast the radars around turn (LR2021). See [Radar sweep detector](radar.md). Meshtastic, weather or aircraft pause meanwhile.
 
+#### Damaged packets
+**Usage:**
+- `dmg on`, `dmg off`
+- `dmg` or `get dmg`: packets heard with a bad CRC, read, shown, fixed, joined from copies, also heard intact
+- `get dmg.log`: the last 8 damaged packets and what became of them
+
+**Example reply:** `> Damaged on: 46 heard, 44 read, 21 shown (2 fixed, 6 joined from copies), 17 also heard intact`
+
+**Notes:**
+- Packets that fail their CRC check are read as far as they go, and show in the app as one more receive-only channel, "Damaged", with ▒▒▒▒ for lost text. Shown only: never acked, forwarded or used. See [Damaged packets](damaged_packets.md).
+- Settings are saved. Reconnect the app after `dmg on` so it lists the new channel. Any radio; not one at a time with the listens.
+
 #### Copy this radio to another
 **Usage:**
 - `clone receive [MHz] [gfsk]`: on the new radio. It shows a 6-digit code and waits 5 minutes.
