@@ -136,9 +136,10 @@ bool MyMesh::handleFreqCommand(const char* command, char* reply) {
   uint32_t now = millis();
   for (int a = start; a < n; a++) {
     const freqprint::Row& r = _freq.rows[order[a]];
-    char id[16];
-    // 2 bytes of ID and a name for a certain row; an unnamed one shows its 1 byte (as damaged packets do)
-    damagedRadioName(r.id, r.certain ? (r.idn < 2 ? r.idn : 2) : 1, id, sizeof(id));
+    char id[20];
+    // a certain row: its ID (2 or 3 bytes, as the mesh's path hashes; an advert's key shows 3) and name;
+    // an unnamed one shows its 1 byte (as damaged packets do)
+    damagedRadioName(r.id, r.certain ? (r.idn < 3 ? r.idn : 3) : 1, id, sizeof(id));
     char age[8];
     fmtAge(now - r.last, age, sizeof(age));
     char item[64];

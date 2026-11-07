@@ -289,6 +289,11 @@ TEST(DamagedSender, IdHasEveryByteThePacketGives) {
   ASSERT_EQ(2, id.n);
   EXPECT_EQ(0x7A, id.b[0]); EXPECT_EQ(0x3C, id.b[1]);
   EXPECT_EQ(0x7A, sender(two, sizeof(two)));
+  const uint8_t three[] = { TYPE_GRP_TXT << 2 | 1, 0x81, 0x7A, 0x3C, 0x19, 0x11, 9, 9 };   // 1 hop, 3-byte hashes
+  senderId(three, sizeof(three), id);
+  ASSERT_EQ(3, id.n);
+  EXPECT_GE(id.n, NAME_MIN_BYTES);
+  EXPECT_EQ(0x7A, id.b[0]); EXPECT_EQ(0x3C, id.b[1]); EXPECT_EQ(0x19, id.b[2]);
   const uint8_t one[] = { TYPE_GRP_TXT << 2 | 1, 1, 0x7A, 0x11, 9, 9 };
   senderId(one, sizeof(one), id);
   EXPECT_EQ(1, id.n);   // too short to name a contact

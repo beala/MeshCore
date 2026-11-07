@@ -13,7 +13,7 @@ The radio keeps a table of the radios it hears, one row per radio, with its usua
 > 4 radios; 2 share 4c; 88a1 Hilltop: -1125Hz ~2, 240, 2m; 4c07 Sender: -390Hz ~2, 6, 7m; 4c: +23Hz ~9, 12, 5s; 7a: +310Hz ~4, 40, 1m
 ```
 
-Per radio: its ID (2 bytes and a contact's name once it's known for sure, else its 1-byte ID), its
+Per radio: its ID (2 or 3 bytes and a contact's name once it's known for sure, else its 1-byte ID), its
 usual frequency error, how far its readings stray from that (`~2`: ±2 Hz), how many packets were put
 under it, and when it was last heard. Most heard first; `get nodes.freq 4` starts at the 5th.
 `2 share 4c`: two radios whose IDs start with `4c`, told apart by their frequencies.
@@ -30,7 +30,8 @@ How the table is built, from each packet that passes its CRC:
   more, so it follows slow drift (heat moves a radio by 150 Hz over minutes). A reading that fits no
   row starts a new one: a radio not heard before, or another radio with the same ID.
 - **Certain rows.** A direct advert whose signature checks out, or a packet with an ID of 2 bytes or
-  more, makes its row certain: only certain rows are shown with 2 bytes and a name. A row started
+  more (3 is the most a path hash has), makes its row certain: only certain rows are shown with 2 or 3
+  bytes and a name. A row started
   from 1-byte IDs stays unnamed (1 in 256 radios share each) until such a packet confirms it, at the
   same frequency.
 - **Learning.** A row learns its frequency from packets whose ID fits only that row: a 1-byte ID

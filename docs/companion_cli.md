@@ -353,7 +353,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 #### See the radios around you by frequency (LR2021 only)
 **Usage:**
-- `get nodes.freq`: one row per radio heard: its ID (2 bytes and a name once known for sure), its usual frequency error in Hz, how far its readings stray (±Hz), packets, and when last heard. `get nodes.freq <n>` starts at row n.
+- `get nodes.freq`: one row per radio heard: its ID (2 or 3 bytes and a name once known for sure), its usual frequency error in Hz, how far its readings stray (±Hz), packets, and when last heard. `get nodes.freq <n>` starts at row n.
 - `nodes.freq reset`: clear the table
 - `get nodes.list [n]`: the same rows as numbers, for apps (format in [frequency_fingerprint.md](frequency_fingerprint.md))
 

@@ -32,6 +32,18 @@ TEST(FreqPrint, OneByteIdAtTheSameFrequencyIsThatRadio) {
   EXPECT_EQ(11, t.rows[i].learned);
 }
 
+TEST(FreqPrint, ThreeByteIdMakesACertainRowToo) {
+  Table t;
+  int i = t.add(RIDGE, 3, true, 300, GOOD, 1000);   // a repeater on a mesh with 3-byte path hashes
+  ASSERT_GE(i, 0);
+  EXPECT_TRUE(t.rows[i].certain);
+  EXPECT_EQ(3, t.rows[i].idn);
+  EXPECT_EQ(i, t.add(RIDGE, 2, true, near(300), GOOD, 1100));   // the same radio with a 2-byte hash
+  EXPECT_EQ(i, t.add(RIDGE, 4, true, near(300), GOOD, 1200));   // and its advert: the longer ID is kept
+  EXPECT_EQ(4, t.rows[i].idn);
+  EXPECT_EQ(1, t.used());
+}
+
 TEST(FreqPrint, OneByteIdNeverNamesARadioOnItsOwn) {
   Table t;
   int i = t.add(RIDGE, 1, false, 300, GOOD, 1000);
