@@ -357,10 +357,10 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - `nodes.freq reset`: clear the table
 - `get nodes.list [n]`: the same rows as numbers, for apps (format in [frequency_fingerprint.md](frequency_fingerprint.md))
 
-**Example reply:** `> 3 radios; 2 share 4c; a2b3: +27Hz ~9, 19, 6s; 4c: +23Hz ~9, 12, 5s; 4c07 Sender: -390Hz ~2, 6, 7s`
+**Example reply:** `> 3 radios; a2b3: +27Hz ~9, 19, 6s; 4c (not 4c07): +23Hz ~9, 12, 5s; 4c07 Sender: -390Hz ~2, 6, 7s`
 
 **Notes:**
-- `2 share 4c`: two radios whose IDs start with the same byte, told apart by their frequencies.
+- `4c (not 4c07)`: an unconfirmed radio whose 1-byte ID matches another radio's first byte, but at a different frequency, so it's counted as a different radio.
 - How rows are learned and when a packet is put under one: [Telling transmitters apart by frequency](frequency_fingerprint.md).
 
 ---
@@ -447,13 +447,13 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 #### Airport weather on 978 MHz (LR2021 only)
 **Usage:**
 - `metar on`, `metar off`
-- `set metar.airports <IDs>` (eg. `KLMO,KBJC`; `none` to clear), `set metar.taf on|off` (default off), `set metar.duty <percent>` (default 10; 100 = all the time), `set metar.freq <MHz>` (default 978; others for bench tests)
+- `set metar.airports <IDs>` (eg. `KLMO,KBJC`; `all`, the default: every airport heard), `set metar.raw on|off` (reports as sent, not in words; default off), `set metar.taf on|off` (default off), `set metar.duty <percent>` (default 10; 100 = all the time), `set metar.freq <MHz>` (default 978; others for bench tests)
 - `metar` or `get metar`, `get metar.heard`, `get metar.stats`
 
 **Example reply:** `> 97 frames (5 corrected, 3 bad), 107 reports, 10 posts, listening 9.8%; station slot 7, -61 dBm, 12.4 mi NE`
 
 **Notes:**
-- METARs and TAFs from FAA ground stations (FIS-B) for the airports chosen show in the app as one more receive-only channel, "Airport weather", each report once. See [Airport weather](airport_weather.md).
+- METARs from FAA ground stations (FIS-B) show in the app in plain words as one more receive-only channel, "Airport weather", each report once: `KLMO: 53°F, humidity 43%. Few clouds at 8,000 ft. Wind NW 14 mph. Visibility 10+ mi. Pressure 30.02 inHg. (7 min ago)`. See [Airport weather](airport_weather.md).
 - Settings are saved. Reconnect the app after `metar on` so it lists the new channel.
 - One at a time with `mt`, `wx` and `air` (see above).
 

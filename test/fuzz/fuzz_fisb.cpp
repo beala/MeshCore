@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <helpers/weather/Fisb.h>
+#include <helpers/weather/Metar.h>
 
 static void readAll(const uint8_t* d, int len) {
   fisb::Reports r(d, len);
@@ -18,6 +19,16 @@ static void readAll(const uint8_t* d, int len) {
     fisb::words(t.text, t.len, kind, sizeof(kind), where, sizeof(where), when, sizeof(when));
     int k = fisb::oneLine(t.text, t.len, line, sizeof(line));
     if (k < 0 || k >= (int) sizeof(line) || line[k] != 0) abort();
+    metar::Report m;
+    if (metar::parse(t.text, t.len, &m)) {   // METARs in words, both units, and cut short
+      char words[300], small[20];
+      for (int us = 0; us < 2; us++) {
+        int w = metar::describe(m, us, words, sizeof(words));
+        if (w < 0 || w >= (int) sizeof(words) || words[w] != 0) abort();
+        metar::describe(m, us, small, sizeof(small));
+        if (strlen(small) >= sizeof(small)) abort();
+      }
+    }
     if (++n > 1000) abort();
   }
 }
@@ -43,6 +54,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       if (fixed < 0 || fixed > 60) abort();
       readAll(d, sizeof(d));
     }
+  }
+  // any text as a METAR (the parser sees every shape of group)
+  metar::Report m;
+  if (metar::parse((const char*) data, (int) size, &m)) {
+    char words[300];
+    metar::describe(m, true, words, sizeof(words));
+    metar::describe(m, false, words, sizeof(words));
   }
   char out[16];
   fisb::dlac(data, (int) size, out, sizeof(out));

@@ -9,13 +9,14 @@
 
 #include "MyMesh.h"
 #include <helpers/weather/Fisb.h>
+#include <helpers/weather/Metar.h>
 #ifdef FISB_BENCH_TX
 #include "target.h"
 #endif
 
 #define METAR_WINDOW_MS   1100   // one listen: a whole UTC second, so every station's slot is in it
 #define METAR_FOREVER_MS  5000   // one listen when listening all the time (duty 100)
-#define METAR_POST_MAX    150    // characters per post (a channel text is at most about 160)
+#define METAR_POST_MAX    160    // bytes per post (a channel text is at most MAX_FRAME_SIZE - 11)
 
 static mesh::Radio::FskListen fisbListen(float freq) {
   mesh::Radio::FskListen cfg = {};
@@ -53,8 +54,7 @@ void MyMesh::applyMetar() {
   _metar_listening = false;
   if (_metar_active && !was) {
     _metar_frames = _metar_fixed = _metar_bad = _metar_reports = _metar_shown = _metar_listen_ms = 0;
-    _metar_posted_n = _metar_heard_n = 0;
-    _metar_hinted = false;
+    _metar_seen_n = 0;
     _metar_stn_lat = _metar_stn_lon = 0;
     _metar_since = _metar_next = millis();
   }
@@ -88,6 +88,53 @@ bool MyMesh::metarWanted(const char* where) const {
   return false;
 }
 
+// Minutes since a report's day, hour and minute (UTC), by this radio's clock; -1 if the clock isn't set
+static int32_t civilDays(int y, int m, int d) {   // days since 1970-01-01 (H. Hinnant's algorithm)
+  y -= m <= 2;
+  int era = (y >= 0 ? y : y - 399) / 400;
+  int yoe = y - era * 400;
+  int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + doe - 719468;
+}
+
+int32_t MyMesh::metarMinutesAgo(uint8_t day, uint8_t hour, uint8_t minute) {
+  uint32_t now = getRTCClock()->getCurrentTime();
+  if (now < 1735689600UL || day < 1 || day > 31) return -1;   // before 2025: never set
+  // this month's year and month, from the day count
+  int32_t z = (int32_t)(now / 86400) + 719468;
+  int era = z / 146097, doe = z - era * 146097;
+  int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  int mp = (5 * doy + 2) / 153;
+  int d = doy - (153 * mp + 2) / 5 + 1;
+  int m = mp + (mp < 10 ? 3 : -9);
+  int y = yoe + era * 400 + (m <= 2);
+  if (day > d + 1) { if (--m < 1) { m = 12; y--; } }   // last month's report
+  int64_t at = (int64_t) civilDays(y, m, day) * 86400 + hour * 3600 + minute * 60;
+  int64_t ago = ((int64_t) now - at) / 60;
+  if (ago < -10) return -1;   // a clock that's off
+  return ago < 0 ? 0 : (int32_t) ago;
+}
+
+MyMesh::MetarSeen* MyMesh::metarSeen(const char* where) {
+  if (strlen(where) >= sizeof(_metar_seen[0].id)) return NULL;
+  MetarSeen* e = NULL;
+  for (int i = 0; i < _metar_seen_n && !e; i++) if (strcmp(_metar_seen[i].id, where) == 0) e = &_metar_seen[i];
+  if (!e) {
+    if (_metar_seen_n < METAR_SEEN) {
+      e = &_metar_seen[_metar_seen_n++];
+    } else {   // full: the airport heard longest ago
+      e = &_metar_seen[0];
+      for (int i = 1; i < _metar_seen_n; i++) if ((int32_t)(_metar_seen[i].heard_at - e->heard_at) < 0) e = &_metar_seen[i];
+    }
+    memset(e, 0, sizeof(*e));
+    strcpy(e->id, where);
+  }
+  e->heard_at = millis();
+  return e;
+}
+
 void MyMesh::metarReport(const char* text, int len) {
   _metar_reports++;
   char kind[10], where[8], when[10];
@@ -95,55 +142,49 @@ void MyMesh::metarReport(const char* text, int len) {
   bool is_metar = strcmp(kind, "METAR") == 0 || strcmp(kind, "SPECI") == 0;
   bool is_taf = strncmp(kind, "TAF", 3) == 0;   // TAF, TAF.AMD
   if (!is_metar && !is_taf) return;   // PIREP, WINDS, NOTAM, ...: not shown
-  if (is_metar) {   // the airports heard, for 'get metar.heard'
-    bool known = false;
-    for (int i = 0; i < _metar_heard_n && !known; i++) known = strcmp(_metar_heard[i], where) == 0;
-    if (!known && strlen(where) < sizeof(_metar_heard[0])) {
-      int slot = _metar_heard_n < (int)(sizeof(_metar_heard) / sizeof(_metar_heard[0])) ? _metar_heard_n++ : (int)(_metar_reports % _metar_heard_n);
-      strcpy(_metar_heard[slot], where);
-    }
-  }
+  MetarSeen* seen = metarSeen(where);
+  if (!seen) return;
   if (is_taf && !_prefs.metar.taf) return;
 #ifdef MAX_GROUP_CHANNELS
   int ch = MAX_GROUP_CHANNELS + VCH_METAR;
-  if (!_prefs.metar.airports[0]) {
-    // nothing chosen yet: one hint, not a post for each of the dozens of airports a station covers
-    if (!_metar_hinted && _metar_heard_n >= 1) {
-      _metar_hinted = true;
-      char hint[MAX_FRAME_SIZE];
-      snprintf(hint, sizeof(hint), "Hearing airport weather, eg. %s. Choose airports to show: "
-               "set metar.airports %s ('get metar.heard' lists the ones heard)", where, where);
-      pushChannelText(ch, getRTCClock()->getCurrentTimeUnique(), 0, 0, hint, strlen(hint));
-    }
-    return;
-  }
-  if (!metarWanted(where)) return;
+  if (_prefs.metar.airports[0] && !metarWanted(where)) return;   // empty: every airport
   uint32_t h = hashWords(kind, where, when);
-  for (int i = 0; i < _metar_posted_n; i++) if (_metar_posted[i] == h) return;   // shown already
-  int n_posted = sizeof(_metar_posted) / sizeof(_metar_posted[0]);
-  if (_metar_posted_n < n_posted) _metar_posted[_metar_posted_n++] = h;
-  else {
-    memmove(_metar_posted, &_metar_posted[1], sizeof(_metar_posted) - sizeof(_metar_posted[0]));
-    _metar_posted[n_posted - 1] = h;
-  }
+  uint32_t& last = is_taf ? seen->taf : seen->metar;
+  if (last == h) return;   // shown already
+  last = h;
 
-  // "KLMO: 052153Z 31012KT 10SM ..." (the app shows "sender: text"); "KLMO: SPECI ..." and
-  // "KLMO: TAF ..." for the others. Long ones (TAFs) in parts.
+  // In words: "KLMO: 52°F, humidity 41%. Few clouds at 8,000 ft. Wind W 14 mph. ... 21:53 UTC, 12 min
+  // ago." (the app shows "sender: text"); "KBJC update: ..." for a SPECI. As sent with 'set metar.raw
+  // on', and always for TAFs: "KLMO: 052153Z 31012KT 10SM ...", "KLMO: TAF ...". Long ones in parts.
   static char line[fisb::TEXT_MAX];
-  int k = fisb::oneLine(text, len, line, sizeof(line));
-  const char* body = line;
-  int skip = 0;   // drop the kind and the airport from the line: they're in the prefix
-  for (int w = 0; w < 2 && skip < k; w++) {
-    while (skip < k && line[skip] != ' ') skip++;
-    while (skip < k && line[skip] == ' ') skip++;
+  static metar::Report rep;
+  const char* label = "";   // after the airport in the first part
+  int k, skip = 0;
+  if (is_metar && !_prefs.metar.raw && metar::parse(text, len, &rep)) {
+    k = metar::describe(rep, !_prefs.wx.metric, line, sizeof(line));
+    if (rep.has_time && k < (int) sizeof(line) - 40) {   // how old: by this radio's clock, else the time
+      int32_t ago = metarMinutesAgo(rep.day, rep.hour, rep.minute);
+      if (ago >= 0 && ago < 120) k += snprintf(&line[k], sizeof(line) - k, " (%ld min ago)", (long) ago);
+      else if (ago >= 120 && ago < 48 * 60) k += snprintf(&line[k], sizeof(line) - k, " (%ld h ago)", (long)(ago / 60));
+      else k += snprintf(&line[k], sizeof(line) - k, " (%02u:%02u UTC)", rep.hour, rep.minute);
+    }
+    if (strcmp(kind, "SPECI") == 0) label = " update";
+  } else {
+    k = fisb::oneLine(text, len, line, sizeof(line));
+    for (int w = 0; w < 2 && skip < k; w++) {   // drop the kind and the airport: they're in the prefix
+      while (skip < k && line[skip] != ' ') skip++;
+      while (skip < k && line[skip] == ' ') skip++;
+    }
+    if (strcmp(kind, "METAR") != 0) label = kind;   // "KLMO: SPECI ...", "KLMO: TAF ..."
   }
-  body = &line[skip];
+  bool label_word = label[0] && label[0] != ' ';
+  const char* body = &line[skip];
   int left = k - skip;
   char post[MAX_FRAME_SIZE];
   bool first = true;
   while (left > 0) {
-    int m = snprintf(post, sizeof(post), "%s%s: %s%s", where, first ? "" : " (cont.)",
-                     first && strcmp(kind, "METAR") != 0 ? kind : "", first && strcmp(kind, "METAR") != 0 ? " " : "");
+    int m = snprintf(post, sizeof(post), "%s%s%s: %s%s", where, first && !label_word ? label : "", first ? "" : " (cont.)",
+                     first && label_word ? label : "", first && label_word ? " " : "");
     int room = METAR_POST_MAX - m;
     int take = left;
     if (take > room) {   // cut at a space
@@ -258,9 +299,10 @@ bool MyMesh::handleMetarCommand(const char* command, char* reply) {
     char listen[24];
     if (_prefs.metar.duty >= 100) strcpy(listen, "all the time");
     else snprintf(listen, sizeof(listen), "%u%% of the time", _prefs.metar.duty);
-    snprintf(reply, 160, "> Airport weather %s: %s, listening %s, %s, TAFs %s%s", _prefs.metar.en ? "on" : "off",
-             _prefs.metar.airports[0] ? _prefs.metar.airports : "no airports chosen", listen,
-             _prefs.metar.freq == 978.0f ? "978 MHz" : "bench frequency", _prefs.metar.taf ? "on" : "off",
+    snprintf(reply, 160, "> Airport weather %s: %s, listening %s, %s, %s, TAFs %s%s", _prefs.metar.en ? "on" : "off",
+             _prefs.metar.airports[0] ? _prefs.metar.airports : "every airport", listen,
+             _prefs.metar.freq == 978.0f ? "978 MHz" : "bench frequency", _prefs.metar.raw ? "as sent" : "in words",
+             _prefs.metar.taf ? "on" : "off",
              _prefs.metar.en && !_metar_active ? " (needs an LR2021)" : "");
     return true;
   }
@@ -287,12 +329,14 @@ bool MyMesh::handleMetarCommand(const char* command, char* reply) {
     return true;
   }
   if (strcmp(command, "get metar.heard") == 0) {
-    if (_metar_heard_n == 0) {
-      strcpy(reply, _metar_active ? "> no METARs heard yet" : "> airport weather is off ('metar on')");
+    if (_metar_seen_n == 0) {
+      strcpy(reply, _metar_active ? "> no reports heard yet" : "> airport weather is off ('metar on')");
       return true;
     }
-    int k = sprintf(reply, "> %d:", _metar_heard_n);
-    for (int i = 0; i < _metar_heard_n && k < 150; i++) k += sprintf(&reply[k], "%s%s", i ? "," : " ", _metar_heard[i]);
+    int k = sprintf(reply, "> %d:", _metar_seen_n);
+    int i = 0;
+    for (; i < _metar_seen_n && k < 148; i++) k += sprintf(&reply[k], "%s%s", i ? "," : " ", _metar_seen[i].id);
+    if (i < _metar_seen_n) sprintf(&reply[k], " +%d", _metar_seen_n - i);
     return true;
   }
   const char* arg = NULL;
@@ -318,7 +362,7 @@ bool MyMesh::handleMetarCommand(const char* command, char* reply) {
   const char* opt = &command[10];
   if (strncmp(opt, "airports ", 9) == 0 || strcmp(opt, "airports") == 0) {
     const char* v = opt[8] ? &opt[9] : "";
-    if (strcmp(v, "none") == 0) v = "";
+    if (strcmp(v, "all") == 0) v = "";
     if (strlen(v) >= sizeof(_prefs.metar.airports)) {
       sprintf(reply, "Error: at most %d characters, eg. KLMO,KBJC", (int) sizeof(_prefs.metar.airports) - 1);
       return true;
@@ -329,18 +373,28 @@ bool MyMesh::handleMetarCommand(const char* command, char* reply) {
         return true;
       }
     }
+    char was[sizeof(_prefs.metar.airports)];
+    strcpy(was, _prefs.metar.airports);
     StrHelper::strncpy(_prefs.metar.airports, v, sizeof(_prefs.metar.airports));
     for (char* p = _prefs.metar.airports; *p; p++) *p = toupper((unsigned char)*p);
-    _metar_posted_n = 0;   // show the latest for the new list
+    if (strcmp(was, _prefs.metar.airports) != 0) {   // a new list: show each one's latest again
+      for (int i = 0; i < _metar_seen_n; i++) _metar_seen[i].metar = _metar_seen[i].taf = 0;
+    }
     savePrefs();
     if (v[0]) sprintf(reply, "OK - showing %s", _prefs.metar.airports);
-    else strcpy(reply, "OK - no airports chosen ('get metar.heard' lists the ones heard)");
+    else strcpy(reply, "OK - showing every airport heard");
     return true;
   }
   if (strncmp(opt, "taf ", 4) == 0 && metarOnOff(&opt[4], &on)) {
     _prefs.metar.taf = on ? 1 : 0;
     savePrefs();
     strcpy(reply, on ? "OK - forecasts (TAF) shown too" : "OK - current conditions (METAR, SPECI) only");
+    return true;
+  }
+  if (strncmp(opt, "raw ", 4) == 0 && metarOnOff(&opt[4], &on)) {
+    _prefs.metar.raw = on ? 1 : 0;
+    savePrefs();
+    strcpy(reply, on ? "OK - reports as sent (31012KT 10SM ...)" : "OK - reports in words (units as 'set wx.units')");
     return true;
   }
   if (strncmp(opt, "duty ", 5) == 0) {
@@ -360,6 +414,6 @@ bool MyMesh::handleMetarCommand(const char* command, char* reply) {
     sprintf(reply, "OK - listening on %s MHz", &opt[5]);
     return true;
   }
-  strcpy(reply, "Error: set metar.airports <IDs>|none, metar.taf on|off, metar.duty <1-100>, metar.freq <MHz>");
+  strcpy(reply, "Error: set metar.airports <IDs>|all, metar.taf on|off, metar.raw on|off, metar.duty <1-100>, metar.freq <MHz>");
   return true;
 }

@@ -66,7 +66,7 @@ echo "built .pio/fuzz/fuzz_uat"
 
 # Airport weather: FIS-B ground station frames (978 MHz)
 clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
-  -I src test/fuzz/fuzz_fisb.cpp src/helpers/weather/Fisb.cpp src/helpers/aircraft/Uat.cpp -o .pio/fuzz/fuzz_fisb
+  -I src test/fuzz/fuzz_fisb.cpp src/helpers/weather/Fisb.cpp src/helpers/weather/Metar.cpp src/helpers/aircraft/Uat.cpp -o .pio/fuzz/fuzz_fisb
 echo "built .pio/fuzz/fuzz_fisb"
 
 # Damaged packets: what's left of packets that failed their CRC, with the real AES and SHA-256

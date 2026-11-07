@@ -579,13 +579,16 @@ private:
 
   // Airport weather: METAR/TAF text from FIS-B ground stations on 978 MHz (MyMeshMetar.cpp,
   // docs/airport_weather.md), one more receive-only channel after Damaged's
-  bool _metar_active = false, _metar_listening = false, _metar_hinted = false;
+  bool _metar_active = false, _metar_listening = false;
   uint32_t _metar_next = 0, _metar_since = 0, _metar_listen_ms = 0;
   uint32_t _metar_frames = 0, _metar_fixed = 0, _metar_bad = 0, _metar_reports = 0, _metar_shown = 0;
-  uint32_t _metar_posted[32];        // reports already shown (a hash of kind, airport and time)
-  uint8_t _metar_posted_n = 0;
-  char _metar_heard[24][5];          // airports heard lately, for 'get metar.heard'
-  uint8_t _metar_heard_n = 0;
+  // the airports heard and their last report shown (a hash of kind, airport and time), so each new
+  // report is posted once; when full, the one heard longest ago makes room
+  struct MetarSeen { char id[5]; uint32_t metar, taf, heard_at; };
+  static const int METAR_SEEN = 96;  // a station covers dozens of airports
+  MetarSeen _metar_seen[METAR_SEEN];
+  uint8_t _metar_seen_n = 0;
+  MetarSeen* metarSeen(const char* where);
   int32_t _metar_stn_lat = 0, _metar_stn_lon = 0;   // the last ground station heard (x 1e5)
   int16_t _metar_stn_rssi = 0;
   uint8_t _metar_stn_slot = 0;
@@ -593,6 +596,7 @@ private:
   void metarLoop();
   void metarFrame(const uint8_t* frame, int len, float rssi);
   void metarReport(const char* text, int len);
+  int32_t metarMinutesAgo(uint8_t day, uint8_t hour, uint8_t minute);
   bool metarWanted(const char* where) const;
   bool handleMetarCommand(const char* command, char* reply);
   bool isMetarChannel(int idx) const;

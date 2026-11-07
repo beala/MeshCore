@@ -119,19 +119,7 @@ bool MyMesh::handleFreqCommand(const char* command, char* reply) {
   }
   int order[freqprint::ROWS];
   int n = freqOrder(_freq, order);
-  // which first bytes are shared by more than one radio
   int k = sprintf(reply, "> %d radio%s", used, used == 1 ? "" : "s");
-  bool shared_any = false;
-  for (int a = 0; a < n; a++) {
-    uint8_t f = _freq.rows[order[a]].id[0];
-    bool first = true;
-    for (int b = 0; b < a; b++) if (_freq.rows[order[b]].id[0] == f) first = false;
-    int c = _freq.radiosOn(f);
-    if (first && c > 1 && k < 60) {
-      k += sprintf(&reply[k], "%s %d share %02x", shared_any ? "," : ";", c, f);
-      shared_any = true;
-    }
-  }
   if (start > 0) k += sprintf(&reply[k], " (from %d)", start);
   uint32_t now = millis();
   for (int a = start; a < n; a++) {
@@ -142,8 +130,21 @@ bool MyMesh::handleFreqCommand(const char* command, char* reply) {
     damagedRadioName(r.id, r.certain ? (r.idn < 3 ? r.idn : 3) : 1, id, sizeof(id));
     char age[8];
     fmtAge(now - r.last, age, sizeof(age));
-    char item[64];
-    int w = snprintf(item, sizeof(item), "; %s: %+ldHz ~%u, %u, %s", id, (long)(r.mean_x16 / 16),
+    // an unnamed radio whose ID byte another radio has too, at another frequency: "(not 0700)"
+    char other[16] = "";
+    if (!r.certain) {
+      for (int b = 0; b < n && !other[0]; b++) {
+        const freqprint::Row& o = _freq.rows[order[b]];
+        if (&o == &r || o.id[0] != r.id[0]) continue;
+        char oid[20];
+        damagedRadioName(o.id, o.certain ? (o.idn < 2 ? o.idn : 2) : 1, oid, sizeof(oid));
+        char* sp = strchr(oid, ' ');   // the ID only, not the name
+        if (sp) *sp = 0;
+        snprintf(other, sizeof(other), " (not %.6s)", oid);
+      }
+    }
+    char item[80];
+    int w = snprintf(item, sizeof(item), "; %s%s: %+ldHz ~%u, %u, %s", id, other, (long)(r.mean_x16 / 16),
                      (unsigned)((r.dev_x16 + 8) / 16), (unsigned)(r.learned + r.matched), age);
     if (k + w >= 158) {
       if (k + 12 < 160) k += sprintf(&reply[k], "; +%d more", n - a);

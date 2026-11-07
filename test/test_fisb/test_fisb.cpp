@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <helpers/weather/Fisb.h>
+#include <helpers/weather/Metar.h>
 #include "vectors.inc"
 
 static std::vector<uint8_t> hex(const char* s) {
@@ -132,6 +133,88 @@ TEST(Fisb, GarbageStaysInBounds) {
     if (k & 1) { d[8] = 0x0D; d[9] = 0x80; d[10] = 0x06; d[11] = 0x74; }   // a text APDU's header
     reports(d, sizeof(d));
   }
+}
+
+static std::string words(const char* m, bool us = true) {
+  metar::Report r;
+  if (!metar::parse(m, strlen(m), &r)) return "(not read)";
+  char out[300];
+  metar::describe(r, us, out, sizeof(out));
+  return out;
+}
+
+TEST(Metar, RealReportsInWords) {
+  EXPECT_EQ("37°F, humidity 38%. Clear sky. Wind NW 3 mph. Visibility 10+ mi. Pressure 30.51 inHg.",
+            words("METAR KCXP 240355Z AUTO 32003KT 10SM CLR 03/M10 A3051 RMK AO2=\n"));
+  EXPECT_EQ("46°F, humidity 100%. Overcast at 200 ft. Wind E 6 mph. Visibility 1 3/4 mi. Pressure 30.31 inHg.",
+            words("METAR KMER 240355Z AUTO 10005KT 1 3/4SM OVC002 08/08 A3031 RMK AO1=\n"));
+  // the remarks' T group gives tenths: 11.7 and 11.1 C
+  EXPECT_EQ("53°F, humidity 96%. Mist. Few clouds at 900 ft. Wind NNW 10 mph. Visibility 4 mi. Pressure 30.40 inHg.",
+            words("METAR KCEC 240356Z AUTO 34009KT 4SM BR FEW009 12/11 A3040 RMK AO2      SLP294 T01170111="));
+  EXPECT_EQ("29°F, humidity 39%. Clear sky. Calm wind. Pressure 30.49 inHg.",
+            words("METAR KBAN 240352Z AUTO 00000KT CLR M02/M14 A3049 RMK AO2 SLP363  T10171139="));
+}
+
+TEST(Metar, EveryRealMetarIsRead) {
+  int n = 0;
+  for (const RealFrame& f : REAL) {
+    for (int i = 0; i < f.n && i < 8; i++) {
+      const char* t = f.reports[i];
+      if (strncmp(t, "METAR ", 6) && strncmp(t, "SPECI ", 6)) continue;
+      metar::Report r;
+      ASSERT_TRUE(metar::parse(t, strlen(t), &r)) << t;
+      EXPECT_TRUE(r.has_time && r.has_wind && r.has_temp && r.has_pressure) << t;
+      n++;
+    }
+  }
+  EXPECT_GE(n, 5);
+}
+
+TEST(Metar, StormsGustsAndLayers) {
+  EXPECT_EQ("50°F, humidity 66%. Thunderstorm with heavy rain. Mostly cloudy at 4,000 ft (thunderstorm clouds). "
+            "Wind WNW 29 mph, gusts 40. Visibility 3 mi. Pressure 29.98 inHg.",
+            words("SPECI KBJC 052201Z 30025G35KT 3SM +TSRA BKN040CB 10/04 A2998="));
+  EXPECT_EQ("28°F. Light snow, freezing fog. Sky hidden, can see up to 300 ft. Wind variable 5 mph. "
+            "Visibility 1/4 mi. Pressure 29.70 inHg.",
+            words("METAR KDEN 060100Z VRB04KT 1/4SM -SN FZFG VV003 M02/ A2970"));
+  EXPECT_EQ("Showers nearby. Scattered clouds at 3,500 ft, overcast at 12,000 ft. Visibility under 1/4 mi.",
+            words("METAR KXYZ 060100Z M1/4SM VCSH SCT035 OVC120"));
+}
+
+TEST(Metar, MetricUnitsAndReports) {
+  EXPECT_EQ("17°C, humidity 72%. Light rain. Few clouds at 610 m. Wind SW 19 km/h. Visibility 10+ km. Pressure 1013 hPa.",
+            words("METAR EGLL 061020Z 22010KT 9999 -RA FEW020 17/12 Q1013", false));
+  EXPECT_EQ("17°C. No low clouds, good visibility. Wind SW 19 km/h. Pressure 1013 hPa.",
+            words("METAR LFPG 061020Z 22005MPS CAVOK 17/ Q1013", false));   // 5 m/s, no dew point
+  EXPECT_EQ("63°F, humidity 72%. Light rain. Few clouds at 2,000 ft. Wind SW 12 mph. Visibility 6+ mi. Pressure 29.91 inHg.",
+            words("METAR EGLL 061020Z 22010KT 9999 -RA FEW020 17/12 Q1013"));
+}
+
+TEST(Metar, WeatherWords) {
+  char w[48];
+  ASSERT_TRUE(metar::weatherWords("-SHRASN", w, sizeof(w)));
+  EXPECT_STREQ("light rain and snow showers", w);
+  ASSERT_TRUE(metar::weatherWords("TS", w, sizeof(w)));
+  EXPECT_STREQ("thunderstorm", w);
+  ASSERT_TRUE(metar::weatherWords("+FC", w, sizeof(w)));
+  EXPECT_STREQ("tornado or waterspout", w);
+  ASSERT_TRUE(metar::weatherWords("BCFG", w, sizeof(w)));
+  EXPECT_STREQ("patches of fog", w);
+  EXPECT_FALSE(metar::weatherWords("AUTO", w, sizeof(w)));
+  EXPECT_FALSE(metar::weatherWords("A3002", w, sizeof(w)));
+  EXPECT_FALSE(metar::weatherWords("", w, sizeof(w)));
+}
+
+TEST(Metar, NotAMetar) {
+  metar::Report r;
+  const char* taf = "TAF KBJC 052320Z 0600/0624 30012G20KT P6SM SCT080";
+  EXPECT_FALSE(metar::parse(taf, strlen(taf), &r));
+  EXPECT_FALSE(metar::parse("METAR KLMO 052153Z", 18, &r));   // nothing in it
+  // too small an out: cut, still terminated
+  char tiny[8];
+  ASSERT_TRUE(metar::parse("METAR KLMO 052153Z 31012KT 10SM CLR 12/M01 A3002", 49, &r));
+  EXPECT_LT(metar::describe(r, true, tiny, sizeof(tiny)), (int) sizeof(tiny));
+  EXPECT_STREQ("54°F, ", tiny);
 }
 
 int main(int argc, char **argv) {

@@ -281,6 +281,7 @@ private:
     uint8_t duty = 10;            // % of the time spent listening (100 = all the time)
     char airports[40] = "";       // comma-separated airport IDs to show, eg. KLMO,KBJC (empty: none, just a hint)
     uint8_t taf = 0;              // 1: forecasts (TAF) too
+    uint8_t raw = 0;              // 1: reports as sent ("31012KT 10SM ..."), not in words
   protected:
     void structure() override {
       def("en", en);
@@ -288,6 +289,7 @@ private:
       def("duty", duty);
       def("airports", airports, sizeof(airports));
       def("taf", taf);
+      def("raw", raw);
     }
   };
   // Packets that fail their CRC check: read what came through and show it in an extra channel

@@ -10,13 +10,13 @@ fingerprint of the radio that sent the packet. It's there for packets that faile
 The radio keeps a table of the radios it hears, one row per radio, with its usual frequency error:
 
 ```
-> 4 radios; 2 share 4c; 88a1 Hilltop: -1125Hz ~2, 240, 2m; 4c07 Sender: -390Hz ~2, 6, 7m; 4c: +23Hz ~9, 12, 5s; 7a: +310Hz ~4, 40, 1m
+> 4 radios; 88a1 Hilltop: -1125Hz ~2, 240, 2m; 4c07 Sender: -390Hz ~2, 6, 7m; 4c (not 4c07): +23Hz ~9, 12, 5s; 7a: +310Hz ~4, 40, 1m
 ```
 
 Per radio: its ID (2 or 3 bytes and a contact's name once it's known for sure, else its 1-byte ID), its
 usual frequency error, how far its readings stray from that (`~2`: ±2 Hz), how many packets were put
 under it, and when it was last heard. Most heard first; `get nodes.freq 4` starts at the 5th.
-`2 share 4c`: two radios whose IDs start with `4c`, told apart by their frequencies.
+`4c (not 4c07)`: a radio heard only by the 1-byte ID `4c`, at a frequency 413 Hz from 4c07's, so a different radio that happens to share the byte. The app says the same: "a different radio from 4c07 Sender (413 Hz apart)".
 `nodes.freq reset` clears the table.
 
 How the table is built, from each packet that passes its CRC:
@@ -87,7 +87,7 @@ differently on two receivers, but the difference between two transmitters is the
 On the bench, with a Heltec V4 sending as a repeater with a 2-byte ID (`a2b3`), as `a2`, as `4c` (the
 first byte of the XIAO's key) and with no ID, while the XIAO and the RAK sent signed adverts, the RAK's
 table showed 3 radios: `a2b3` (its 1-byte `a2` packets joined it), `4c07 Sender` (the XIAO), and an
-unnamed `4c` 410 Hz away from it, flagged `2 share 4c`. Weak `a2` packets that failed their CRC on the
+unnamed `4c` 410 Hz away from it, shown as `4c (not 4c07)`. Weak `a2` packets that failed their CRC on the
 XIAO were posted as `~a2b3`.
 
 ## What the tests showed

@@ -3,29 +3,35 @@
 FAA ground stations broadcast free weather on **978 MHz** (FIS-B, on the same UAT link light
 aircraft use for ADS-B): METARs (current conditions at airports), TAFs (forecasts), and more. A
 companion with an LR2021 radio listens in short breaks from the mesh and shows the reports for the
-airports you choose in the MeshCore app, in an "Airport weather" channel. Nothing is ever sent on
-978 MHz.
+airports heard in the MeshCore app, in an "Airport weather" channel, in plain words. Nothing is ever
+sent on 978 MHz.
 
 ```
-metar on                          # listen 10% of the time
-set metar.airports KLMO,KBJC      # the airports to show
+metar on                          # listen 10% of the time; every airport heard
+set metar.airports KLMO,KBJC      # or only these
 ```
 
 Reconnect the app after `metar on`. The channel comes after your own, in a fixed slot after the
 Meshtastic, Weather, Aircraft and Damaged ones (empty if those are off). Each report shows once:
 
 ```
-KLMO: 052153Z 31012KT 10SM FEW080 12/M01 A3002 RMK AO2 SLP163 T01171006
-KBJC: SPECI 052201Z 30025G35KT 3SM +TSRA BKN040CB 10/02 A2998
-KBJC: TAF 052320Z 0600/0624 30012G20KT P6SM SCT080 FM061800 32015KT P6SM BKN100
+KLMO: 53°F, humidity 43%. Few clouds at 8,000 ft, scattered clouds at 12,000 ft. Wind NW 14 mph. Visibility 10+ mi. Pressure 30.02 inHg. (7 min ago)
+KMER: 46°F, humidity 100%. Overcast at 200 ft. Wind E 6 mph. Visibility 1 3/4 mi. Pressure 30.31 inHg. (12 min ago)
+KBJC update: 50°F, humidity 66%. Thunderstorm with heavy rain, mist. Mostly cloudy at 4,000 ft (thunderstorm clouds), overcast at 9,000 ft. Wind WNW 29 mph, gusts 40. Visibility 3 mi. Pressure 29.98 inHg. (2 min ago)
 ```
 
-- Posts read `airport: report`, as channel texts are `sender: text` in the app. METARs show
-  without the word METAR; SPECIs (special reports, issued when the weather changes fast) and TAFs
-  say what they are.
-- One station sends reports for dozens of airports. Until `set metar.airports` names some, the
-  channel gets one hint instead, with an airport it heard; `get metar.heard` lists them all.
-- Long reports (most TAFs) come in parts: `KBJC (cont.): ...`.
+- Posts read `airport: report`, as channel texts are `sender: text` in the app. "update" marks a
+  SPECI, a special report issued when the weather changes fast.
+- Humidity comes from the temperature and dew point. Cloud heights are above the ground. "Mostly
+  cloudy" is a broken layer (BKN), which pilots count as a ceiling. "(7 min ago)" is by this
+  radio's clock (set from the app); without one, the report's UTC time shows instead.
+- Units follow `set wx.units`: US (°F, mph, miles, inHg) or metric (°C, km/h, km, hPa).
+- `set metar.raw on` shows reports as sent instead: `KLMO: 052153Z 31012KT 10SM FEW080 12/M01 A3002 ...`.
+  Forecasts (`set metar.taf on`) are always as sent: `KBJC: TAF 052320Z 0600/0624 30012G20KT ...`.
+- One station sends reports for dozens of airports, each repeated every few minutes; a new report
+  for an airport comes about once an hour, so a busy station posts dozens an hour. `set
+  metar.airports` narrows it down; `get metar.heard` lists the airports heard.
+- Long reports come in parts: `KBJC (cont.): ...`.
 - Turning it on turns off Meshtastic, Weather or Aircraft (one listen at a time).
 
 ## Settings
@@ -33,12 +39,13 @@ KBJC: TAF 052320Z 0600/0624 30012G20KT P6SM SCT080 FM061800 32015KT P6SM BKN100
 | Command | |
 |---|---|
 | `metar on` / `metar off` | start or stop (saved) |
-| `set metar.airports <IDs>` | airports to show, by ICAO ID, comma-separated, up to 39 characters (`none` to clear) |
+| `set metar.airports <IDs>` | only these airports, by ICAO ID, comma-separated, up to 39 characters (`all`, the default: every airport heard) |
+| `set metar.raw on\|off` | reports as sent instead of in words (default off) |
 | `set metar.taf on\|off` | forecasts (TAF) too (default off: METAR and SPECI only) |
 | `set metar.duty <percent>` | share of the time spent listening (default 10; 100 = all the time, and the mesh isn't heard) |
 | `set metar.freq <MHz>` | where to listen (default 978; other values are for bench tests) |
 | `metar`, `get metar` | the settings |
-| `get metar.heard` | airports with a METAR heard since `metar on` |
+| `get metar.heard` | airports heard since `metar on` (the last 96) |
 | `get metar.stats` | frames (corrected by Reed-Solomon, and beyond repair), reports read, posts, time listening, and the last station: its slot, signal, and where it is (distance and direction from this radio's location, or latitude, longitude) |
 | `get radio.fsk`, `get radio.fsk.rx` | the radio's listens and its receiver counters |
 
@@ -140,6 +147,8 @@ tools/bench/fisb_bench.py /dev/serial/by-id/usb-Seeed_Studio_XIAO_* /dev/serial/
 - **The encoder against dump978.** mutability's dump978 demodulates `fisb.py` frames, corrects
   them (also with 10 bad bytes in every block) and `uat2text` prints their METARs. Its parity and
   interleaving are dump978's.
+- **In words.** All 133 different METARs in dump978's samples are read (`test/test_fisb`
+  checks several word for word, and storms, fog, fractions of a mile and metric reports).
 - **Real frames.** dump978 ships 704 frames from real ground stations, already corrected. `fisb.py`
   and the C decoder read 147 METARs from them, as `uat2text` does, plus TAFs, SPECIs, PIREPs and
   winds aloft. Six of those frames are the C tests' vectors.
@@ -149,7 +158,9 @@ tools/bench/fisb_bench.py /dev/serial/by-id/usb-Seeed_Studio_XIAO_* /dev/serial/
   - 10 bad bytes in every block: 5 of 5 corrected and posted; 11 in one block: 5 of 5 rejected, nothing posted
   - a real station's frame from dump978's sample data, sent again: its METARs posted for the
     airports chosen, the others not
-  - each report posted once, however many times it was heard
+  - each report posted once, however many times it was heard, for every airport in a real
+    station's frame (7) or only the one chosen
+  - in words, with the age by the radio's clock: `KLMO: 53°F, humidity 43%. ... (7 min ago)`
   - an RTL-SDR recording of the XIAO's frames: dump978 decoded 5 of 5
   - at 10%: 17 of 182 frames heard (9%); mesh messages 18 of 20 (20 of 20 with it off)
   - 90 s with nothing sent: no frames, so no false matches of the sync word
@@ -159,6 +170,7 @@ tools/bench/fisb_bench.py /dev/serial/by-id/usb-Seeed_Studio_XIAO_* /dev/serial/
 | | |
 |---|---|
 | `src/helpers/weather/Fisb.*` | Reed-Solomon (`uat::rsDecode`), the header, information frames, APDUs, DLAC, report words |
+| `src/helpers/weather/Metar.*` | METARs in plain words: wind, visibility, weather, clouds, temperature and humidity, pressure |
 | `examples/companion_radio/MyMeshMetar.cpp` | the Airport weather channel, posts and commands, the bench sender |
 | `src/helpers/radiolib/CustomLR2021.*`, `CustomLR2021Wrapper.h` | the FSK listen with the 1 KB FIFO, and a slot for one long frame |
 | `test/test_fisb`, `test/fuzz/fuzz_fisb.cpp` | `pio test -e native_wxsensor` (ASAN + UBSan), and the fuzzer |
