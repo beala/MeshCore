@@ -106,26 +106,41 @@ bool sizeFits(const Layout& l) {
   }
 }
 
-int sender(const uint8_t* raw, int len) {
+void senderId(const uint8_t* raw, int len, RadioId& out) {
+  out.n = 0;
   Layout l = parseHeader(raw, len);
-  if (l.payload_off == 0 || l.payload_len < 1) return -1;
+  if (l.payload_off == 0 || l.payload_len < 1) return;
   uint8_t route = raw[0] & PH_ROUTE_MASK;
   int pl_at = (route == ROUTE_TYPE_TRANSPORT_FLOOD || route == ROUTE_TYPE_TRANSPORT_DIRECT) ? 5 : 1;
   int hops = raw[pl_at] & 63, hash_size = (raw[pl_at] >> 6) + 1;
+  const uint8_t* at = NULL;
+  int n = 0;
   if (hops > 0) {
-    if (route == ROUTE_TYPE_DIRECT || route == ROUTE_TYPE_TRANSPORT_DIRECT) return -1;
-    return raw[l.payload_off - hash_size];   // the last hop added itself at the end
+    if (route == ROUTE_TYPE_DIRECT || route == ROUTE_TYPE_TRANSPORT_DIRECT) return;
+    at = &raw[l.payload_off - hash_size];   // the last hop added itself at the end
+    n = hash_size;
+  } else if (l.type == PAYLOAD_TYPE_ADVERT) {
+    at = &raw[l.payload_off];               // its public key comes first
+    n = l.payload_len < 4 ? l.payload_len : 4;
+  } else if (l.type == PAYLOAD_TYPE_TXT_MSG || l.type == PAYLOAD_TYPE_REQ || l.type == PAYLOAD_TYPE_RESPONSE ||
+             l.type == PAYLOAD_TYPE_PATH) {
+    // only a flood with no hops comes straight from its source: a direct-routed one with its path used up
+    // was sent by the last repeater on the way (each takes itself off), so the source byte isn't the sender
+    if (route == ROUTE_TYPE_DIRECT || route == ROUTE_TYPE_TRANSPORT_DIRECT) return;
+    if (l.payload_len < 2) return;
+    at = &raw[l.payload_off + 1];           // destination, then source
+    n = 1;
+  } else {
+    return;
   }
-  switch (l.type) {
-    case PAYLOAD_TYPE_ADVERT: return raw[l.payload_off];   // its public key comes first
-    case PAYLOAD_TYPE_TXT_MSG:
-    case PAYLOAD_TYPE_REQ:
-    case PAYLOAD_TYPE_RESPONSE:
-    case PAYLOAD_TYPE_PATH:
-      return l.payload_len >= 2 ? raw[l.payload_off + 1] : -1;   // destination, then source
-    default:
-      return -1;
-  }
+  memcpy(out.b, at, n);
+  out.n = (uint8_t) n;
+}
+
+int sender(const uint8_t* raw, int len) {
+  RadioId id;
+  senderId(raw, len, id);
+  return id.n ? id.b[0] : -1;
 }
 
 int countGood(uint16_t mask) {

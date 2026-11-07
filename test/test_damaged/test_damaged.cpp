@@ -282,6 +282,29 @@ TEST(DamagedMerge, DifferentMessagesDontJoin) {
   EXPECT_FALSE(merge(a, b, s));
 }
 
+TEST(DamagedSender, IdHasEveryByteThePacketGives) {
+  RadioId id;
+  const uint8_t two[] = { TYPE_GRP_TXT << 2 | 1, 0x42, 0xA0, 0xA1, 0x7A, 0x3C, 0x11, 9, 9 };   // 2 hops, 2-byte hashes
+  senderId(two, sizeof(two), id);
+  ASSERT_EQ(2, id.n);
+  EXPECT_EQ(0x7A, id.b[0]); EXPECT_EQ(0x3C, id.b[1]);
+  EXPECT_EQ(0x7A, sender(two, sizeof(two)));
+  const uint8_t one[] = { TYPE_GRP_TXT << 2 | 1, 1, 0x7A, 0x11, 9, 9 };
+  senderId(one, sizeof(one), id);
+  EXPECT_EQ(1, id.n);   // too short to name a contact
+  EXPECT_LT(id.n, NAME_MIN_BYTES);
+  const uint8_t advert[] = { PAYLOAD_TYPE_ADVERT << 2 | 1, 0, 0x5E, 1, 2, 3, 4, 5 };
+  senderId(advert, sizeof(advert), id);
+  ASSERT_EQ(4, id.n);
+  EXPECT_EQ(0x5E, id.b[0]); EXPECT_EQ(3, id.b[3]);
+  const uint8_t dm0[] = { TYPE_TXT_MSG << 2 | 1, 0, 0x4C, 0x4E, 9, 9 };
+  senderId(dm0, sizeof(dm0), id);
+  EXPECT_EQ(1, id.n);
+  const uint8_t q[] = { TYPE_GRP_TXT << 2 | 1, 0, 0x11, 9, 9 };
+  senderId(q, sizeof(q), id);
+  EXPECT_EQ(0, id.n);
+}
+
 TEST(DamagedSender, LastHopOrOriginator) {
   uint8_t s[32]; secretFor(16, s);
   auto p = channelPacket(s, "Bench: who sent this", NOW, 3);   // path a0 a1 a2
@@ -294,8 +317,12 @@ TEST(DamagedSender, LastHopOrOriginator) {
   EXPECT_EQ(0x77, sender(dm, sizeof(dm)));
   const uint8_t direct[] = { TYPE_TXT_MSG << 2 | 2, 1, 0x77, 0x4C, 0x4E, 9, 9 };
   EXPECT_EQ(-1, sender(direct, sizeof(direct)));
-  const uint8_t dm0[] = { TYPE_TXT_MSG << 2 | 2, 0, 0x4C, 0x4E, 9, 9 };   // zero hops: the source itself
+  const uint8_t dm0[] = { TYPE_TXT_MSG << 2 | 1, 0, 0x4C, 0x4E, 9, 9 };   // a flood with zero hops: the source itself
   EXPECT_EQ(0x4E, sender(dm0, sizeof(dm0)));
+  // direct-routed with its path used up: the last repeater sent it, not the source (seen on the live mesh:
+  // the carrier's frequency error was the repeater's)
+  const uint8_t last_leg[] = { TYPE_TXT_MSG << 2 | 2, 0, 0x4C, 0x4E, 9, 9 };
+  EXPECT_EQ(-1, sender(last_leg, sizeof(last_leg)));
   const uint8_t garbled[] = { 0xC5, 0 };
   EXPECT_EQ(-1, sender(garbled, sizeof(garbled)));
 }

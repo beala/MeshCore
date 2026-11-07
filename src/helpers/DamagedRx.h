@@ -49,10 +49,21 @@ Layout parseHeader(const uint8_t* raw, int len);
 bool sizeFits(const Layout& l);
 
 // The radio that sent us this packet, as its 1-byte hash: the last repeater in a flood packet's path,
-// or the packet's originator when it has no hops yet (an advert's key, a direct message's source).
+// or the packet's originator when it has no hops yet (an advert's key, a flooded direct message's source).
 // -1 when the packet doesn't say: a channel message straight from its sender (no source byte), a
-// direct-routed packet (each hop takes itself off the path), or a header that didn't come through.
+// direct-routed packet (each hop takes itself off the path, so even with none left, the last repeater
+// may have sent it), or a header that didn't come through.
 int sender(const uint8_t* raw, int len);
+
+// The same radio's ID with every byte the packet gives: a flood path's hash size (1 to 3 bytes), an
+// advert's key (the first 4 bytes kept), a direct message's source (1 byte). n = 0 when unknown.
+// A 1-byte ID is shared by 1 in 256 radios: name a contact only from 2 bytes up (NAME_MIN_BYTES).
+struct RadioId {
+  uint8_t n;
+  uint8_t b[4];
+};
+static const int NAME_MIN_BYTES = 2;
+void senderId(const uint8_t* raw, int len, RadioId& out);
 
 // One key's reading of a damaged packet.
 struct Result {

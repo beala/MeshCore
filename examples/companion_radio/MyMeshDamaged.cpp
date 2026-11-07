@@ -43,20 +43,23 @@ void MyMesh::applyDamaged() {
 
 // Every intact packet: a fingerprint, so a damaged copy of it (through another repeater) isn't shown
 void MyMesh::damagedCount(const uint8_t* raw, int len, bool bad, float snr) {
-  int who = damaged::sender(raw, len);
+  damaged::RadioId who;
+  damaged::senderId(raw, len, who);
   DamagedFrom* f = NULL;
-  for (int i = 0; i < _dmg_from_n && !f; i++) if (_dmg_from[i].who == who) f = &_dmg_from[i];
+  for (int i = 0; i < _dmg_from_n && !f; i++) {
+    if (_dmg_from[i].who.n == who.n && memcmp(_dmg_from[i].who.b, who.b, who.n) == 0) f = &_dmg_from[i];
+  }
   if (!f) {
     if (_dmg_from_n < DMG_FROM) {
       f = &_dmg_from[_dmg_from_n++];
     } else {   // full: replace the one heard least, keeping the unknown (-1) row
       for (int i = 0; i < DMG_FROM; i++) {
-        if (_dmg_from[i].who == -1) continue;
+        if (_dmg_from[i].who.n == 0) continue;
         if (!f || _dmg_from[i].whole + _dmg_from[i].damaged < f->whole + f->damaged) f = &_dmg_from[i];
       }
     }
     memset(f, 0, sizeof(*f));
-    f->who = (int16_t) who;
+    f->who = who;
   }
   if (bad) {
     if (f->damaged < 0xFFFF) { f->damaged++; f->damaged_snr4 += (int32_t)(snr * 4); }
@@ -118,13 +121,14 @@ int MyMesh::damagedWhy(const uint8_t* raw, int len) {
   }
 }
 
-// "7a DEN-CONI" for a radio's 1-byte ID, with the first contact that has it (most likely them), "?" if unknown
-void MyMesh::damagedRadioName(int who, char* out, int n) {
-  if (who < 0) { snprintf(out, n, "?"); return; }
-  uint8_t h = (uint8_t) who;
-  ContactInfo* c = lookupContactByPubKey(&h, 1);
-  if (c) snprintf(out, n, "%02x %.*s", h, n > 4 ? n - 4 : 0, c->name);   // as much of the name as fits
-  else snprintf(out, n, "%02x", h);
+// A radio's ID in hex, "?" if unknown. "7a3c DEN-CONI" adds the contact with that ID, but only from
+// 2 bytes up: a 1-byte ID is shared by 1 in 256 radios, too many for a name to mean much.
+void MyMesh::damagedRadioName(const uint8_t* id, int idn, char* out, int n) {
+  if (idn <= 0) { snprintf(out, n, "?"); return; }
+  int k = 0;
+  for (int i = 0; i < idn && k + 3 <= n; i++) k += snprintf(&out[k], n - k, "%02x", id[i]);
+  ContactInfo* c = idn >= damaged::NAME_MIN_BYTES ? lookupContactByPubKey(id, idn) : NULL;
+  if (c && k + 2 < n) snprintf(&out[k], n - k, " %s", c->name);   // as much of the name as fits
 }
 
 static const char* typeName(uint8_t type) {
@@ -138,13 +142,15 @@ static const char* typeName(uint8_t type) {
 void MyMesh::damagedPostUnread(const uint8_t* raw, int len, int why, float snr) {
   damaged::Layout l = damaged::parseHeader(raw, len);
   char from[24], a[24], b[24];
-  damagedRadioName(why == DMG_TOO_DAMAGED ? -1 : damaged::sender(raw, len), from, sizeof(from));
+  damaged::RadioId who;
+  damaged::senderId(raw, len, who);
+  damagedRadioName(who.b, why == DMG_TOO_DAMAGED ? 0 : who.n, from, sizeof(from));
   char detail[120];
   const uint8_t* p = &raw[l.payload_off];
   if (why == DMG_TOO_DAMAGED && !damaged::sizeFits(l)) {
     snprintf(detail, sizeof(detail), "header hit: %d bytes, can't tell what it was", len);
   } else if (l.type == PAYLOAD_TYPE_ADVERT) {
-    damagedRadioName(p[0], a, sizeof(a));
+    damagedRadioName(p, l.payload_len < 4 ? l.payload_len : 4, a, sizeof(a));   // its key
     int k = snprintf(detail, sizeof(detail), "from %s", a);
     // the advert's own data isn't encrypted: its name, if that part came through
     int i = PUB_KEY_SIZE + 4 + SIGNATURE_SIZE;
@@ -169,12 +175,12 @@ void MyMesh::damagedPostUnread(const uint8_t* raw, int len, int why, float snr) 
     else snprintf(detail, sizeof(detail), why == DMG_TOO_DAMAGED ? "on one of your channels, but no piece came through"
                                                                   : "on one of your channels (not text)");
   } else if (l.type == PAYLOAD_TYPE_ANON_REQ) {
-    damagedRadioName(p[0], a, sizeof(a));
+    damagedRadioName(p, 1, a, sizeof(a));
     snprintf(detail, sizeof(detail), "to %s", a);
   } else if (l.type == PAYLOAD_TYPE_TXT_MSG || l.type == PAYLOAD_TYPE_REQ || l.type == PAYLOAD_TYPE_RESPONSE ||
              l.type == PAYLOAD_TYPE_PATH) {
-    damagedRadioName(p[1], a, sizeof(a));
-    damagedRadioName(p[0], b, sizeof(b));
+    damagedRadioName(&p[1], 1, a, sizeof(a));   // 1-byte IDs: no names
+    damagedRadioName(p, 1, b, sizeof(b));
     if (why == DMG_TOO_DAMAGED) snprintf(detail, sizeof(detail), "from %s to you, but no piece came through", a);
     else snprintf(detail, sizeof(detail), "from %s to %s", a, b);
   } else {
@@ -441,7 +447,7 @@ bool MyMesh::handleDamagedCommand(const char* command, char* reply) {
       done[best] = true;
       const DamagedFrom& f = _dmg_from[best];
       char name[16];
-      damagedRadioName(f.who, name, 12);
+      damagedRadioName(f.who.b, f.who.n, name, 16);
       char snr[24] = "";
       if (f.damaged) {
         int n = snprintf(snr, sizeof(snr), " %+ddB", (int)(f.damaged_snr4 / 4 / (int32_t) f.damaged));

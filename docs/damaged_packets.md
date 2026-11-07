@@ -24,9 +24,9 @@ your own echoes, and every damaged packet that couldn't be read, with what it wa
 it:
 
 ```
-7a Hilltop: [advert, -9dB] from 5e, named "Hklltop Rptr"
-7a Hilltop: [channel message, -10dB] on channel 99, not one of yours
-7a Hilltop: [direct message, -10dB] from 44 to 33 Ridge
+7a: [advert, -9dB] from 5e21c0d4 Hilltop Rptr, named "Hklltop Rptr"
+7a3c Ridge: [channel message, -10dB] on channel 99, not one of yours
+7a: [direct message, -10dB] from 44 to 33
 ?: [unknown, -11dB] header hit: 61 bytes, can't tell what it was
 ```
 
@@ -40,8 +40,9 @@ Each post starts with a sender, because the app takes what's before the first `:
 - **A message that was read**: the sender is its author. For a channel message the author's name is
   part of the encrypted text (`Bob: ...`), so it's only known if that part came through; otherwise the
   sender shows as `▒▒▒▒`. For a direct message it's the contact whose key read it.
-- **A packet that wasn't read** (only with `dmg.all`): the sender is the radio that sent it to you
-  (see [Who sent it](#who-sent-it)), `?` if the packet doesn't say.
+- **A packet that wasn't read** (only with `dmg.all`): the sender is the radio that sent it to you, as
+  its ID in hex, with a contact's name when 2 or more bytes of ID match (see [Who sent it](#who-sent-it));
+  `?` if the packet doesn't say.
 
 In the brackets:
 
@@ -176,15 +177,19 @@ type. On the bench, the first byte was hit in 2 of 17 damaged packets.
 The sender of a packet is the radio you heard it from:
 
 - **a flood packet with hops**: the last repeater on its path (each repeater adds its ID to the end);
-- **a packet with no hops**: its originator: an advert's key, or a direct message's (request's,
+- **a packet with no hops**: its originator: an advert's key, or a flooded direct message's (request's,
   response's, path's) source byte;
 - **otherwise `?`**: a channel message straight from its author (channel messages carry no source
   byte), a direct-routed packet (each hop removes its own ID from the path, so the last sender isn't
-  in it), or a header that didn't add up.
+  in it; even with no hops left, the last repeater may have sent it, not the source), or a header that
+  didn't add up.
 
-IDs are 1 byte (the first byte of the radio's key), so 1 in 256 radios share each. A name is the first
-contact with that ID, so it's the likely radio, not a certain one. A path or ID byte that was hit names
-the wrong radio.
+The ID is the start of the radio's key, as many bytes as the packet has: 1 to 3 for a repeater (the
+mesh's path hash size), the first 4 of an advert's key, 1 for a direct message's source. It's shown in
+hex, with the name of the contact whose key starts the same, but only for 2 bytes or more: 1 in 256
+radios share each 1-byte ID, too many for a name to mean anything. With 2 bytes it's 1 in 65,536, so
+the name is very likely right. A path or ID byte that was hit gives the wrong ID (and a wrong name only
+when it happens to match another contact's).
 
 ## Where the damage comes from
 
@@ -193,7 +198,7 @@ packets heard from that radio (intact ones are counted too, while `dmg` is on), 
 of the damaged ones and of the intact ones:
 
 ```
-> 7a Hilltop: 9/18 -9dB/+6; 5e: 12/12 -9dB; ?: 13/15 -9dB/-9
+> 7a: 9/18 -9dB/+6; 5e21c0d4 Hilltop: 12/12 -9dB; ?: 13/15 -9dB/-9
 ```
 
 - **Damage at low SNR** (around −7 dB and below at SF7) means a weak link: that radio is near the edge of

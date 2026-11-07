@@ -541,12 +541,12 @@ private:
   enum { DMG_ADVERT, DMG_ACK, DMG_OTHERS, DMG_TRAFFIC, DMG_TOO_DAMAGED, DMG_KINDS };
   uint32_t _dmg_unread[DMG_KINDS] = {};
   int damagedWhy(const uint8_t* raw, int len);
-  void damagedRadioName(int who, char* out, int n);
+  void damagedRadioName(const uint8_t* id, int idn, char* out, int n);
   void damagedPostUnread(const uint8_t* raw, int len, int why, float snr);
   // Where the damage comes from: per radio that sent us packets (the last repeater, or the originator;
   // damaged::sender), how many came whole and how many damaged, and at what SNR ('get dmg.from')
   struct DamagedFrom {
-    int16_t who;                 // 1-byte hash, -1 = the packet didn't say
+    damaged::RadioId who;        // n = 0: the packet didn't say
     uint16_t whole, damaged;
     int32_t whole_snr4, damaged_snr4;   // sums, SNR x4
   };
