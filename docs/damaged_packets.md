@@ -9,10 +9,17 @@ dmg on
 ```
 
 ```
-[#Public, 1 of 5 lost] Bob: running late, be there ▒▒▒▒ minutes
-[#Public, fixed] Alice: anyone on the hill tonight?
-[from Carol, 2 of 6 lost] ▒▒▒▒the gate code is 4471, ▒▒▒▒
+Bob: [#Public, 1 of 5 lost] running late, be there ▒▒▒▒ minutes
+Alice: [#Public, fixed] anyone on the hill tonight?
+▒▒▒▒: [#Public, 2 of 4 lost] ▒▒▒▒ the trailhead at 6▒▒▒▒
+Carol: [direct, 2 of 6 lost] ▒▒▒▒the gate code is 4471, ▒▒▒▒
 ```
+
+Each post starts with the sender, so the app shows their name. For a channel message the name is
+part of the message: when it was in a lost piece, the sender shows as ▒▒▒▒. In the brackets:
+the channel (or `direct`), then how much was lost, `fixed`, or `unchecked` (every piece came through
+but the MAC doesn't match: the damage was in the header or the MAC). `start lost` means the
+message's first piece wasn't found, so how much is missing in front isn't known.
 
 Reconnect the app after `dmg on`, and the channel appears after your own channels. It keeps a fixed
 slot after Meshtastic, Weather and Aircraft. Receive only: text typed there is not sent. Any radio

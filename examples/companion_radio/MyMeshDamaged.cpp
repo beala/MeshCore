@@ -170,13 +170,47 @@ void MyMesh::damagedPost(DamagedMsg& m) {
   char text[MAX_FRAME_SIZE];
   int lost = m.c.r.n - damaged::countGood(m.c.r.good);
   char state[64];
-  if (m.c.fixed) strcpy(state, m.copies > 1 ? "fixed from copies" : "fixed");
-  else if (lost == 0) strcpy(state, m.copies > 1 ? "unchecked, from copies" : "unchecked");
-  else snprintf(state, sizeof(state), m.copies > 1 ? "%d of %d lost, from copies" : "%d of %d lost", lost, m.c.r.n);
+  if (m.c.fixed) strcpy(state, "fixed");
+  else if (!m.c.r.start_known) {   // where the message starts wasn't found: how much is missing in front is unknown
+    if (lost == 0) strcpy(state, "start lost");
+    else snprintf(state, sizeof(state), "start and %d more lost", lost);
+  } else if (lost == 0) strcpy(state, "unchecked");
+  else snprintf(state, sizeof(state), "%d of %d lost", lost, m.c.r.n);
+  if (m.copies > 1) strcat(state, m.c.fixed ? " from copies" : ", from copies");
   if (m.whole_heard) strcat(state, ", also heard whole");
-  int k = snprintf(text, sizeof(text), m.kind == damaged::KIND_CHANNEL ? "[#%s, %s] " : "[from %s, %s] ", m.name, state);
-  if (k < 0 || k >= (int) sizeof(text)) return;
-  damaged::showText(m.c.r, (damaged::Kind) m.kind, &text[k], sizeof(text) - k - 12);
+  // The app takes what's before the first ": " as the sender's name, so the post starts with the name:
+  // "Bob: [#Public, 1 of 3 lost] text". For a channel the name is in the message itself: found only in
+  // the text before the first lost piece, else "▒▒▒▒" (it was lost)
+  static char body[MAX_FRAME_SIZE];
+  damaged::showText(m.c.r, (damaged::Kind) m.kind, body, sizeof(body));
+  const char* sender = m.name;
+  const char* rest = body;
+  char lost_name[16];
+  if (m.kind == damaged::KIND_CHANNEL) {
+    const char* cut = strstr(body, "\xE2\x96\x92");   // the first lost piece
+    const char* colon = strstr(body, ": ");
+    if (colon && (!cut || colon < cut) && colon > body) {
+      body[colon - body] = 0;
+      sender = body;
+      rest = colon + 2;
+    } else {
+      strcpy(lost_name, "\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92");
+      sender = lost_name;
+    }
+  }
+  // what fits in the app's frame after its 11-byte header, cut at a character boundary
+  int cap = MAX_FRAME_SIZE - 11 + 1;
+  int k = m.kind == damaged::KIND_CHANNEL ? snprintf(text, cap, "%s: [#%s, %s] %s", sender, m.name, state, rest)
+                                          : snprintf(text, cap, "%s: [direct, %s] %s", sender, state, rest);
+  if (k < 0) return;
+  if (k >= cap) {   // cut short: drop a last character that lost its tail
+    k = cap - 1;
+    int j = k - 1;
+    while (j > 0 && ((uint8_t) text[j] & 0xC0) == 0x80) j--;
+    uint8_t c = (uint8_t) text[j];
+    int want = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+    if (k - j < want) text[j] = 0;
+  }
   uint32_t ts = damaged::timestampOf(m.c.r);
   if (ts == 0) ts = getRTCClock()->getCurrentTimeUnique();
   pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, ts, m.snr_x4, 0, text, strlen(text));
