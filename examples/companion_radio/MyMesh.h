@@ -513,6 +513,7 @@ public:
     damaged::Copy c;             // the pieces, merged from copies
     int8_t snr_x4;
     uint8_t copies;
+    bool whole_heard;            // an intact copy was heard too (shown only with 'set dmg.all on')
   };
   struct DamagedSeen {
     uint32_t at;                 // millis() | 1; 0 = empty

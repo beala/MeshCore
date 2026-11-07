@@ -420,6 +420,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 #### Damaged packets
 **Usage:**
 - `dmg on`, `dmg off`
+- `set dmg.all on|off`: also show damaged messages that were heard intact too (default off)
 - `dmg` or `get dmg`: packets heard with a bad CRC, read, shown, fixed, joined from copies, also heard intact
 - `get dmg.log`: the last 8 damaged packets and what became of them
 

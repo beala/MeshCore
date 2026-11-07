@@ -41,8 +41,11 @@ bad bits spoil only the pieces they land in, and the other pieces still decrypt 
   or else when both have the same length and MAC. A joined message that's whole and matches the MAC
   is marked `fixed from copies`.
 - **Intact copies.** If any copy arrives intact, through another repeater, before or after, the
-  damaged one isn't shown: the message is already in its own channel.
-- **Your own messages.** A damaged echo of your own channel message, repeated back, isn't shown.
+  damaged one isn't shown: the message is already in its own channel. With `set dmg.all on` it's shown
+  anyway, labelled `also heard whole`, to see what the damage looks like on your mesh. A damaged copy
+  with only one readable piece can't be matched to the intact one, so it shows without the label.
+- **Your own messages.** A damaged echo of your own channel message, repeated back, isn't shown
+  (with `set dmg.all on` it is, labelled `also heard whole`).
 
 On the bench (an SX1262 sending to an LR2021 near the edge of range, −121 dBm), 6 in 10 pieces of
 damaged packets came through. In 10 of 17 damaged packets only one piece was bad.
@@ -64,6 +67,7 @@ Packets in [v2 encryption](crypto_v2.md) aren't read: they're scrambled as a who
 | Command | |
 |---|---|
 | `dmg on` / `dmg off` | start or stop (saved) |
+| `set dmg.all on` / `off` | also show damaged messages that were heard intact too, and your own echoes (saved; default off) |
 | `dmg`, `get dmg` | packets heard with a bad CRC; read (some text found); shown; fixed; joined from copies; also heard intact |
 | `get dmg.log` | the last 8 damaged packets, oldest first: age, length, then `-` nothing read, `i` an intact copy was heard, `w` waiting for copies, `j` joined to a waiting one. After `w`/`j`: the slot and the pieces read, as a bit mask (bit 15: has the timestamp, bit 14: starts where the header says) |
 

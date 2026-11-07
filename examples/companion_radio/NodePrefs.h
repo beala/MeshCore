@@ -277,9 +277,11 @@ private:
   class DamagedPrefs : public ConfigSerializer {
   public:
     uint8_t en = 0;
+    uint8_t all = 0;              // 1: show damaged copies even when an intact copy was heard too
   protected:
     void structure() override {
       def("en", en);
+      def("all", all);
     }
   };
 public:

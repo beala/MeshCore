@@ -138,6 +138,7 @@ bool MyMesh::damagedMerge(DamagedMsg& m, const DamagedMsg& in) {
   if (!damaged::merge(m.c, in.c, m.secret)) return false;
   m.copies++;
   if (in.snr_x4 > m.snr_x4) m.snr_x4 = in.snr_x4;
+  if (in.whole_heard) m.whole_heard = true;
   return true;
 }
 
@@ -148,8 +149,11 @@ void MyMesh::damagedFinish(DamagedMsg& m) {
   memcpy(raw, m.c.ct, n);
   damaged::Result r = m.c.r;
   r.ct_off = 0;
-  if (damagedHadIntact(raw, n, r)) _dmg_dupes++;
-  else damagedPost(m);
+  if (!m.whole_heard && damagedHadIntact(raw, n, r)) {
+    _dmg_dupes++;
+    m.whole_heard = true;
+  }
+  if (!m.whole_heard || _prefs.dmg.all) damagedPost(m);
   m.at = 0;
 }
 
@@ -158,14 +162,18 @@ void MyMesh::damagedPost(DamagedMsg& m) {
   if (m.kind == damaged::KIND_CHANNEL && m.c.r.first && (m.c.r.good & 1)) {
     char own[40];
     snprintf(own, sizeof(own), "%s: ", _prefs.node_name);
-    if (strncmp((const char*) &m.c.r.pt[5], own, strlen(own) < 11 ? strlen(own) : 11) == 0) return;
+    if (strncmp((const char*) &m.c.r.pt[5], own, strlen(own) < 11 ? strlen(own) : 11) == 0) {
+      if (!_prefs.dmg.all) return;
+      m.whole_heard = true;   // ours: the whole message is in the app already
+    }
   }
   char text[MAX_FRAME_SIZE];
   int lost = m.c.r.n - damaged::countGood(m.c.r.good);
-  char state[40];
+  char state[64];
   if (m.c.fixed) strcpy(state, m.copies > 1 ? "fixed from copies" : "fixed");
   else if (lost == 0) strcpy(state, m.copies > 1 ? "unchecked, from copies" : "unchecked");
   else snprintf(state, sizeof(state), m.copies > 1 ? "%d of %d lost, from copies" : "%d of %d lost", lost, m.c.r.n);
+  if (m.whole_heard) strcat(state, ", also heard whole");
   int k = snprintf(text, sizeof(text), m.kind == damaged::KIND_CHANNEL ? "[#%s, %s] " : "[from %s, %s] ", m.name, state);
   if (k < 0 || k >= (int) sizeof(text)) return;
   damaged::showText(m.c.r, (damaged::Kind) m.kind, &text[k], sizeof(text) - k - 12);
@@ -198,7 +206,9 @@ void MyMesh::damagedLoop() {
       if (damagedHadIntact(_dmg_raw, len, in.c.r)) {
         _dmg_dupes++;
         ev.what = 'i';
-      } else {
+        in.whole_heard = true;
+      }
+      if (!in.whole_heard || _prefs.dmg.all) {
         int merged = -1;
         for (int i = 0; i < DMG_PENDING && merged < 0; i++) {
           if (_dmg_pending[i].at && damagedMerge(_dmg_pending[i], in)) merged = i;
@@ -232,8 +242,8 @@ bool MyMesh::handleDamagedCommand(const char* command, char* reply) {
     if (!_prefs.dmg.en) {
       strcpy(reply, "> Damaged off: packets that fail their CRC check are dropped ('dmg on' to read what's left of them)");
     } else {
-      sprintf(reply, "> Damaged on: %lu heard, %lu read, %lu shown (%lu fixed, %lu joined from copies), %lu also heard intact",
-              (unsigned long) _dmg_heard, (unsigned long) _dmg_read, (unsigned long) _dmg_shown,
+      sprintf(reply, "> Damaged on%s: %lu heard, %lu read, %lu shown (%lu fixed, %lu joined from copies), %lu also heard intact",
+              _prefs.dmg.all ? " (all)" : "", (unsigned long) _dmg_heard, (unsigned long) _dmg_read, (unsigned long) _dmg_shown,
               (unsigned long) _dmg_fixed, (unsigned long) _dmg_joined, (unsigned long) _dmg_dupes);
     }
     return true;
@@ -247,6 +257,16 @@ bool MyMesh::handleDamagedCommand(const char* command, char* reply) {
       k += snprintf(&reply[k], 160 - k, " -%lus:%u %c", (unsigned long)((now - e.at) / 1000), e.len, e.what);
       if (e.what != '-' && k < 150) k += snprintf(&reply[k], 160 - k, "%u/%x", e.slot, e.good);
     }
+    return true;
+  }
+  const char* all = strncmp(command, "set dmg.all ", 12) == 0 ? &command[12] : strncmp(command, "dmg all ", 8) == 0 ? &command[8] : NULL;
+  if (all) {
+    if (strcmp(all, "on") == 0) _prefs.dmg.all = 1;
+    else if (strcmp(all, "off") == 0) _prefs.dmg.all = 0;
+    else { strcpy(reply, "Error: set dmg.all on|off"); return true; }
+    savePrefs();
+    strcpy(reply, _prefs.dmg.all ? "OK - showing every damaged message, also those heard whole (and your own echoes)"
+                                 : "OK - hiding damaged messages that were also heard whole");
     return true;
   }
   const char* arg = strncmp(command, "dmg ", 4) == 0 ? &command[4] : strncmp(command, "set dmg ", 8) == 0 ? &command[8] : NULL;
