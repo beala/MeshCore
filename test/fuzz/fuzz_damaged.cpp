@@ -31,6 +31,8 @@ static void checkResult(const Result& r, int len) {
 
 static void readAll(const uint8_t* secret, uint8_t* raw, int len, Copy* out) {
   Layout l = parseHeader(raw, len);
+  int who = sender(raw, len);
+  if (who < -1 || who > 255) abort();
   if (l.ok && (l.payload_off + l.payload_len != len || l.payload_off < 2)) abort();
   for (int kind = KIND_CHANNEL; kind <= KIND_DIRECT; kind++) {
     Result r;

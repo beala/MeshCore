@@ -43,6 +43,17 @@ struct Layout {
 };
 Layout parseHeader(const uint8_t* raw, int len);
 
+// Whether the payload's size fits the type the header claims (an ack is 4 bytes, an advert a key, a
+// signature and up to 32 bytes of data, encrypted messages whole pieces...). A packet whose first byte
+// was hit usually claims a type its size doesn't fit.
+bool sizeFits(const Layout& l);
+
+// The radio that sent us this packet, as its 1-byte hash: the last repeater in a flood packet's path,
+// or the packet's originator when it has no hops yet (an advert's key, a direct message's source).
+// -1 when the packet doesn't say: a channel message straight from its sender (no source byte), a
+// direct-routed packet (each hop takes itself off the path), or a header that didn't come through.
+int sender(const uint8_t* raw, int len);
+
 // One key's reading of a damaged packet.
 struct Result {
   uint8_t n;            // pieces from the start of the message to the end of the packet

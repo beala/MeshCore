@@ -420,14 +420,16 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 #### Damaged packets
 **Usage:**
 - `dmg on`, `dmg off`
-- `set dmg.all on|off`: also show damaged messages that were heard intact too (default off)
+- `set dmg.all on|off`: show everything in the channel: also damaged copies of messages heard whole, your own echoes, and each damaged packet that couldn't be read, with its type, SNR and the radio that sent it (default off)
 - `dmg` or `get dmg`: packets heard with a bad CRC, read, shown, fixed, joined from copies, also heard intact
+- `get dmg.from`: which radios the damaged packets come from: damaged/heard and average SNR of each
 - `get dmg.log`: the last 8 damaged packets and what became of them
+- `dmg reset`: start the counts again
 
-**Example reply:** `> Damaged on: 46 heard, 44 read, 21 shown (2 fixed, 6 joined from copies), 17 also heard intact`
+**Example reply:** `> Damaged on: 34 heard. Read 20: 7 shown (3 fixed, 5 joined), 8 heard whole. Not read: 12 adverts, 0 acks, 1 for others, 0 other, 1 too damaged`
 
 **Notes:**
-- Packets that fail their CRC check are read as far as they go, and show in the app as one more receive-only channel, "Damaged", with ▒▒▒▒ for lost text. Shown only: never acked, forwarded or used. See [Damaged packets](damaged_packets.md).
+- Packets that fail their CRC check are read as far as they go, and show in the app as one more receive-only channel, "Damaged", with ▒▒▒▒ for lost text. Shown only: never acked, forwarded or used. Everything about a damaged packet is a guess with a rule behind it: see [How it decides](damaged_packets.md#how-it-decides).
 - Settings are saved. Reconnect the app after `dmg on` so it lists the new channel. Any radio; not one at a time with the listens.
 
 #### Copy this radio to another

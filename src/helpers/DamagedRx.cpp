@@ -82,6 +82,52 @@ Layout parseHeader(const uint8_t* raw, int len) {
   return l;
 }
 
+// an encrypted envelope: v1 (2-byte MAC + whole pieces) or v2 (16-byte tag + any length)
+static bool envelopeFits(int n) {
+  return (n >= CIPHER_MAC_SIZE + PIECE && n % PIECE == CIPHER_MAC_SIZE) || n > 16;
+}
+
+bool sizeFits(const Layout& l) {
+  if (l.payload_off == 0 || l.payload_len < 1) return false;
+  int n = l.payload_len;
+  switch (l.type) {
+    case PAYLOAD_TYPE_ACK:       return n >= 4 && n <= 8;
+    case PAYLOAD_TYPE_ADVERT:    return n > PUB_KEY_SIZE + 4 + SIGNATURE_SIZE && n <= PUB_KEY_SIZE + 4 + SIGNATURE_SIZE + MAX_ADVERT_DATA_SIZE;
+    case PAYLOAD_TYPE_TXT_MSG:
+    case PAYLOAD_TYPE_REQ:
+    case PAYLOAD_TYPE_RESPONSE:
+    case PAYLOAD_TYPE_PATH:      return envelopeFits(n - 2);
+    case PAYLOAD_TYPE_GRP_TXT:
+    case PAYLOAD_TYPE_GRP_DATA:  return envelopeFits(n - 1);
+    case PAYLOAD_TYPE_ANON_REQ:  return envelopeFits(n - 1 - PUB_KEY_SIZE);
+    case PAYLOAD_TYPE_TRACE:     return n >= 9;
+    case 0x0C: case 0x0D: case 0x0E: return false;   // reserved: no one sends these
+    default:                     return true;
+  }
+}
+
+int sender(const uint8_t* raw, int len) {
+  Layout l = parseHeader(raw, len);
+  if (l.payload_off == 0 || l.payload_len < 1) return -1;
+  uint8_t route = raw[0] & PH_ROUTE_MASK;
+  int pl_at = (route == ROUTE_TYPE_TRANSPORT_FLOOD || route == ROUTE_TYPE_TRANSPORT_DIRECT) ? 5 : 1;
+  int hops = raw[pl_at] & 63, hash_size = (raw[pl_at] >> 6) + 1;
+  if (hops > 0) {
+    if (route == ROUTE_TYPE_DIRECT || route == ROUTE_TYPE_TRANSPORT_DIRECT) return -1;
+    return raw[l.payload_off - hash_size];   // the last hop added itself at the end
+  }
+  switch (l.type) {
+    case PAYLOAD_TYPE_ADVERT: return raw[l.payload_off];   // its public key comes first
+    case PAYLOAD_TYPE_TXT_MSG:
+    case PAYLOAD_TYPE_REQ:
+    case PAYLOAD_TYPE_RESPONSE:
+    case PAYLOAD_TYPE_PATH:
+      return l.payload_len >= 2 ? raw[l.payload_off + 1] : -1;   // destination, then source
+    default:
+      return -1;
+  }
+}
+
 int countGood(uint16_t mask) {
   int n = 0;
   for (; mask; mask &= mask - 1) n++;

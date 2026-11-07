@@ -7,6 +7,7 @@
 #include <string.h>
 #include "helpers/DamagedRx.h"
 #include "Utils.h"
+#include "Packet.h"
 
 using namespace damaged;
 
@@ -279,6 +280,41 @@ TEST(DamagedMerge, DifferentMessagesDontJoin) {
   Copy a = readCopy(s, p, {}, 3);
   Copy b = readCopy(s, q, {}, 3);
   EXPECT_FALSE(merge(a, b, s));
+}
+
+TEST(DamagedSender, LastHopOrOriginator) {
+  uint8_t s[32]; secretFor(16, s);
+  auto p = channelPacket(s, "Bench: who sent this", NOW, 3);   // path a0 a1 a2
+  EXPECT_EQ(0xA2, sender(p.data(), (int)p.size()));
+  auto q = channelPacket(s, "Bench: who sent this", NOW, 0);   // straight from its sender: no source byte
+  EXPECT_EQ(-1, sender(q.data(), (int)q.size()));
+  const uint8_t advert[] = { PAYLOAD_TYPE_ADVERT << 2 | 1, 0, 0x5E, 1, 2, 3 };
+  EXPECT_EQ(0x5E, sender(advert, sizeof(advert)));
+  const uint8_t dm[] = { TYPE_TXT_MSG << 2 | 1, 1, 0x77, 0x4C, 0x4E, 9, 9 };   // via 77, to 4c from 4e
+  EXPECT_EQ(0x77, sender(dm, sizeof(dm)));
+  const uint8_t direct[] = { TYPE_TXT_MSG << 2 | 2, 1, 0x77, 0x4C, 0x4E, 9, 9 };
+  EXPECT_EQ(-1, sender(direct, sizeof(direct)));
+  const uint8_t dm0[] = { TYPE_TXT_MSG << 2 | 2, 0, 0x4C, 0x4E, 9, 9 };   // zero hops: the source itself
+  EXPECT_EQ(0x4E, sender(dm0, sizeof(dm0)));
+  const uint8_t garbled[] = { 0xC5, 0 };
+  EXPECT_EQ(-1, sender(garbled, sizeof(garbled)));
+}
+
+TEST(DamagedSize, TypeMustFitSize) {
+  uint8_t s[32]; secretFor(17, s);
+  auto p = channelPacket(s, "Bench: fits", NOW, 2);
+  EXPECT_TRUE(sizeFits(parseHeader(p.data(), (int)p.size())));
+  p[0] = PAYLOAD_TYPE_ACK << 2 | 1;          // the first byte hit: now claims to be an ack
+  EXPECT_FALSE(sizeFits(parseHeader(p.data(), (int)p.size())));
+  p[0] = PAYLOAD_TYPE_ADVERT << 2 | 1;       // or an advert: too short for one
+  EXPECT_FALSE(sizeFits(parseHeader(p.data(), (int)p.size())));
+  uint8_t ack[] = { PAYLOAD_TYPE_ACK << 2 | 1, 1, 0x7a, 1, 2, 3, 4 };
+  EXPECT_TRUE(sizeFits(parseHeader(ack, sizeof(ack))));
+  std::vector<uint8_t> adv = { PAYLOAD_TYPE_ADVERT << 2 | 1, 0 };
+  adv.resize(2 + 32 + 4 + 64 + 10);
+  EXPECT_TRUE(sizeFits(parseHeader(adv.data(), (int)adv.size())));
+  uint8_t reserved[] = { 0x0D << 2 | 1, 0, 1, 2, 3 };
+  EXPECT_FALSE(sizeFits(parseHeader(reserved, sizeof(reserved))));
 }
 
 int main(int argc, char** argv) {

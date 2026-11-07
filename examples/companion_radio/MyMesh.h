@@ -535,6 +535,25 @@ private:
   static const int DMG_LOG = 8;
   DamagedEvent _dmg_log[DMG_LOG] = {};
   uint8_t _dmg_log_next = 0;
+  // why a damaged packet wasn't read, from its header: an advert, an ack, for someone else (another
+  // contact's message or a channel we don't have), other traffic (paths, requests, traces...), or ours
+  // but too damaged (or the header itself was hit)
+  enum { DMG_ADVERT, DMG_ACK, DMG_OTHERS, DMG_TRAFFIC, DMG_TOO_DAMAGED, DMG_KINDS };
+  uint32_t _dmg_unread[DMG_KINDS] = {};
+  int damagedWhy(const uint8_t* raw, int len);
+  void damagedRadioName(int who, char* out, int n);
+  void damagedPostUnread(const uint8_t* raw, int len, int why, float snr);
+  // Where the damage comes from: per radio that sent us packets (the last repeater, or the originator;
+  // damaged::sender), how many came whole and how many damaged, and at what SNR ('get dmg.from')
+  struct DamagedFrom {
+    int16_t who;                 // 1-byte hash, -1 = the packet didn't say
+    uint16_t whole, damaged;
+    int32_t whole_snr4, damaged_snr4;   // sums, SNR x4
+  };
+  static const int DMG_FROM = 12;
+  DamagedFrom _dmg_from[DMG_FROM] = {};
+  uint8_t _dmg_from_n = 0;
+  void damagedCount(const uint8_t* raw, int len, bool damaged, float snr);
   uint32_t _dmg_heard = 0, _dmg_read = 0, _dmg_shown = 0, _dmg_fixed = 0, _dmg_joined = 0, _dmg_dupes = 0;
   bool isDamagedChannel(int idx) const;
   void getDamagedChannel(ChannelDetails& ch);

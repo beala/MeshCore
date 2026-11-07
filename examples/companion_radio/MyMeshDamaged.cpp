@@ -42,8 +42,32 @@ void MyMesh::applyDamaged() {
 }
 
 // Every intact packet: a fingerprint, so a damaged copy of it (through another repeater) isn't shown
+void MyMesh::damagedCount(const uint8_t* raw, int len, bool bad, float snr) {
+  int who = damaged::sender(raw, len);
+  DamagedFrom* f = NULL;
+  for (int i = 0; i < _dmg_from_n && !f; i++) if (_dmg_from[i].who == who) f = &_dmg_from[i];
+  if (!f) {
+    if (_dmg_from_n < DMG_FROM) {
+      f = &_dmg_from[_dmg_from_n++];
+    } else {   // full: replace the one heard least, keeping the unknown (-1) row
+      for (int i = 0; i < DMG_FROM; i++) {
+        if (_dmg_from[i].who == -1) continue;
+        if (!f || _dmg_from[i].whole + _dmg_from[i].damaged < f->whole + f->damaged) f = &_dmg_from[i];
+      }
+    }
+    memset(f, 0, sizeof(*f));
+    f->who = (int16_t) who;
+  }
+  if (bad) {
+    if (f->damaged < 0xFFFF) { f->damaged++; f->damaged_snr4 += (int32_t)(snr * 4); }
+  } else {
+    if (f->whole < 0xFFFF) { f->whole++; f->whole_snr4 += (int32_t)(snr * 4); }
+  }
+}
+
 void MyMesh::damagedNoteIntact(const uint8_t* raw, int len) {
   if (!_prefs.dmg.en) return;
+  damagedCount(raw, len, false, _radio->getLastSNR());
   damaged::Layout l = damaged::parseHeader(raw, len);
   if (!l.ok) return;
   DamagedSeen& s = _dmg_seen[_dmg_seen_next];
@@ -59,6 +83,109 @@ bool MyMesh::damagedHadIntact(const uint8_t* raw, int len, const damaged::Result
     if (damaged::sameMessage(s.print, raw, len, r)) return true;
   }
   return false;
+}
+
+// Why a damaged packet that nothing could read wasn't for reading: from its header, which usually
+// comes through (a channel or contact byte that was hit can make "ours" look like someone else's)
+int MyMesh::damagedWhy(const uint8_t* raw, int len) {
+  damaged::Layout l = damaged::parseHeader(raw, len);
+  if (!damaged::sizeFits(l)) return DMG_TOO_DAMAGED;   // the header itself was hit
+  uint8_t first = raw[l.payload_off];
+  switch (l.type) {
+    case PAYLOAD_TYPE_ADVERT: return DMG_ADVERT;
+    case PAYLOAD_TYPE_ACK: return DMG_ACK;
+    case PAYLOAD_TYPE_GRP_TXT:
+    case PAYLOAD_TYPE_GRP_DATA: {
+#ifdef MAX_GROUP_CHANNELS
+      for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+        ChannelDetails ch;
+        if (getChannel(i, ch) && ch.name[0] && ch.channel.hash[0] == first) {
+          return l.type == PAYLOAD_TYPE_GRP_TXT ? DMG_TOO_DAMAGED : DMG_TRAFFIC;
+        }
+      }
+#endif
+      return DMG_OTHERS;
+    }
+    case PAYLOAD_TYPE_TXT_MSG:
+    case PAYLOAD_TYPE_REQ:
+    case PAYLOAD_TYPE_RESPONSE:
+    case PAYLOAD_TYPE_PATH:
+    case PAYLOAD_TYPE_ANON_REQ:
+      if (first != self_id.pub_key[0]) return DMG_OTHERS;
+      return l.type == PAYLOAD_TYPE_TXT_MSG ? DMG_TOO_DAMAGED : DMG_TRAFFIC;
+    default:
+      return DMG_TRAFFIC;
+  }
+}
+
+// "7a DEN-CONI" for a radio's 1-byte ID, with the first contact that has it (most likely them), "?" if unknown
+void MyMesh::damagedRadioName(int who, char* out, int n) {
+  if (who < 0) { snprintf(out, n, "?"); return; }
+  uint8_t h = (uint8_t) who;
+  ContactInfo* c = lookupContactByPubKey(&h, 1);
+  if (c) snprintf(out, n, "%02x %.*s", h, n > 4 ? n - 4 : 0, c->name);   // as much of the name as fits
+  else snprintf(out, n, "%02x", h);
+}
+
+static const char* typeName(uint8_t type) {
+  static const char* names[16] = { "request", "response", "direct message", "ack", "advert", "channel message",
+                                   "group data", "anonymous request", "path", "trace", "multipart", "control",
+                                   "reserved type", "reserved type", "reserved type", "custom packet" };
+  return names[type & 15];
+}
+
+// With 'set dmg.all on', a damaged packet nothing could read still gets a post: what it was, who sent it
+void MyMesh::damagedPostUnread(const uint8_t* raw, int len, int why, float snr) {
+  damaged::Layout l = damaged::parseHeader(raw, len);
+  char from[24], a[24], b[24];
+  damagedRadioName(why == DMG_TOO_DAMAGED ? -1 : damaged::sender(raw, len), from, sizeof(from));
+  char detail[120];
+  const uint8_t* p = &raw[l.payload_off];
+  if (why == DMG_TOO_DAMAGED && !damaged::sizeFits(l)) {
+    snprintf(detail, sizeof(detail), "header hit: %d bytes, can't tell what it was", len);
+  } else if (l.type == PAYLOAD_TYPE_ADVERT) {
+    damagedRadioName(p[0], a, sizeof(a));
+    int k = snprintf(detail, sizeof(detail), "from %s", a);
+    // the advert's own data isn't encrypted: its name, if that part came through
+    int i = PUB_KEY_SIZE + 4 + SIGNATURE_SIZE;
+    if (i < l.payload_len) {
+      uint8_t flags = p[i++];
+      if (flags & ADV_LATLON_MASK) i += 8;
+      if (flags & ADV_FEAT1_MASK) i += 2;
+      if (flags & ADV_FEAT2_MASK) i += 2;
+      if ((flags & ADV_NAME_MASK) && i < l.payload_len && k < (int) sizeof(detail) - 8) {
+        k += snprintf(&detail[k], sizeof(detail) - k, ", named \"");
+        for (; i < l.payload_len && p[i] && k < (int) sizeof(detail) - 3; i++) {
+          detail[k++] = (p[i] >= 0x20 && p[i] < 0x7F) ? (char) p[i] : '?';   // ASCII only: a bad byte shows as ?
+        }
+        detail[k++] = '"';
+        detail[k] = 0;
+      }
+    }
+  } else if (l.type == PAYLOAD_TYPE_ACK) {
+    snprintf(detail, sizeof(detail), "nothing to read in an ack");
+  } else if (l.type == PAYLOAD_TYPE_GRP_TXT || l.type == PAYLOAD_TYPE_GRP_DATA) {
+    if (why == DMG_OTHERS) snprintf(detail, sizeof(detail), "on channel %02x, not one of yours", p[0]);
+    else snprintf(detail, sizeof(detail), why == DMG_TOO_DAMAGED ? "on one of your channels, but no piece came through"
+                                                                  : "on one of your channels (not text)");
+  } else if (l.type == PAYLOAD_TYPE_ANON_REQ) {
+    damagedRadioName(p[0], a, sizeof(a));
+    snprintf(detail, sizeof(detail), "to %s", a);
+  } else if (l.type == PAYLOAD_TYPE_TXT_MSG || l.type == PAYLOAD_TYPE_REQ || l.type == PAYLOAD_TYPE_RESPONSE ||
+             l.type == PAYLOAD_TYPE_PATH) {
+    damagedRadioName(p[1], a, sizeof(a));
+    damagedRadioName(p[0], b, sizeof(b));
+    if (why == DMG_TOO_DAMAGED) snprintf(detail, sizeof(detail), "from %s to you, but no piece came through", a);
+    else snprintf(detail, sizeof(detail), "from %s to %s", a, b);
+  } else {
+    detail[0] = 0;
+  }
+  char text[MAX_FRAME_SIZE];
+  int k = snprintf(text, MAX_FRAME_SIZE - 11, "%s: [%s, %+.0fdB] %s", from,
+                   why == DMG_TOO_DAMAGED && !damaged::sizeFits(l) ? "unknown" : typeName(l.type), snr, detail);
+  if (k < 0) return;
+  pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, getRTCClock()->getCurrentTimeUnique(), (int8_t)(snr * 4), 0,
+                  text, strlen(text));
 }
 
 // The best reading of a damaged packet, over every key we have. False if nothing reads right.
@@ -225,12 +352,18 @@ void MyMesh::damagedLoop() {
   int len = _radio->takeDamaged(&snr, &rssi);
   if (len > 0) {
     _dmg_heard++;
+    damagedCount(_dmg_raw, len, true, snr);
     DamagedEvent& ev = _dmg_log[_dmg_log_next];
     _dmg_log_next = (_dmg_log_next + 1) % DMG_LOG;
     ev = { millis(), (uint8_t) len, 0, 0, '-', 0 };
     static DamagedMsg in;   // big: not on the stack
     memset(&in, 0, sizeof(in));
-    if (damagedRead(_dmg_raw, len, in)) {
+    if (!damagedRead(_dmg_raw, len, in)) {
+      int why = damagedWhy(_dmg_raw, len);
+      _dmg_unread[why]++;
+      ev.what = "akox-"[why];
+      if (_prefs.dmg.all) damagedPostUnread(_dmg_raw, len, why, snr);
+    } else {
       _dmg_read++;
       in.at = millis() | 1;
       in.copies = 1;
@@ -276,9 +409,50 @@ bool MyMesh::handleDamagedCommand(const char* command, char* reply) {
     if (!_prefs.dmg.en) {
       strcpy(reply, "> Damaged off: packets that fail their CRC check are dropped ('dmg on' to read what's left of them)");
     } else {
-      sprintf(reply, "> Damaged on%s: %lu heard, %lu read, %lu shown (%lu fixed, %lu joined from copies), %lu also heard intact",
-              _prefs.dmg.all ? " (all)" : "", (unsigned long) _dmg_heard, (unsigned long) _dmg_read, (unsigned long) _dmg_shown,
-              (unsigned long) _dmg_fixed, (unsigned long) _dmg_joined, (unsigned long) _dmg_dupes);
+      snprintf(reply, 160, "> Damaged on%s: %lu heard. Read %lu: %lu shown (%lu fixed, %lu joined), %lu heard whole. "
+               "Not read: %lu adverts, %lu acks, %lu for others, %lu other, %lu too damaged",
+               _prefs.dmg.all ? " (all)" : "", (unsigned long) _dmg_heard, (unsigned long) _dmg_read,
+               (unsigned long) _dmg_shown, (unsigned long) _dmg_fixed, (unsigned long) _dmg_joined,
+               (unsigned long) _dmg_dupes, (unsigned long) _dmg_unread[DMG_ADVERT], (unsigned long) _dmg_unread[DMG_ACK],
+               (unsigned long) _dmg_unread[DMG_OTHERS], (unsigned long) _dmg_unread[DMG_TRAFFIC],
+               (unsigned long) _dmg_unread[DMG_TOO_DAMAGED]);
+    }
+    return true;
+  }
+  if (strcmp(command, "dmg reset") == 0) {   // start the counts again
+    _dmg_heard = _dmg_read = _dmg_shown = _dmg_fixed = _dmg_joined = _dmg_dupes = 0;
+    memset(_dmg_unread, 0, sizeof(_dmg_unread));
+    _dmg_from_n = 0;
+    memset(_dmg_log, 0, sizeof(_dmg_log));
+    strcpy(reply, "OK - counts cleared");
+    return true;
+  }
+  if (strcmp(command, "get dmg.from") == 0) {   // the radios our damaged packets came from, most first
+    if (_dmg_from_n == 0) { strcpy(reply, "> nothing heard yet"); return true; }
+    bool done[DMG_FROM] = {};
+    int k = sprintf(reply, ">");
+    for (int shown = 0; shown < _dmg_from_n && k < 150; shown++) {
+      int best = -1;
+      for (int i = 0; i < _dmg_from_n; i++) {
+        if (done[i]) continue;
+        if (best < 0 || _dmg_from[i].damaged > _dmg_from[best].damaged ||
+            (_dmg_from[i].damaged == _dmg_from[best].damaged && _dmg_from[i].whole > _dmg_from[best].whole)) best = i;
+      }
+      done[best] = true;
+      const DamagedFrom& f = _dmg_from[best];
+      char name[16];
+      damagedRadioName(f.who, name, 12);
+      char snr[24] = "";
+      if (f.damaged) {
+        int n = snprintf(snr, sizeof(snr), " %+ddB", (int)(f.damaged_snr4 / 4 / (int32_t) f.damaged));
+        if (f.whole) snprintf(&snr[n], sizeof(snr) - n, "/%+d", (int)(f.whole_snr4 / 4 / (int32_t) f.whole));
+      }
+      char item[64];
+      int w = snprintf(item, sizeof(item), "%s %s: %u/%u%s", shown ? ";" : "", name, f.damaged,
+                       f.damaged + f.whole, snr);
+      if (k + w >= 158) break;
+      memcpy(&reply[k], item, w + 1);
+      k += w;
     }
     return true;
   }
@@ -289,7 +463,7 @@ bool MyMesh::handleDamagedCommand(const char* command, char* reply) {
       const DamagedEvent& e = _dmg_log[(_dmg_log_next + i) % DMG_LOG];
       if (e.at == 0) continue;
       k += snprintf(&reply[k], 160 - k, " -%lus:%u %c", (unsigned long)((now - e.at) / 1000), e.len, e.what);
-      if (e.what != '-' && k < 150) k += snprintf(&reply[k], 160 - k, "%u/%x", e.slot, e.good);
+      if ((e.what == 'w' || e.what == 'j' || e.what == 'i') && k < 150) k += snprintf(&reply[k], 160 - k, "%u/%x", e.slot, e.good);
     }
     return true;
   }
