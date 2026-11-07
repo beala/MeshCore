@@ -351,6 +351,19 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+#### See each packet's frequency error (LR2021 only)
+**Usage:**
+- `get radio.freq`: the last packets heard (up to 16, oldest first, as many as fit in the reply), each with the frequency error the chip measured: how far the sender's carrier was from this radio's, in Hz
+- `get radio.freq <n>`: only packets numbered `n` and after, for polling from a script
+
+**Example reply:** `> 41;37 -1125 54 15 88 92733861;38 -1122 53 22 ? 314174f6`
+
+**Notes:**
+- First the number of packets logged since boot, then per packet: its number, the error in Hz, SNR × 4, the packet's first byte, the radio it came from (hex, `?` unknown), the first 4 payload bytes, and `!` if it failed its CRC.
+- Each radio's crystal is off by its own steady amount, so the error tells transmitters apart: see [Telling transmitters apart by frequency](frequency_fingerprint.md).
+
+---
+
 #### See what the radio did lately (LR2021 only)
 **Usage:**
 - `get radio.log`: the last 24 radio events, newest first, as milliseconds ago and a letter: `X` a transmit started (then the header byte × 256 + length), `T` it ended, `R` a packet heard (its length), `E` one heard with an error, `S` receive couldn't start, `L` a weather/aircraft/radar listen started (modem + 1), `l` it ended (ms it ran), `C` a transmit cut it short, `H` it was skipped for mesh traffic

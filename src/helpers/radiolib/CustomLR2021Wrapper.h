@@ -835,8 +835,9 @@ public:
       _rx_freqs.add(f);
     }
 
-    // eg. "> 41 -1234 -21 11 7a c3d4e5f6;42 ..." per packet: its number, frequency error (Hz), SNR x4,
-    // first byte, the radio heard from (-1 unknown), the payload's first bytes, '!' when the CRC failed.
+    // eg. "> 43;41 -1234 -21 11 7a c3d4e5f6;42 ..." packets logged, then per packet: its number, frequency
+    // error (Hz), SNR x4, first byte, the radio heard from (hex, ? unknown), the payload's first bytes,
+    // '!' when the CRC failed (docs/frequency_fingerprint.md).
     // Only packets numbered after 'since', oldest first, as many as fit.
     void formatRxFreqs(char* reply, uint32_t since) const {
       uint32_t total = _rx_freqs.total();
@@ -845,9 +846,10 @@ public:
         uint32_t seq = total - 1 - i;
         if (seq < since) continue;
         const RxFreq& f = _rx_freqs.get(i);
-        char entry[48];
-        int e = snprintf(entry, sizeof(entry), ";%lu %ld %d %02x %d %02x%02x%02x%02x%s", (unsigned long)seq,
-                         (long)f.err_hz, f.snr_x4, f.hdr, f.from, f.tag[0], f.tag[1], f.tag[2], f.tag[3], f.ok ? "" : "!");
+        char entry[48], from[4] = "?";
+        if (f.from >= 0) snprintf(from, sizeof(from), "%02x", (unsigned)(uint8_t)f.from);
+        int e = snprintf(entry, sizeof(entry), ";%lu %ld %d %02x %s %02x%02x%02x%02x%s", (unsigned long)seq,
+                         (long)f.err_hz, f.snr_x4, f.hdr, from, f.tag[0], f.tag[1], f.tag[2], f.tag[3], f.ok ? "" : "!");
         if (n + e > REPLY_MAX) break;
         strcpy(&reply[n], entry);
         n += e;
