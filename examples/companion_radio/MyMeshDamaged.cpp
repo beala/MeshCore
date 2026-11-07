@@ -45,6 +45,9 @@ void MyMesh::applyDamaged() {
 void MyMesh::damagedCount(const uint8_t* raw, int len, bool bad, float snr) {
   damaged::RadioId who;
   damaged::senderId(raw, len, who);
+  // less than 2 bytes of ID (or none): by its frequency, when that fits exactly one named radio
+  int32_t err;
+  if (bad ? _radio->getDamagedFreqError(&err) : _radio->getLastFreqError(&err)) freqSender(who, err, snr, bad);
   DamagedFrom* f = NULL;
   for (int i = 0; i < _dmg_from_n && !f; i++) {
     if (_dmg_from[i].who.n == who.n && memcmp(_dmg_from[i].who.b, who.b, who.n) == 0) f = &_dmg_from[i];
@@ -144,7 +147,12 @@ void MyMesh::damagedPostUnread(const uint8_t* raw, int len, int why, float snr) 
   char from[24], a[24], b[24];
   damaged::RadioId who;
   damaged::senderId(raw, len, who);
-  damagedRadioName(who.b, why == DMG_TOO_DAMAGED ? 0 : who.n, from, sizeof(from));
+  if (why == DMG_TOO_DAMAGED) who.n = 0;
+  // the radio it came from by its frequency, when the packet doesn't say enough: "~88a1 Hilltop"
+  int32_t err;
+  bool by_freq = _radio->getDamagedFreqError(&err) && freqSender(who, err, snr, false);
+  if (by_freq) from[0] = '~';
+  damagedRadioName(who.b, who.n, &from[by_freq ? 1 : 0], sizeof(from) - 1);
   char detail[120];
   const uint8_t* p = &raw[l.payload_off];
   if (why == DMG_TOO_DAMAGED && !damaged::sizeFits(l)) {

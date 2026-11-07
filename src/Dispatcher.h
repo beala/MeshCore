@@ -90,6 +90,16 @@ public:
   virtual int takeDamaged(float* snr, float* rssi) { (void)snr; (void)rssi; return 0; }
 
   /**
+   * \brief  the frequency error of the last packet read (good or not), in Hz: how far its sender's
+   *          carrier was from ours (helpers/FreqPrint). False if this radio doesn't measure it.
+   */
+  virtual bool getLastFreqError(int32_t* hz) const { (void)hz; return false; }
+  /**
+   * \brief  the same, for the damaged packet takeDamaged() last returned
+   */
+  virtual bool getDamagedFreqError(int32_t* hz) const { (void)hz; return false; }
+
+  /**
    * \returns  the receiver gain step used for the last received packet, or -1 if the radio can't report it.
    */
   virtual int getLastGainStep() const { return -1; }

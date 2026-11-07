@@ -191,6 +191,11 @@ radios share each 1-byte ID, too many for a name to mean anything. With 2 bytes 
 the name is very likely right. A path or ID byte that was hit gives the wrong ID (and a wrong name only
 when it happens to match another contact's).
 
+On LR2021 radios, a packet that gives less than 2 bytes of ID (or none) can still be placed by its
+frequency: if exactly one radio known for sure fits its ID and its frequency error, it's shown with a
+`~`, eg. `~88a1 Hilltop: [channel message, -10dB] ...`, and `get dmg.from` counts it there. See
+[Telling transmitters apart by frequency](frequency_fingerprint.md#naming-the-sender-of-a-packet).
+
 ## Where the damage comes from
 
 `get dmg.from` lists the radios damaged packets came from, most first: damaged packets out of all

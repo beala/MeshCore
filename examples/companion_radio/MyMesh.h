@@ -29,6 +29,7 @@
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/BaseSerialInterface.h>
 #include <helpers/DamagedRx.h>
+#include <helpers/FreqPrint.h>
 #include <helpers/meshtastic/MeshtasticRx.h>
 #include <helpers/weather/SensorTracker.h>
 #include <helpers/aircraft/Uat.h>
@@ -554,6 +555,12 @@ private:
   DamagedFrom _dmg_from[DMG_FROM] = {};
   uint8_t _dmg_from_n = 0;
   void damagedCount(const uint8_t* raw, int len, bool damaged, float snr);
+
+  // frequency fingerprints of nearby radios (MyMeshFreq.cpp)
+  freqprint::Table _freq;
+  void freqNote(const uint8_t* raw, int len, float snr);
+  bool freqSender(damaged::RadioId& who, int32_t err, float snr, bool count);
+  bool handleFreqCommand(const char* command, char* reply);
   uint32_t _dmg_heard = 0, _dmg_read = 0, _dmg_shown = 0, _dmg_fixed = 0, _dmg_joined = 0, _dmg_dupes = 0;
   bool isDamagedChannel(int idx) const;
   void getDamagedChannel(ChannelDetails& ch);

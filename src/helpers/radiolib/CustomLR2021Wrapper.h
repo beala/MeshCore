@@ -309,6 +309,9 @@ public:
         _last_gain_step = -1;
       }
       if (got && (len > 0 || bad)) noteFreq(bytes, len > 0 ? len : (hlen < sz ? hlen : sz), ferr, len > 0);
+      _last_ferr = ferr;
+      _last_ferr_ok = got && (len > 0 || bad);
+      if (bad && got) { _dmg_ferr_new = ferr; _dmg_ferr_new_ok = true; }   // the packet kept as damaged
       if (scan_pkt) {
         // The scan parks after RxDone; read what belongs to this packet, then let it carry on.
         _scan_rssi = r->getRSSI();
@@ -480,6 +483,14 @@ public:
   }
 
   int getLastGainStep() const override { return _last_gain_step; }
+
+  bool getLastFreqError(int32_t* hz) const override { if (_last_ferr_ok) *hz = _last_ferr; return _last_ferr_ok; }
+  int takeDamaged(float* snr, float* rssi) override {
+    int n = RadioLibWrapper::takeDamaged(snr, rssi);
+    if (n > 0) { _dmg_ferr = _dmg_ferr_new; _dmg_ferr_ok = _dmg_ferr_new_ok; _dmg_ferr_new_ok = false; }
+    return n;
+  }
+  bool getDamagedFreqError(int32_t* hz) const override { if (_dmg_ferr_ok) *hz = _dmg_ferr; return _dmg_ferr_ok; }
 
   // Companion/remote CLI: recent TX faults and AGC gain steps. Replies list the newest entries
   // first, as many as fit in REPLY_MAX characters.
@@ -825,6 +836,8 @@ public:
     RecentHistory<TxFault, TX_FAULT_HISTORY> _tx_faults;
     RecentHistory<RxGain, RX_GAIN_HISTORY> _rx_gains;
     RecentHistory<RxFreq, RX_FREQ_LOG> _rx_freqs;
+    int32_t _last_ferr = 0, _dmg_ferr_new = 0, _dmg_ferr = 0;
+    bool _last_ferr_ok = false, _dmg_ferr_new_ok = false, _dmg_ferr_ok = false;
 
     void noteFreq(const uint8_t* raw, int len, int32_t err_hz, bool ok) {
       RxFreq f = { (uint32_t)millis(), err_hz, (int8_t)(getLastSNR() * 4), len > 0 ? raw[0] : (uint8_t)0,

@@ -351,6 +351,20 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 ---
 
+#### See the radios around you by frequency (LR2021 only)
+**Usage:**
+- `get nodes.freq`: one row per radio heard: its ID (2 bytes and a name once known for sure), its usual frequency error in Hz, how far its readings stray (±Hz), packets, and when last heard. `get nodes.freq <n>` starts at row n.
+- `nodes.freq reset`: clear the table
+- `get nodes.list [n]`: the same rows as numbers, for apps (format in [frequency_fingerprint.md](frequency_fingerprint.md))
+
+**Example reply:** `> 3 radios; 2 share 4c; a2b3: +27Hz ~9, 19, 6s; 4c: +23Hz ~9, 12, 5s; 4c07 Sender: -390Hz ~2, 6, 7s`
+
+**Notes:**
+- `2 share 4c`: two radios whose IDs start with the same byte, told apart by their frequencies.
+- How rows are learned and when a packet is put under one: [Telling transmitters apart by frequency](frequency_fingerprint.md).
+
+---
+
 #### See each packet's frequency error (LR2021 only)
 **Usage:**
 - `get radio.freq`: the last packets heard (up to 16, oldest first, as many as fit in the reply), each with the frequency error the chip measured: how far the sender's carrier was from this radio's, in Hz

@@ -721,6 +721,7 @@ uint8_t MyMesh::getExtraAckTransmitCount() const {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  freqNote(raw, len, snr);
   damagedNoteIntact(raw, len);
   // Apps only understand v1: show them v2 packets we can decrypt in their v1 form, so they still
   // recognise echoes of their own messages ("heard N repeats").
@@ -2743,6 +2744,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (handleWeatherCommand(command, reply)) return true;
   if (handleAircraftCommand(command, reply)) return true;
   if (handleDamagedCommand(command, reply)) return true;
+  if (handleFreqCommand(command, reply)) return true;
   if (handleRadarCommand(command, reply)) return true;
 
   // hook for variant-specific CLI processing
