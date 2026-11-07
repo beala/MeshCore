@@ -273,6 +273,23 @@ private:
       def("below", below);
     }
   };
+  // Airport weather (METAR, TAF) from FIS-B ground stations on 978 MHz, shown as an extra channel
+  class MetarPrefs : public ConfigSerializer {
+  public:
+    uint8_t en = 0;
+    float freq = 978.0f;          // MHz (978 for FIS-B; other values are for bench tests)
+    uint8_t duty = 10;            // % of the time spent listening (100 = all the time)
+    char airports[40] = "";       // comma-separated airport IDs to show, eg. KLMO,KBJC (empty: none, just a hint)
+    uint8_t taf = 0;              // 1: forecasts (TAF) too
+  protected:
+    void structure() override {
+      def("en", en);
+      def("freq", freq);
+      def("duty", duty);
+      def("airports", airports, sizeof(airports));
+      def("taf", taf);
+    }
+  };
   // Packets that fail their CRC check: read what came through and show it in an extra channel
   class DamagedPrefs : public ConfigSerializer {
   public:
@@ -291,6 +308,7 @@ public:
   WeatherPrefs wx;
   AircraftPrefs air;
   DamagedPrefs dmg;
+  MetarPrefs metar;
 private:
 
   class CompanionPrefs : public ConfigSerializer {
@@ -396,6 +414,7 @@ protected:
     def("wx", wx);
     def("air", air);
     def("dmg", dmg);
+    def("metar", metar);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif

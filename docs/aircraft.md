@@ -153,4 +153,4 @@ turns with 978 at 10% of the time: digests such as `Nearby: N713SA 5,750 ft (+1 
 | `test/test_uat`, `test/test_adsb`, `test/fuzz/fuzz_uat.cpp` | `pio test -e native_wxsensor` (ASAN + UBSan), and the fuzzer (both bands) |
 
 Weather from ground stations (FIS-B) uses the same frequency and modulation: see
-[airport weather notes](airport_weather_notes.md).
+[airport weather](airport_weather.md).

@@ -389,7 +389,7 @@ public:
 
   // ---- FSK listen (weather sensors) ----
   bool startFskListen(const FskListen& cfg, uint32_t ms) override {
-    if (cfg.pkt_len == 0 || cfg.pkt_len > FSK_MAX_LEN) return false;
+    if (cfg.pkt_len == 0 || (cfg.pkt_len > FSK_MAX_LEN && cfg.pkt_len != FSK_BIG_LEN)) return false;
     if (cfg.modem == MODEM_GFSK && (cfg.sync_len == 0 || cfg.sync_len > 8)) return false;
     if (cfg.modem > MODEM_PULSE) return false;
     if (_fsk_state == FSK_LISTENING) endFskListen();
@@ -405,10 +405,30 @@ public:
     _fsk_state = FSK_IDLE;
   }
 
+#ifdef FISB_BENCH_TX
+  // Bench only: one GFSK packet (CustomLR2021::benchFskTx), then mesh receive again
+  int16_t benchFskTx(float freq, float kbps, float dev, const uint8_t* sync, uint8_t syncLen, uint8_t syncBits,
+                     const uint8_t* data, uint16_t len) {
+    stopFskListen();
+    int16_t st = ((CustomLR2021 *)_radio)->benchFskTx(freq, kbps, dev, sync, syncLen, syncBits, data, len);
+    clearIrqPending();
+    applySideDetectorConfig();
+    idle();
+    return st;
+  }
+#endif
+
   int fskListenState() const override { return _fsk_state; }
   uint32_t lastFskListenMillis() const override { return _fsk_ran; }
 
   int recvFsk(uint8_t* bytes, int sz, float* rssi) override {
+    if (_fsk_big_len) {   // a long frame (cut to sz if bytes is shorter)
+      int len = _fsk_big_len < sz ? _fsk_big_len : sz;
+      memcpy(bytes, _fsk_big, len);
+      if (rssi) *rssi = _fsk_big_rssi;
+      _fsk_big_len = 0;
+      return len;
+    }
     if (_fsk_count == 0) return 0;
     const FskPacket& p = _fsk_q[_fsk_head];
     int len = p.len < sz ? p.len : sz;
@@ -607,6 +627,10 @@ public:
     enum { FSK_IDLE = 0, FSK_WAITING = 1, FSK_LISTENING = 2 };
     static const int FSK_MAX_LEN = 48;   // the longest: a UAT long message
     static const int FSK_QUEUE = 4;
+    static const int FSK_BIG_LEN = 552;  // or one FIS-B ground station frame, held on its own
+    uint8_t _fsk_big[FSK_BIG_LEN];
+    uint16_t _fsk_big_len = 0;
+    int16_t _fsk_big_rssi = 0;
     // After a transmit, repeaters echo it, and repeaters further away echo those; after a packet is
     // heard, other copies follow. FSK listens wait (a listen whose time runs out meanwhile is skipped).
     // A repeater forwards within about 1 s + 8 airtimes (as flood retry waits for an echo,
@@ -690,6 +714,18 @@ public:
         float rssi = 0;
         p.len = _fsk_cfg.pkt_len;
         int16_t rs;
+        if (_fsk_cfg.pkt_len > FSK_MAX_LEN) {   // a long frame: its own slot, the newest kept
+          rs = r->fskRead(_fsk_big, _fsk_cfg.pkt_len, &rssi);
+          if (rs == RADIOLIB_ERR_NONE) {
+            if (_fsk_big_len) _fsk_dropped++;
+            _fsk_big_len = _fsk_cfg.pkt_len;
+            _fsk_big_rssi = (int16_t) rssi;
+            _fsk_packets++;
+          }
+          r->fskRearm();
+          if ((int32_t)(now - _fsk_end) >= 0) endFskListen();
+          return;
+        }
         if (_fsk_cfg.modem == MODEM_PULSE) {   // only when: no need to read the chip's byte
           uint32_t t = millis();
           memcpy(p.data, &t, 4);

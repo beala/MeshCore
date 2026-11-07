@@ -406,7 +406,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - The radio also listens to a Meshtastic channel, and its texts show in the app as one more channel, "Meshtastic LongFast", after your own. Receive only: text typed there is not sent. See [Meshtastic channel](meshtastic_channel.md).
 - Settings are saved. Reconnect the app after `mt on` so it lists the new channel.
-- Meshtastic (`mt`), weather (`wx`) and aircraft (`air`) are one at a time: turning one on turns the others off (the reply says which). `radar`, copying a radio (`clone`) and `find range` pause whichever is on until they finish. A radio updated from firmware that let several be on keeps the first of Meshtastic, Weather, Aircraft.
+- Meshtastic (`mt`), weather (`wx`), aircraft (`air`) and airport weather (`metar`) are one at a time: turning one on turns the others off (the reply says which). `radar`, copying a radio (`clone`) and `find range` pause whichever is on until they finish. A radio updated from firmware that let several be on keeps the first of Meshtastic, Weather, Aircraft, Airport weather.
 
 #### Weather sensors (LR2021 only)
 **Usage:**
@@ -427,7 +427,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - Ecowitt, Ambient Weather, other Fine Offset and La Crosse View sensors show in the app as one more channel, "Weather", after your own and the Meshtastic slot. Receive only. See [Weather sensors](weather_sensors.md).
 - Settings are saved. Reconnect the app after `wx on` so it lists the new channel.
-- One at a time with `mt` and `air` (see above).
+- One at a time with `mt`, `air` and `metar` (see above).
 
 #### Aircraft on 978 MHz (LR2021 only)
 **Usage:**
@@ -441,8 +441,21 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 **Notes:**
 - Aircraft reporting on UAT (978 MHz) and 1090 MHz ADS-B show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
-- One at a time with `mt` and `wx` (see above).
+- One at a time with `mt`, `wx` and `metar` (see above).
 - `radar [seconds] [threshold] [MHz]`, `get radar`, `get radar.bursts`, `radar stop`: listen on 1030 MHz and work out how fast the radars around turn (LR2021). See [Radar sweep detector](radar.md). Meshtastic, weather or aircraft pause meanwhile.
+
+#### Airport weather on 978 MHz (LR2021 only)
+**Usage:**
+- `metar on`, `metar off`
+- `set metar.airports <IDs>` (eg. `KLMO,KBJC`; `none` to clear), `set metar.taf on|off` (default off), `set metar.duty <percent>` (default 10; 100 = all the time), `set metar.freq <MHz>` (default 978; others for bench tests)
+- `metar` or `get metar`, `get metar.heard`, `get metar.stats`
+
+**Example reply:** `> 97 frames (5 corrected, 3 bad), 107 reports, 10 posts, listening 9.8%; station slot 7, -61 dBm, 12.4 mi NE`
+
+**Notes:**
+- METARs and TAFs from FAA ground stations (FIS-B) for the airports chosen show in the app as one more receive-only channel, "Airport weather", each report once. See [Airport weather](airport_weather.md).
+- Settings are saved. Reconnect the app after `metar on` so it lists the new channel.
+- One at a time with `mt`, `wx` and `air` (see above).
 
 #### Damaged packets
 **Usage:**

@@ -432,18 +432,20 @@ private:
   // The synthetic channels have fixed slots after the regular ones, whichever are on, so a client
   // never sees one move: Meshtastic, then Weather, then Aircraft. A slot whose feature is off reads
   // as an empty channel.
-  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3 };
+  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3, VCH_METAR = 4 };
   // One listen at a time: Meshtastic, weather and aircraft each take the radio away from the mesh
   // in their own way, so turning one on turns the others off. 'radar' and copying a radio pause
   // whichever is on while they run.
-  enum { LISTEN_MT = 1, LISTEN_WX = 2, LISTEN_AIR = 4 };
+  enum { LISTEN_MT = 1, LISTEN_WX = 2, LISTEN_AIR = 4, LISTEN_METAR = 8 };
   void listenOthersOff(uint8_t keep, char* off, size_t n);   // off: a note for the reply, "" if none were on
   void pauseListens();
   void resumeListens();
   bool _listens_paused = false;
   bool listensBusy(char* reply) const;
   void drainFsk();                   // drop packets queued by a listen that's over   // paused: an error in reply, and true
-  int virtualChannelCount() const { return _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0; }
+  int virtualChannelCount() const {
+    return _metar_active ? 5 : _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0;
+  }
   bool isVirtualChannelSlot(int idx) const;
 
   // Aircraft heard on 978 MHz (UAT), shown as one more receive-only channel after Weather's
@@ -574,6 +576,26 @@ private:
   void damagedFinish(DamagedMsg& m);
   bool handleDamagedCommand(const char* command, char* reply);
   bool isAircraftChannel(int idx) const;
+
+  // Airport weather: METAR/TAF text from FIS-B ground stations on 978 MHz (MyMeshMetar.cpp,
+  // docs/airport_weather.md), one more receive-only channel after Damaged's
+  bool _metar_active = false, _metar_listening = false, _metar_hinted = false;
+  uint32_t _metar_next = 0, _metar_since = 0, _metar_listen_ms = 0;
+  uint32_t _metar_frames = 0, _metar_fixed = 0, _metar_bad = 0, _metar_reports = 0, _metar_shown = 0;
+  uint32_t _metar_posted[32];        // reports already shown (a hash of kind, airport and time)
+  uint8_t _metar_posted_n = 0;
+  char _metar_heard[24][5];          // airports heard lately, for 'get metar.heard'
+  uint8_t _metar_heard_n = 0;
+  int32_t _metar_stn_lat = 0, _metar_stn_lon = 0;   // the last ground station heard (x 1e5)
+  int16_t _metar_stn_rssi = 0;
+  uint8_t _metar_stn_slot = 0;
+  void applyMetar();
+  void metarLoop();
+  void metarFrame(const uint8_t* frame, int len, float rssi);
+  void metarReport(const char* text, int len);
+  bool metarWanted(const char* where) const;
+  bool handleMetarCommand(const char* command, char* reply);
+  bool isMetarChannel(int idx) const;
   void describePlane(const Plane& p, char* out, size_t n);
   bool weatherShown(const wxsensor::Reading& r) const;
   void showWeather(const char* text, int8_t snr_x4);

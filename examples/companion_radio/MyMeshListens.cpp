@@ -1,4 +1,4 @@
-// One listen at a time. Meshtastic (the on-chip scanner), weather and aircraft (short FSK/OOK
+// One listen at a time. Meshtastic (the on-chip scanner), weather, aircraft and airport weather (short FSK/OOK
 // listens away from the mesh) each cost the mesh some of its receive time; together they cost too
 // much, and they got in each other's way. So turning one on turns the others off, and 'radar' and
 // copying a radio, which need the radio to themselves, pause whichever is on until they finish.
@@ -28,6 +28,11 @@ void MyMesh::listenOthersOff(uint8_t keep, char* off, size_t n) {
     applyAircraft();
     addName(off, n, "Aircraft");
   }
+  if (!(keep & LISTEN_METAR) && _prefs.metar.en) {
+    _prefs.metar.en = 0;
+    applyMetar();
+    addName(off, n, "Airport weather");
+  }
   drainFsk();   // packets the last listen left queued belong to the one turned off
   if (off[0]) {   // as a note for the reply: " (Weather off: one at a time)"
     char names[40];
@@ -54,6 +59,7 @@ void MyMesh::pauseListens() {
   _radio->stopFskListen();
   _wx_win_open = false;   // the window is lost, not missed: don't count it against the sensor
   _air_listening = false;
+  _metar_listening = false;
   drainFsk();
   if (_mt_active && _radio->isSideListening()) {
     _radio->stopSideListen();   // Semtech's patch back in the chip while the radio is busy elsewhere

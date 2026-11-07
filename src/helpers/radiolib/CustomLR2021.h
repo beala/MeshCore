@@ -64,6 +64,9 @@ private:
   struct { uint32_t packets, crc_err, len_err; } _ook_stats_raw = {};
   struct { uint32_t packets, crc_err, len_err; } _link_stats = {};   // the link, all time
   int16_t fskStopInternal();
+  bool _fifo_big = false;             // the receive FIFO is in its 1 KB region (a long FSK listen)
+  uint32_t _fifo_rx_base = 0, _fifo_rx_size = 0;   // its usual place, to put it back
+  int16_t rxFifoBig(bool on);
   int16_t ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits, uint8_t pktLen,
                    uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm);
   int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);
@@ -331,11 +334,14 @@ private:
     }
 
     // ---- FSK listen (weather sensors) ----
+    static const uint16_t FSK_PKT_MAX = 1000;   // the longest packet: the receive FIFO's 1 KB region
     // Leaves LoRa (and the scan) for GFSK receive with these settings, continuous, RxDone on the IRQ
     // pin. Packets are fixed length, with no CRC or whitening: the caller checks them.
     // syncBits: 0 = syncLen * 8, else the sync word is the last syncBits bits of sync[]
+    // pktLen over 256 (FIS-B's 552-byte frames): the receive FIFO moves to its 1 KB region for the
+    // listen (datasheet 5.3.3), so the whole frame is read after RxDone; fskStop puts it back.
     int16_t fskStart(float freqMHz, float kbps, float devKHz, float rxbwKHz,
-                     const uint8_t* sync, uint8_t syncLen, uint8_t pktLen, uint8_t syncBits = 0, bool noPreamble = false,
+                     const uint8_t* sync, uint8_t syncLen, uint16_t pktLen, uint8_t syncBits = 0, bool noPreamble = false,
                      uint8_t preDetBits = 0);
     // receiver counts over all FSK listens (GetGfskRxStats, read as each listen ends)
     struct FskStats { uint32_t packets, len_err, preambles, sync_ok, sync_fail; };
@@ -360,8 +366,15 @@ private:
       OokStats o = { _ook_stats_raw.packets, _ook_stats_raw.crc_err, _ook_stats_raw.len_err };
       return o;
     }
+#ifdef FISB_BENCH_TX
+    // Bench only (never in release builds): sends one fixed-length GFSK packet up to 1000 bytes, no
+    // preamble, no CRC or whitening, as FIS-B ground stations frame theirs, then back to LoRa in
+    // standby. 902-928 MHz only: never 978 MHz (an aviation band).
+    int16_t benchFskTx(float freqMHz, float kbps, float devKHz, const uint8_t* sync, uint8_t syncLen, uint8_t syncBits,
+                       const uint8_t* data, uint16_t len);
+#endif
     int16_t fskRearm();                                    // receive again after a packet
-    int16_t fskRead(uint8_t* buf, uint8_t len, float* rssi);
+    int16_t fskRead(uint8_t* buf, uint16_t len, float* rssi);
     // Back to LoRa with MeshCore's settings, in standby. The caller starts receive again.
     int16_t fskStop() { return _fsk_active ? fskStopInternal() : RADIOLIB_ERR_NONE; }
     // Point-to-point link (copying a radio). It starts in GFSK, framed as on the SX126x so either

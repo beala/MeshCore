@@ -224,9 +224,9 @@ int16_t CustomLR2021::calibrateFor(float fskMHz) {
 }
 
 int16_t CustomLR2021::fskStart(float fMHz, float kbps, float devKHz, float rxbwKHz,
-                               const uint8_t* sync, uint8_t syncLen, uint8_t pktLen, uint8_t syncBits, bool noPreamble,
+                               const uint8_t* sync, uint8_t syncLen, uint16_t pktLen, uint8_t syncBits, bool noPreamble,
                                uint8_t preDetBits) {
-  if (syncLen == 0 || syncLen > RADIOLIB_LR2021_GFSK_SYNC_WORD_LEN || pktLen == 0) return RADIOLIB_ERR_INVALID_SYNC_WORD;
+  if (syncLen == 0 || syncLen > RADIOLIB_LR2021_GFSK_SYNC_WORD_LEN || pktLen == 0 || pktLen > FSK_PKT_MAX) return RADIOLIB_ERR_INVALID_SYNC_WORD;
   int16_t state = standby();   // stops a scan or an earlier listen
   if (state != RADIOLIB_ERR_NONE) return state;
   state = calibrateFor(fMHz);  // in LoRa packet type: calibrating in other types can miscalibrate
@@ -254,6 +254,8 @@ int16_t CustomLR2021::fskStart(float fMHz, float kbps, float devKHz, float rxbwK
     state = SPIcommand(RADIOLIB_LR2021_CMD_SET_GFSK_SYNCWORD, true, buff, sizeof(buff));
   }
   if (state == RADIOLIB_ERR_NONE) state = setDioIrqConfig(irqDioNum, RADIOLIB_LR2021_IRQ_RX_DONE);
+  // after the front end calibration above: calibrating overwrites the 1 KB region
+  if (state == RADIOLIB_ERR_NONE && pktLen > 256) state = rxFifoBig(true);
   if (state == RADIOLIB_ERR_NONE) {
     this->mod->setRfSwitchState(Module::MODE_RX);
     state = fskRearm();
@@ -261,6 +263,91 @@ int16_t CustomLR2021::fskStart(float fMHz, float kbps, float devKHz, float rxbwK
   if (state != RADIOLIB_ERR_NONE) fskStopInternal();
   return state;
 }
+
+// The receive FIFO's 1 KB region (datasheet 5.3.3, table 5-2 and 5-3), or back where it was. In standby.
+static const uint32_t REG_RX_FIFO_BASE = 0x00F30028UL, REG_RX_FIFO_SIZE = 0x00F30030UL;
+
+int16_t CustomLR2021::rxFifoBig(bool on) {
+  if (on == _fifo_big) return RADIOLIB_ERR_NONE;
+  int16_t state;
+  if (on) {
+    state = readRegMem32(REG_RX_FIFO_BASE, &_fifo_rx_base, 1);
+    if (state == RADIOLIB_ERR_NONE) state = readRegMem32(REG_RX_FIFO_SIZE, &_fifo_rx_size, 1);
+    if (state != RADIOLIB_ERR_NONE) return state;
+    uint32_t base = 0x00804400UL, size = 0x000003E8UL;   // 1000 + 4 implicit bytes
+    state = writeRegMem32(REG_RX_FIFO_BASE, &base, 1);
+    if (state == RADIOLIB_ERR_NONE) state = writeRegMem32(REG_RX_FIFO_SIZE, &size, 1);
+  } else {
+    state = writeRegMem32(REG_RX_FIFO_BASE, &_fifo_rx_base, 1);
+    if (state == RADIOLIB_ERR_NONE) state = writeRegMem32(REG_RX_FIFO_SIZE, &_fifo_rx_size, 1);
+  }
+  _fifo_big = on;   // even after an error: putting it back is tried again on the next stop
+  if (state == RADIOLIB_ERR_NONE) state = clearRxFifo();
+  return state;
+}
+
+#ifdef FISB_BENCH_TX
+static const uint32_t REG_TX_FIFO_BASE = 0x00F3002CUL, REG_TX_FIFO_SIZE = 0x00F30034UL;
+
+int16_t CustomLR2021::benchFskTx(float fMHz, float kbps, float devKHz, const uint8_t* sync, uint8_t syncLen, uint8_t syncBits,
+                                 const uint8_t* data, uint16_t len) {
+  if (fMHz < 902.0f || fMHz > 928.0f) return RADIOLIB_ERR_INVALID_FREQUENCY;   // the ISM band only
+  if (len == 0 || len > FSK_PKT_MAX || syncLen == 0 || syncLen > RADIOLIB_LR2021_GFSK_SYNC_WORD_LEN) return RADIOLIB_ERR_PACKET_TOO_LONG;
+  int16_t state = standby();
+  if (state == RADIOLIB_ERR_NONE) state = calibrateFor(fMHz);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  _fsk_active = true;
+  state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_GFSK);
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setGfskModulationParams((uint32_t)(kbps * 1000.0f + 0.5f), RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE,
+                                    gfskRxBwCode(2222.0f), (uint32_t)(devKHz * 1000.0f + 0.5f));
+  }
+  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(fMHz * 1000000.0f + 0.5f));
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setGfskPacketParams(0, 0, false, false, RADIOLIB_LR2021_GFSK_OOK_ADDR_FILT_DISABLED,
+                                RADIOLIB_LR2021_GFSK_OOK_PACKET_FORMAT_FIXED, len, RADIOLIB_LR2021_GFSK_OOK_CRC_OFF, 0);
+  }
+  if (state == RADIOLIB_ERR_NONE) {
+    uint8_t buff[9] = { 0 };   // right-aligned, then MSB first and the length in bits (see fskStart)
+    memcpy(&buff[RADIOLIB_LR2021_GFSK_SYNC_WORD_LEN - syncLen], sync, syncLen);
+    buff[8] = 0x80 | ((syncBits ? syncBits : syncLen * 8) & 0x7F);
+    state = SPIcommand(RADIOLIB_LR2021_CMD_SET_GFSK_SYNCWORD, true, buff, sizeof(buff));
+  }
+  // the transmit FIFO's 1 KB region (datasheet 5.3.3), so the whole packet goes in before it starts
+  uint32_t tx_base = 0, tx_size = 0;
+  bool big = len > 256;
+  if (state == RADIOLIB_ERR_NONE && big) {
+    state = readRegMem32(REG_TX_FIFO_BASE, &tx_base, 1);
+    if (state == RADIOLIB_ERR_NONE) state = readRegMem32(REG_TX_FIFO_SIZE, &tx_size, 1);
+    uint32_t base = 0x00804000UL, size = 0x000003FCUL;
+    if (state == RADIOLIB_ERR_NONE) state = writeRegMem32(REG_TX_FIFO_BASE, &base, 1);
+    if (state == RADIOLIB_ERR_NONE) state = writeRegMem32(REG_TX_FIFO_SIZE, &size, 1);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = clearTxFifo();
+  for (uint16_t at = 0; at < len && state == RADIOLIB_ERR_NONE; at += 128) {
+    state = writeRadioTxFifo(&data[at], len - at < 128 ? len - at : 128);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
+  if (state == RADIOLIB_ERR_NONE) {
+    this->mod->setRfSwitchState(Module::MODE_TX);
+    state = setTx(0);
+  }
+  if (state == RADIOLIB_ERR_NONE) {
+    uint32_t start = millis();
+    while (!(getIrqStatus() & RADIOLIB_LR2021_IRQ_TX_DONE)) {
+      if (millis() - start > 100) { state = RADIOLIB_ERR_TX_TIMEOUT; break; }
+    }
+  }
+  LR2021::standby();
+  if (big) {
+    writeRegMem32(REG_TX_FIFO_BASE, &tx_base, 1);
+    writeRegMem32(REG_TX_FIFO_SIZE, &tx_size, 1);
+    clearTxFifo();
+  }
+  int16_t back = fskStopInternal();
+  return state != RADIOLIB_ERR_NONE ? state : back;
+}
+#endif
 
 int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uint8_t gain, int8_t threshDbm) {
   // 2 Mchip/s: 1 Mbit/s of Manchester-coded data, as the chip counts it. 11 data bytes then the
@@ -337,7 +424,7 @@ int16_t CustomLR2021::fskRearm() {
   return state;
 }
 
-int16_t CustomLR2021::fskRead(uint8_t* buf, uint8_t len, float* rssi) {
+int16_t CustomLR2021::fskRead(uint8_t* buf, uint16_t len, float* rssi) {
   if (!_fsk_active) return RADIOLIB_ERR_WRONG_MODEM;
   uint32_t irq = getIrqStatus();
   if (!(irq & RADIOLIB_LR2021_IRQ_RX_DONE)) return RADIOLIB_ERR_RX_TIMEOUT;
@@ -351,7 +438,12 @@ int16_t CustomLR2021::fskRead(uint8_t* buf, uint8_t len, float* rssi) {
   float rssiSync = 0;
   getGfskPacketStatus(NULL, NULL, &rssiSync, NULL, NULL, NULL);
   if (rssi) *rssi = rssiSync;
-  return readRadioRxFifo(buf, len);
+  // in pieces: RadioLib allocates each SPI transfer's buffer
+  int16_t state = RADIOLIB_ERR_NONE;
+  for (uint16_t at = 0; at < len && state == RADIOLIB_ERR_NONE; at += 128) {
+    state = readRadioRxFifo(&buf[at], len - at < 128 ? len - at : 128);
+  }
+  return state;
 }
 
 static const uint32_t LINK_SYNC = 0x4D43434CUL;   // "MCCL"
@@ -526,6 +618,7 @@ int16_t CustomLR2021::fskStopInternal() {
     _fsk_stats_raw.sync_ok += sok; _fsk_stats_raw.sync_fail += sfail;
   }
   int16_t state = LR2021::standby();
+  if (_fifo_big) rxFifoBig(false);
   // LoRa again, with RadioLib's cached MeshCore settings
   if (state == RADIOLIB_ERR_NONE) state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_LORA);
   if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(freqMHz * 1000000.0f + 0.5f));

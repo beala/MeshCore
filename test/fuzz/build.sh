@@ -64,6 +64,11 @@ clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-reco
   -I src test/fuzz/fuzz_uat.cpp src/helpers/aircraft/Uat.cpp src/helpers/aircraft/AdsB.cpp src/helpers/aircraft/RadarSweep.cpp -o .pio/fuzz/fuzz_uat
 echo "built .pio/fuzz/fuzz_uat"
 
+# Airport weather: FIS-B ground station frames (978 MHz)
+clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+  -I src test/fuzz/fuzz_fisb.cpp src/helpers/weather/Fisb.cpp src/helpers/aircraft/Uat.cpp -o .pio/fuzz/fuzz_fisb
+echo "built .pio/fuzz/fuzz_fisb"
+
 # Damaged packets: what's left of packets that failed their CRC, with the real AES and SHA-256
 clang++ $FLAGS test/fuzz/fuzz_damaged.cpp src/helpers/DamagedRx.cpp src/Utils.cpp src/Packet.cpp \
   $CRYPTO/AES128.cpp $CRYPTO/AESCommon.cpp $CRYPTO/BlockCipher.cpp $CRYPTO/Crypto.cpp $CRYPTO/Hash.cpp \
