@@ -33,6 +33,11 @@ void MyMesh::listenOthersOff(uint8_t keep, char* off, size_t n) {
     applyMetar();
     addName(off, n, "Airport weather");
   }
+  if (!(keep & LISTEN_METERS) && _prefs.meter.en) {
+    _prefs.meter.en = 0;
+    applyMeters();
+    addName(off, n, "Meters");
+  }
   drainFsk();   // packets the last listen left queued belong to the one turned off
   if (off[0]) {   // as a note for the reply: " (Weather off: one at a time)"
     char names[40];
@@ -60,6 +65,7 @@ void MyMesh::pauseListens() {
   _wx_win_open = false;   // the window is lost, not missed: don't count it against the sensor
   _air_listening = false;
   _metar_listening = false;
+  _meter_listening = false;
   drainFsk();
   if (_mt_active && _radio->isSideListening()) {
     _radio->stopSideListen();   // Semtech's patch back in the chip while the radio is busy elsewhere

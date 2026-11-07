@@ -27,6 +27,7 @@
 
 #include <RTClib.h>
 #include <helpers/ArduinoHelpers.h>
+#include <helpers/meters/Meters.h>
 #include <helpers/BaseSerialInterface.h>
 #include <helpers/DamagedRx.h>
 #include <helpers/FreqPrint.h>
@@ -432,11 +433,11 @@ private:
   // The synthetic channels have fixed slots after the regular ones, whichever are on, so a client
   // never sees one move: Meshtastic, then Weather, then Aircraft. A slot whose feature is off reads
   // as an empty channel.
-  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3, VCH_METAR = 4 };
+  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3, VCH_METAR = 4, VCH_METERS = 5 };
   // One listen at a time: Meshtastic, weather and aircraft each take the radio away from the mesh
   // in their own way, so turning one on turns the others off. 'radar' and copying a radio pause
   // whichever is on while they run.
-  enum { LISTEN_MT = 1, LISTEN_WX = 2, LISTEN_AIR = 4, LISTEN_METAR = 8 };
+  enum { LISTEN_MT = 1, LISTEN_WX = 2, LISTEN_AIR = 4, LISTEN_METAR = 8, LISTEN_METERS = 16 };
   void listenOthersOff(uint8_t keep, char* off, size_t n);   // off: a note for the reply, "" if none were on
   void pauseListens();
   void resumeListens();
@@ -444,7 +445,7 @@ private:
   bool listensBusy(char* reply) const;
   void drainFsk();                   // drop packets queued by a listen that's over   // paused: an error in reply, and true
   int virtualChannelCount() const {
-    return _metar_active ? 5 : _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0;
+    return _meter_active ? 6 : _metar_active ? 5 : _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0;
   }
   bool isVirtualChannelSlot(int idx) const;
 
@@ -600,6 +601,38 @@ private:
   bool metarWanted(const char* where) const;
   bool handleMetarCommand(const char* command, char* reply);
   bool isMetarChannel(int idx) const;
+  // Utility meters: water, gas and electric meter readings on 915 MHz (MyMeshMeters.cpp,
+  // docs/utility_meters.md), the chosen ones shown in a "Meters" channel
+  bool _meter_active = false, _meter_listening = false;
+  uint8_t _meter_turn = 0, _meter_kind = 1;   // the listen's kind and centre, in turn
+  uint8_t _meter_last_bad[32], _meter_last_bad_len = 0, _meter_last_bad_kind = 0;
+  float _meter_center = 0;                    // 'set meter.center': one centre for tests (0 = all four)
+  uint32_t _meter_next = 0, _meter_since = 0, _meter_listen_ms = 0;
+  uint32_t _meter_frames = 0, _meter_bad = 0, _meter_shown = 0, _meter_kind_ok[3] = {};
+  struct MeterSeen {
+    uint32_t id, total, heard_at, posted_at, posted_total;
+    uint32_t period_us;            // how often it sends, as measured (0: not yet)
+    uint16_t count, tries, hits;   // frames heard; timed listens for it, and those that caught it
+    uint8_t ch_turn;
+    int16_t rssi;
+    uint8_t kind, utility, leak_days, leak_now, backflow;   // leak_now, backflow: as last posted
+  };
+  static const int METER_SEEN = 40;   // 36 meters were in range at the bench
+  MeterSeen _meter_seen[METER_SEEN];
+  uint8_t _meter_seen_n = 0;
+  MeterSeen* meterSeen(uint8_t kind, uint32_t id);
+  void applyMeters();
+  void meterLoop();
+  void meterFrame(uint8_t kind, const uint8_t* chips, int len, float rssi);
+  void meterPost(MeterSeen& m, const meters::Reading& r);
+  uint8_t meterSearchKinds() const;
+  bool meterNextTimed(uint32_t now, int* which, uint32_t* start, uint32_t* end) const;
+  bool _meter_timed = false;         // the listen is a timed one (for a chosen meter)
+  uint32_t _meter_timed_tries = 0, _meter_last_win = 1000;
+  uint8_t _meter_search_ch[3] = {};
+  bool meterWanted(uint32_t id) const;
+  bool handleMeterCommand(const char* command, char* reply);
+  bool isMeterChannel(int idx) const;
   void describePlane(const Plane& p, char* out, size_t n);
   bool weatherShown(const wxsensor::Reading& r) const;
   void showWeather(const char* text, int8_t snr_x4);

@@ -356,6 +356,47 @@ int16_t CustomLR2021::benchFskTx(float fMHz, float kbps, float devKHz, const uin
 }
 #endif
 
+#ifdef FISB_BENCH_TX
+int16_t CustomLR2021::benchOokTx(float fMHz, uint32_t bps, const uint8_t* chips, uint16_t len) {
+  if (fMHz < 902.0f || fMHz > 928.0f) return RADIOLIB_ERR_INVALID_FREQUENCY;   // the ISM band only
+  if (len == 0 || len > 255) return RADIOLIB_ERR_PACKET_TOO_LONG;
+  int16_t state = standby();
+  if (state == RADIOLIB_ERR_NONE) state = calibrateFor(fMHz);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  _fsk_active = true;
+  _fsk_ook = true;
+  state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_OOK);
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setOokModulationParams(bps, RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE, gfskRxBwCode(3076.0f), 0);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = setRfFrequency((uint32_t)(fMHz * 1000000.0f + 0.5f));
+  // no preamble or sync word: the chips carry their own
+  if (state == RADIOLIB_ERR_NONE) {
+    state = setOokPacketParams(0, RADIOLIB_LR2021_GFSK_OOK_ADDR_FILT_DISABLED, RADIOLIB_LR2021_GFSK_OOK_PACKET_FORMAT_FIXED,
+                               len, 0, RADIOLIB_LR2021_OOK_MANCHESTER_OFF);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = setOokSyncword(NULL, 0, true);
+  if (state == RADIOLIB_ERR_NONE) state = clearTxFifo();
+  for (uint16_t at = 0; at < len && state == RADIOLIB_ERR_NONE; at += 128) {
+    state = writeRadioTxFifo(&chips[at], len - at < 128 ? len - at : 128);
+  }
+  if (state == RADIOLIB_ERR_NONE) state = clearIrqState(RADIOLIB_LR2021_IRQ_ALL);
+  if (state == RADIOLIB_ERR_NONE) {
+    this->mod->setRfSwitchState(Module::MODE_TX);
+    state = setTx(0);
+  }
+  if (state == RADIOLIB_ERR_NONE) {
+    uint32_t start = millis();
+    while (!(getIrqStatus() & RADIOLIB_LR2021_IRQ_TX_DONE)) {
+      if (millis() - start > 200) { state = RADIOLIB_ERR_TX_TIMEOUT; break; }
+    }
+  }
+  LR2021::standby();
+  int16_t back = fskStopInternal();
+  return state != RADIOLIB_ERR_NONE ? state : back;
+}
+#endif
+
 int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uint8_t gain, int8_t threshDbm) {
   // 2 Mchip/s: 1 Mbit/s of Manchester-coded data, as the chip counts it. 11 data bytes then the
   // 3-byte parity (CRC-24, polynomial 0xFFF409, init 0), checked by the chip. The detector: the
@@ -369,8 +410,17 @@ int16_t CustomLR2021::pulseStart(float fMHz, float rxbwKHz, uint8_t threshDb, ui
   return ookStart(fMHz, 1000000UL, rxbwKHz, 0x0001, 2, 1, 0, RADIOLIB_LR2021_OOK_MANCHESTER_OFF, threshDb, gain, threshDbm);
 }
 
+int16_t CustomLR2021::ookRawStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits,
+                                  const uint8_t* sync, uint8_t syncLen, uint8_t pktLen, uint8_t threshDb, uint8_t gain,
+                                  int8_t threshDbm, uint8_t patRepeats) {
+  if (patBits < 2 || patBits > 16 || syncLen > RADIOLIB_LR2021_OOK_SYNC_WORD_LEN) return RADIOLIB_ERR_INVALID_SYNC_WORD;
+  return ookStart(fMHz, bps, rxbwKHz, pattern, patBits, pktLen, 0, RADIOLIB_LR2021_OOK_MANCHESTER_OFF, threshDb, gain,
+                  threshDbm, sync, syncLen, patRepeats);
+}
+
 int16_t CustomLR2021::ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits, uint8_t pktLen,
-                               uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm) {
+                               uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm,
+                               const uint8_t* sync, uint8_t syncLen, uint8_t patRepeats) {
   int16_t state = standby();
   if (state != RADIOLIB_ERR_NONE) return state;
   state = calibrateFor(fMHz);
@@ -389,8 +439,9 @@ int16_t CustomLR2021::ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t
                                pktLen, crcLen, manchester);
   }
   if (state == RADIOLIB_ERR_NONE && crcLen) state = setOokCrcParams(0x1FFF409UL, 0);
-  if (state == RADIOLIB_ERR_NONE) state = setOokSyncword(NULL, 0, true);
-  if (state == RADIOLIB_ERR_NONE) state = setOokDetector(pattern, patBits - 1, 0, false, false, 0);
+  if (state == RADIOLIB_ERR_NONE) state = setOokSyncword(sync, syncLen, true);
+  // the sync word as sent (not coded): only matters with Manchester on
+  if (state == RADIOLIB_ERR_NONE) state = setOokDetector(pattern, patBits - 1, patRepeats, syncLen > 0, false, 0);
   if (state == RADIOLIB_ERR_NONE && gain) state = setGain(gain > 13 ? 13 : gain);
   if (state == RADIOLIB_ERR_NONE) state = setDioIrqConfig(irqDioNum, RADIOLIB_LR2021_IRQ_RX_DONE);
   if (state == RADIOLIB_ERR_NONE) {

@@ -292,6 +292,21 @@ private:
       def("raw", raw);
     }
   };
+  // Utility meters (water, gas, electric) on 915 MHz, the chosen ones shown as an extra channel
+  class MeterPrefs : public ConfigSerializer {
+  public:
+    uint8_t en = 0;
+    uint8_t duty = 10;            // % of the time spent listening (100 = all the time)
+    char ids[48] = "";            // comma-separated meter IDs to show (empty: none; 'get meter.heard' lists them)
+    uint16_t every = 60;          // minutes between a meter's posts (a leak or backflow change: at once)
+  protected:
+    void structure() override {
+      def("en", en);
+      def("duty", duty);
+      def("ids", ids, sizeof(ids));
+      def("every", every);
+    }
+  };
   // Packets that fail their CRC check: read what came through and show it in an extra channel
   class DamagedPrefs : public ConfigSerializer {
   public:
@@ -311,6 +326,7 @@ public:
   AircraftPrefs air;
   DamagedPrefs dmg;
   MetarPrefs metar;
+  MeterPrefs meter;
 private:
 
   class CompanionPrefs : public ConfigSerializer {
@@ -417,6 +433,7 @@ protected:
     def("air", air);
     def("dmg", dmg);
     def("metar", metar);
+    def("meter", meter);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif

@@ -1514,14 +1514,16 @@ void MyMesh::begin() {
 
   // one listen at a time (MyMeshListens.cpp); settings from before that may have several on: keep
   // the first of Meshtastic, Weather, Aircraft (the order of their channels)
-  if (_prefs.mt.en) _prefs.wx.en = _prefs.air.en = _prefs.metar.en = 0;
-  else if (_prefs.wx.en) _prefs.air.en = _prefs.metar.en = 0;
-  else if (_prefs.air.en) _prefs.metar.en = 0;
+  if (_prefs.mt.en) _prefs.wx.en = _prefs.air.en = _prefs.metar.en = _prefs.meter.en = 0;
+  else if (_prefs.wx.en) _prefs.air.en = _prefs.metar.en = _prefs.meter.en = 0;
+  else if (_prefs.air.en) _prefs.metar.en = _prefs.meter.en = 0;
+  else if (_prefs.metar.en) _prefs.meter.en = 0;
   applyMeshtastic();   // may load the on-chip scanner, which restarts the radio: settings come next
   applyRadioPrefs();
   applyWeather();
   applyAircraft();
   applyMetar();
+  applyMeters();
   applyDamaged();
   radio_driver.setTxLedEnabled(!_prefs.led_off);
   loadFindAllow();
@@ -1686,7 +1688,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     if (txt_type != TXT_TYPE_PLAIN) {
       writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
     } else if (isMeshtasticChannel(channel_idx) || isWeatherChannel(channel_idx) || isAircraftChannel(channel_idx) ||
-               isDamagedChannel(channel_idx) || isMetarChannel(channel_idx)) {   // receive only
+               isDamagedChannel(channel_idx) || isMetarChannel(channel_idx) || isMeterChannel(channel_idx)) {   // receive only
       writeOKFrame();
       ChatRef to;
       memset(&to, 0, sizeof(to));
@@ -1696,6 +1698,7 @@ void MyMesh::handleCmdFrame(size_t len) {
                      : isAircraftChannel(channel_idx) ? "Not sent: the Aircraft channel is receive-only"
                      : isDamagedChannel(channel_idx) ? "Not sent: the Damaged channel is receive-only"
                      : isMetarChannel(channel_idx) ? "Not sent: the Airport weather channel is receive-only"
+                     : isMeterChannel(channel_idx) ? "Not sent: the Meters channel is receive-only"
                                                       : "Not sent: the Meshtastic channel is receive-only");
     } else {
       ChannelDetails channel;
@@ -2279,6 +2282,13 @@ void MyMesh::handleCmdFrame(size_t len) {
       const char* tag = "airport weather channel";
       mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
       memcpy(channel.channel.secret, h, 16);
+    } else if (isMeterChannel(channel_idx)) {
+      memset(&channel, 0, sizeof(channel));
+      strcpy(channel.name, "Meters");
+      uint8_t h[32];
+      const char* tag = "meters channel";
+      mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
+      memcpy(channel.channel.secret, h, 16);
     } else if (isAircraftChannel(channel_idx)) {
       memset(&channel, 0, sizeof(channel));
       strcpy(channel.name, "Aircraft");
@@ -2754,6 +2764,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (handleWeatherCommand(command, reply)) return true;
   if (handleAircraftCommand(command, reply)) return true;
   if (handleMetarCommand(command, reply)) return true;
+  if (handleMeterCommand(command, reply)) return true;
   if (handleDamagedCommand(command, reply)) return true;
   if (handleFreqCommand(command, reply)) return true;
   if (handleRadarCommand(command, reply)) return true;
@@ -3464,7 +3475,7 @@ int MyMesh::fillDeviceInfo(uint8_t* out_frame) {
   out_frame[i++] = RESP_CODE_DEVICE_INFO;
   out_frame[i++] = FIRMWARE_VER_CODE;
   out_frame[i++] = MAX_CONTACTS / 2;   // v3+
-  out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft, Damaged, Airport weather)
+  out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft, Damaged, Airport weather, Meters)
   memcpy(&out_frame[i], &_prefs.ble_pin, 4);
   i += 4;
   memset(&out_frame[i], 0, 12);
@@ -3606,6 +3617,7 @@ void MyMesh::loop() {
       weatherLoop();
       aircraftLoop();
       metarLoop();
+      meterLoop();
     }
     damagedLoop();
   }

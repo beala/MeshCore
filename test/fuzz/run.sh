@@ -11,7 +11,7 @@ SECONDS_EACH=${1:-60}
 test/fuzz/build.sh
 mkdir -p .pio/fuzz/findings .pio/fuzz/corpus_cli .pio/fuzz/corpus_mesh .pio/fuzz/seeds_mesh \
   .pio/fuzz/corpus_meshtastic .pio/fuzz/seeds_meshtastic \
-  .pio/fuzz/corpus_wxsensor .pio/fuzz/corpus_uat .pio/fuzz/corpus_fisb .pio/fuzz/corpus_clone .pio/fuzz/corpus_damaged
+  .pio/fuzz/corpus_wxsensor .pio/fuzz/corpus_uat .pio/fuzz/corpus_fisb .pio/fuzz/corpus_meters .pio/fuzz/corpus_clone .pio/fuzz/corpus_damaged
 FUZZ_WRITE_SEEDS=.pio/fuzz/seeds_mesh .pio/fuzz/fuzz_mesh
 FUZZ_WRITE_SEEDS=.pio/fuzz/seeds_meshtastic .pio/fuzz/fuzz_meshtastic
 
@@ -42,6 +42,7 @@ run meshtastic -max_len=1200 .pio/fuzz/corpus_meshtastic .pio/fuzz/seeds_meshtas
 run wxsensor -max_len=400 .pio/fuzz/corpus_wxsensor
 run uat -max_len=300 .pio/fuzz/corpus_uat
 run fisb -max_len=600 .pio/fuzz/corpus_fisb
+run meters -max_len=64 .pio/fuzz/corpus_meters
 run clone -max_len=2000 .pio/fuzz/corpus_clone
 run damaged -max_len=300 .pio/fuzz/corpus_damaged
 wait

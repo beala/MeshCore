@@ -138,17 +138,23 @@ public:
     uint16_t pkt_len;    // fixed number of bytes received after the sync word (LR2021: up to 552, a FIS-B frame)
     uint8_t sync_bits;   // 0 = sync_len * 8; else the sync word is its last sync_bits bits (eg. 36 for UAT)
     bool no_preamble;    // the transmitter sends no 0101.. preamble: search for the sync word directly
-    uint8_t pre_det_bits;  // preamble bits to detect (0 = 16, or none with no_preamble); for experiments
+    uint8_t pre_det_bits;  // preamble bits to detect (0 = 16, or none with no_preamble); for experiments.
+                           // MODEM_OOK: the detector's pattern repeats + 1 (0 = 31: no sync word timeout)
     // MODEM_ADSB: 1090 MHz Mode S extended squitters (OOK, pulse position), 11 bytes each after the
     // radio checks their parity; only freq, rxbw_khz, pkt_len, thresh_db and gain apply
     uint8_t modem;         // MODEM_GFSK or MODEM_ADSB
     uint8_t thresh_db;     // ADS-B: detection threshold above the noise (0 = the radio's default)
     uint8_t gain;          // ADS-B: fixed receiver gain step (0 = automatic)
     int8_t thresh_dbm;     // OOK (ADS-B, pulses): a fixed detection threshold in dBm instead (0 = relative)
+    // MODEM_OOK: on-off keyed chips at kbps (eg. utility meters, 32.768), no line coding: the radio
+    // finds ook_pattern (its first chip in the LSB), then the sync word in sync[] (up to 4 bytes),
+    // and hands over the pkt_len bytes of raw chips after it. freq, rxbw_khz, thresh_db, gain apply.
+    uint16_t ook_pattern;
+    uint8_t ook_pattern_bits;
   };
   // MODEM_PULSE: every pulse above the threshold is one "packet" of 4 bytes: when it was heard,
   // in ms (millis(), little-endian). freq, rxbw_khz, thresh_db and gain apply.
-  enum { MODEM_GFSK = 0, MODEM_ADSB = 1, MODEM_PULSE = 2 };
+  enum { MODEM_GFSK = 0, MODEM_ADSB = 1, MODEM_PULSE = 2, MODEM_OOK = 3 };
   /**
    * \brief  Some radios can step away from the mesh for a moment to receive FSK packets, then come
    *         back. The listen starts as soon as the radio isn't busy with a mesh packet, and lasts

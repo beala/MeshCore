@@ -72,6 +72,18 @@ TEST(FineOffset, WH31) {
   EXPECT_EQ(fmt(r2, false), "WH31 ch5: 60.6F 60%");
 }
 
+TEST(FineOffset, WH31BIsAWH31) {
+  // an Ecowitt WN31 (FCC ID WA5WH31B) on channel 1, heard with an RTL-SDR (rtl_433: WH31B, 18.9 C, 36%)
+  Reading r = dec("37 d2 82 4d 24 23 1f");
+  EXPECT_EQ(r.model, WH31);
+  EXPECT_EQ(r.id, 0xD2u);
+  EXPECT_EQ(r.channel, 1);
+  EXPECT_EQ(r.temp_c10, 189);
+  EXPECT_EQ(r.humidity, 36);
+  EXPECT_FALSE(r.battery_low);
+  EXPECT_EQ(fmt(r, true), "WH31 ch1: 18.9C 36%");
+}
+
 TEST(FineOffset, WH40) {
   Reading r = dec("40 00 cd 6f 10 00 00 64 f0");
   EXPECT_EQ(r.model, WH40);

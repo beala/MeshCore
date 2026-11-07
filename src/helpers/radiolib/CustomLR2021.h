@@ -69,7 +69,8 @@ private:
   int16_t rxFifoBig(bool on);
   int16_t resetRxStats();
   int16_t ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits, uint8_t pktLen,
-                   uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm);
+                   uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm,
+                   const uint8_t* sync = NULL, uint8_t syncLen = 0, uint8_t patRepeats = 0);
   int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);
   static bool bwCode(float bw, uint8_t* code);
 
@@ -361,6 +362,12 @@ private:
     // Pulses (eg. radar interrogations at 1030 MHz): every pulse above the threshold ends a 1-byte
     // packet, so each RxDone marks one; the caller just counts them. fskRearm/fskStop as above.
     int16_t pulseStart(float freqMHz, float rxbwKHz, uint8_t threshDb = 0, uint8_t gain = 0, int8_t threshDbm = 0);
+    // Raw on-off keyed chips (eg. utility meters at 32768 chip/s): the detector pattern (first chip in
+    // the LSB, 2-16 chips), then the sync word (1-4 bytes, sent MSB first), then pktLen bytes of chips
+    // as they came (no Manchester, CRC or whitening: the caller reads them). fskRead/fskStop as above.
+    int16_t ookRawStart(float freqMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits,
+                        const uint8_t* sync, uint8_t syncLen, uint8_t pktLen, uint8_t threshDb = 0, uint8_t gain = 0,
+                        int8_t threshDbm = 0, uint8_t patRepeats = 31);
     float adsbNoise() const { return _ook_noise; }
     struct OokStats { uint32_t packets, crc_err, len_err; };
     OokStats ookStats() const {
@@ -373,6 +380,11 @@ private:
     // standby. 902-928 MHz only: never 978 MHz (an aviation band).
     int16_t benchFskTx(float freqMHz, float kbps, float devKHz, const uint8_t* sync, uint8_t syncLen, uint8_t syncBits,
                        const uint8_t* data, uint16_t len);
+#endif
+#ifdef FISB_BENCH_TX
+    // Bench only: sends len bytes of raw on-off keyed chips (first chip in each byte's top bit), as
+    // they are: no preamble, sync word or coding added. 902-928 MHz only.
+    int16_t benchOokTx(float freqMHz, uint32_t bps, const uint8_t* chips, uint16_t len);
 #endif
     int16_t fskRearm();                                    // receive again after a packet
     int16_t fskRead(uint8_t* buf, uint16_t len, float* rssi);

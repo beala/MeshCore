@@ -391,7 +391,8 @@ public:
   bool startFskListen(const FskListen& cfg, uint32_t ms) override {
     if (cfg.pkt_len == 0 || (cfg.pkt_len > FSK_MAX_LEN && cfg.pkt_len != FSK_BIG_LEN)) return false;
     if (cfg.modem == MODEM_GFSK && (cfg.sync_len == 0 || cfg.sync_len > 8)) return false;
-    if (cfg.modem > MODEM_PULSE) return false;
+    if (cfg.modem > MODEM_OOK) return false;
+    if (cfg.modem == MODEM_OOK && (cfg.sync_len > 4 || cfg.ook_pattern_bits < 2 || cfg.ook_pattern_bits > 16)) return false;
     if (_fsk_state == FSK_LISTENING) endFskListen();
     _fsk_cfg = cfg;
     _fsk_end = millis() + ms;
@@ -411,6 +412,14 @@ public:
                      const uint8_t* data, uint16_t len) {
     stopFskListen();
     int16_t st = ((CustomLR2021 *)_radio)->benchFskTx(freq, kbps, dev, sync, syncLen, syncBits, data, len);
+    clearIrqPending();
+    applySideDetectorConfig();
+    idle();
+    return st;
+  }
+  int16_t benchOokTx(float freq, uint32_t bps, const uint8_t* chips, uint16_t len) {
+    stopFskListen();
+    int16_t st = ((CustomLR2021 *)_radio)->benchOokTx(freq, bps, chips, len);
     clearIrqPending();
     applySideDetectorConfig();
     idle();
@@ -682,6 +691,11 @@ public:
           ? r->adsbStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain, _fsk_cfg.thresh_dbm)
           : _fsk_cfg.modem == MODEM_PULSE
           ? r->pulseStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain, _fsk_cfg.thresh_dbm)
+          : _fsk_cfg.modem == MODEM_OOK
+          ? r->ookRawStart(_fsk_cfg.freq, (uint32_t)(_fsk_cfg.kbps * 1000.0f + 0.5f), _fsk_cfg.rxbw_khz, _fsk_cfg.ook_pattern,
+                           _fsk_cfg.ook_pattern_bits, _fsk_cfg.sync, _fsk_cfg.sync_len, (uint8_t) _fsk_cfg.pkt_len,
+                           _fsk_cfg.thresh_db, _fsk_cfg.gain, _fsk_cfg.thresh_dbm,
+                           _fsk_cfg.pre_det_bits ? _fsk_cfg.pre_det_bits - 1 : 31)
           : r->fskStart(_fsk_cfg.freq, _fsk_cfg.kbps, _fsk_cfg.dev_khz, _fsk_cfg.rxbw_khz,
                         _fsk_cfg.sync, _fsk_cfg.sync_len, _fsk_cfg.pkt_len, _fsk_cfg.sync_bits,
                         _fsk_cfg.no_preamble, _fsk_cfg.pre_det_bits);

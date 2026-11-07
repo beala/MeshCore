@@ -21,7 +21,7 @@ const char* modelName(uint8_t model) {
 int packetLength(uint8_t family) {
   switch (family) {
     case 0x24: return 17;   // WH65 (WH24, WS69, HP1000)
-    case 0x30: return 7;    // WH31
+    case 0x30: case 0x37: return 7;   // WH31 (E), WH31B (Ecowitt WN31)
     case 0x40: return 9;    // WH40
     case 0x57: return 9;    // WH57
     case 0x80: return 18;   // WS80
@@ -117,7 +117,8 @@ bool decode(const uint8_t* b, int len, Reading* r) {
     case 0x24:
       wh65(b, r);
       break;
-    case 0x30: {
+    case 0x30:
+    case 0x37: {   // WH31B / WN31: the same layout (rtl_433 ambientweather_wh31e.c)
       r->model = WH31;
       r->id = b[1];
       r->channel = ((b[2] >> 4) & 0x07) + 1;

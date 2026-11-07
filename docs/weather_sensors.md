@@ -85,7 +85,7 @@ corrupted packet is dropped.
 | Model | Family | What it reports |
 |---|---|---|
 | WH65 (WH24, WS69; Ambient WS-2902 array) | 0x24 | temperature, humidity, wind, gust, direction, rain, UV, light |
-| WH31 (Ambient WH31E, Ecowitt WN31) | 0x30 | temperature, humidity, channel 1–8 |
+| WH31 (Ambient WH31E; Ecowitt WN31, which sends as a WH31B) | 0x30, 0x37 | temperature, humidity, channel 1–8 |
 | WH40 | 0x40 | rain |
 | WH57 | 0x57 | lightning: strike count, storm distance |
 | WS80 | 0x80 | wind, temperature, humidity, UV, light |

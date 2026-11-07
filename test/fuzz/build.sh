@@ -69,6 +69,11 @@ clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-reco
   -I src test/fuzz/fuzz_fisb.cpp src/helpers/weather/Fisb.cpp src/helpers/weather/Metar.cpp src/helpers/aircraft/Uat.cpp -o .pio/fuzz/fuzz_fisb
 echo "built .pio/fuzz/fuzz_fisb"
 
+# Utility meters: R900 and Itron ERT frames (915 MHz)
+clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+  -I src test/fuzz/fuzz_meters.cpp src/helpers/meters/Meters.cpp -o .pio/fuzz/fuzz_meters
+echo "built .pio/fuzz/fuzz_meters"
+
 # Damaged packets: what's left of packets that failed their CRC, with the real AES and SHA-256
 clang++ $FLAGS test/fuzz/fuzz_damaged.cpp src/helpers/DamagedRx.cpp src/Utils.cpp src/Packet.cpp \
   $CRYPTO/AES128.cpp $CRYPTO/AESCommon.cpp $CRYPTO/BlockCipher.cpp $CRYPTO/Crypto.cpp $CRYPTO/Hash.cpp \
