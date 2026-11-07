@@ -3,6 +3,7 @@
 #include "CustomLR2021.h"
 #include "RadioLibWrappers.h"
 #include "../RecentHistory.h"
+#include "../DamagedRx.h"
 
 #ifndef USE_LR2021
 #define USE_LR2021
@@ -29,6 +30,20 @@ public:
     int8_t snr_x4;      // dB * 4
   };
   static const int RX_GAIN_HISTORY = 8;
+
+  // Each packet heard (good or failing its CRC) with its frequency error: how far the transmitter's
+  // carrier was from ours. It comes from the sender's crystal, so each radio has its own, for
+  // 'get radio.freq' (telling transmitters apart).
+  struct RxFreq {
+    uint32_t at_millis;
+    int32_t err_hz;
+    int8_t snr_x4;
+    uint8_t hdr;        // the packet's first byte
+    int16_t from;       // damaged::sender(): the radio we heard it from, -1 unknown
+    uint8_t tag[4];     // the payload's first bytes (an advert: its key)
+    bool ok;            // passed its CRC
+  };
+  static const int RX_FREQ_LOG = 16;
 
   // What the radio did lately, for 'get radio.log': T sent, R heard, E heard with an error,
   // X a transmit started (arg: header byte << 8 | length; x: failed), K/k a copy link frame sent/heard,
@@ -272,6 +287,7 @@ public:
     }
     bool scan_pkt = r->isScanning() && isIrqPending();
     uint32_t errs = getPacketsRecvErrors();
+    uint32_t prev_sum = _last_rx_sum;
     bool was_rx = isInRecvMode();
     bool had_irq = isIrqPending();
     int len = RadioLibWrapper::recvRaw(bytes, sz);
@@ -281,13 +297,18 @@ public:
     if (!isInRecvMode() && !was_rx) logEvent('S', 0);
     _scan_cached = false;
     if (len > 0) holdForRepeats(len, false);   // more copies (repeats) may follow
-    if (len > 0 || scan_pkt) {
-      uint8_t step = 0;
-      if (len > 0 && r->readLastGainStep(&step) == RADIOLIB_ERR_NONE && step >= 1 && step <= 13) {
+    // a packet that failed its CRC, unless it's the last one's bytes left behind by a bad header
+    bool bad = len == 0 && getPacketsRecvErrors() != errs && _last_rx_sum != prev_sum;
+    if (len > 0 || scan_pkt || bad) {
+      uint8_t step = 0, hlen = 0;
+      int32_t ferr = 0;
+      bool got = r->readLastStatus(&step, &ferr, &hlen) == RADIOLIB_ERR_NONE;
+      if (len > 0 && got && step >= 1 && step <= 13) {
         _last_gain_step = step;
       } else {
         _last_gain_step = -1;
       }
+      if (got && (len > 0 || bad)) noteFreq(bytes, len > 0 ? len : (hlen < sz ? hlen : sz), ferr, len > 0);
       if (scan_pkt) {
         // The scan parks after RxDone; read what belongs to this packet, then let it carry on.
         _scan_rssi = r->getRSSI();
@@ -465,6 +486,10 @@ public:
   bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) override {
     if (strcmp(command, "get radio.faults") == 0) {
       formatTxFaults(reply);
+      return true;
+    }
+    if (strncmp(command, "get radio.freq", 14) == 0) {   // [since]: entries after that number, oldest first
+      formatRxFreqs(reply, command[14] == ' ' ? strtoul(&command[15], NULL, 10) : 0);
       return true;
     }
     if (strcmp(command, "get radio.agc") == 0) {
@@ -799,6 +824,35 @@ public:
     void logEvent(char what, uint16_t arg) { _radio_log.add({ (uint32_t)millis(), what, arg }); }
     RecentHistory<TxFault, TX_FAULT_HISTORY> _tx_faults;
     RecentHistory<RxGain, RX_GAIN_HISTORY> _rx_gains;
+    RecentHistory<RxFreq, RX_FREQ_LOG> _rx_freqs;
+
+    void noteFreq(const uint8_t* raw, int len, int32_t err_hz, bool ok) {
+      RxFreq f = { (uint32_t)millis(), err_hz, (int8_t)(getLastSNR() * 4), len > 0 ? raw[0] : (uint8_t)0,
+                   (int16_t)damaged::sender(raw, len), { 0 }, ok };
+      damaged::Layout l = damaged::parseHeader(raw, len);
+      if (l.payload_off > 0 && l.payload_len > 0)   // the header and path add up (any type)
+        memcpy(f.tag, &raw[l.payload_off], l.payload_len < 4 ? l.payload_len : 4);
+      _rx_freqs.add(f);
+    }
+
+    // eg. "> 41 -1234 -21 11 7a c3d4e5f6;42 ..." per packet: its number, frequency error (Hz), SNR x4,
+    // first byte, the radio heard from (-1 unknown), the payload's first bytes, '!' when the CRC failed.
+    // Only packets numbered after 'since', oldest first, as many as fit.
+    void formatRxFreqs(char* reply, uint32_t since) const {
+      uint32_t total = _rx_freqs.total();
+      int n = sprintf(reply, "> %lu", (unsigned long)total);
+      for (int i = _rx_freqs.count() - 1; i >= 0; i--) {
+        uint32_t seq = total - 1 - i;
+        if (seq < since) continue;
+        const RxFreq& f = _rx_freqs.get(i);
+        char entry[48];
+        int e = snprintf(entry, sizeof(entry), ";%lu %ld %d %02x %d %02x%02x%02x%02x%s", (unsigned long)seq,
+                         (long)f.err_hz, f.snr_x4, f.hdr, f.from, f.tag[0], f.tag[1], f.tag[2], f.tag[3], f.ok ? "" : "!");
+        if (n + e > REPLY_MAX) break;
+        strcpy(&reply[n], entry);
+        n += e;
+      }
+    }
     LR2021LoRaSideDetector_t _sideDet[3];
     size_t _numSideDet = 0;
 

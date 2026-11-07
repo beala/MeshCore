@@ -529,10 +529,22 @@ private:
     // GetLoraPacketStatus returns 10 bytes but the datasheet documents only the first 9; RadioLib
     // reads 6. Byte 9 holds the gain step, which the ROM latches from the AGC when the packet arrives.
     // Undocumented; found by disassembling the LR2021 ROM and confirmed with SetAgcGainManual (0x021A).
-    int16_t readLastGainStep(uint8_t* step) {
+    int16_t readLastGainStep(uint8_t* step) { return readLastStatus(step, NULL, NULL); }
+
+    // The same status, also with the packet's frequency error: how far the transmitter's carrier was
+    // from ours, in Hz (bytes 6-8, signed 24-bit, datasheet 9.9.9), and the length the header gave.
+    // The error comes from the sender's crystal, so it stays about the same for each radio.
+    int16_t readLastStatus(uint8_t* step, int32_t* freq_err, uint8_t* len) {
       uint8_t buff[10] = { 0 };
       int16_t state = SPIcommand(RADIOLIB_LR2021_CMD_GET_LORA_PACKET_STATUS, false, buff, sizeof(buff));
-      if (state == RADIOLIB_ERR_NONE && step) *step = buff[9];
+      if (state != RADIOLIB_ERR_NONE) return state;
+      if (step) *step = buff[9];
+      if (len) *len = buff[1];
+      if (freq_err) {
+        int32_t v = ((int32_t)buff[6] << 16) | ((int32_t)buff[7] << 8) | buff[8];
+        if (v & 0x800000) v -= 0x1000000;
+        *freq_err = v;
+      }
       return state;
     }
 };
