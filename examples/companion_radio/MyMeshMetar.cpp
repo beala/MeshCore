@@ -258,7 +258,8 @@ static bool metarOnOff(const char* s, bool* on) {
 // Bench only (build with -D FISB_BENCH_TX; never in releases): sends a frame made by
 // tools/bench/fisb.py, as a ground station would, at 902-928 MHz. Never on 978 MHz.
 //   metar tx load <offset> <hex>       up to 64 bytes at a time into the frame
-//   metar tx send <MHz>                sends it once (the host repeats it: tools/bench/fisb_bench.py)
+//   metar tx send <MHz> [down]         sends it once (the host repeats it: tools/bench/fisb_bench.py);
+//                                      down: with the aircraft sync word
 static uint8_t bench_frame[fisb::FRAME_BYTES];
 
 static bool benchTx(const char* cmd, char* reply) {
@@ -278,9 +279,12 @@ static bool benchTx(const char* cmd, char* reply) {
     return true;
   }
   if (strncmp(cmd, "metar tx send ", 14) == 0) {
-    float mhz = strtod(&cmd[14], NULL);
+    char* p;
+    float mhz = strtod(&cmd[14], &p);
     if (mhz < 902.0f || mhz > 928.0f) { strcpy(reply, "Error: 902-928 MHz only (never 978)"); return true; }
-    static const uint8_t sync[5] = { 0x01, 0x53, 0x22, 0x5B, 0x1D };
+    // "down": the aircraft (downlink) sync word instead, the ground station one's bit-opposite
+    static const uint8_t up[5] = { 0x01, 0x53, 0x22, 0x5B, 0x1D }, down[5] = { 0x0E, 0xAC, 0xDD, 0xA4, 0xE2 };
+    const uint8_t* sync = strstr(p, "down") ? down : up;
     int16_t st = radio_driver.benchFskTx(mhz, 1041.667f, 312.5f, sync, 5, 36, bench_frame, sizeof(bench_frame));
     if (st == RADIOLIB_ERR_NONE) strcpy(reply, "OK - sent");
     else sprintf(reply, "Error: %d", st);

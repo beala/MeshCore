@@ -131,7 +131,7 @@ tools/bench/fisb.py read sample-data.txt      # the text reports in dump978's '+
 ```
 
 A companion built with `-D FISB_BENCH_TX` (never in releases) can send a loaded frame, at 902–928
-MHz only: `metar tx load <offset> <hex>` (64 bytes at a time), then `metar tx send <MHz>`.
+MHz only: `metar tx load <offset> <hex>` (64 bytes at a time), then `metar tx send <MHz>` (`metar tx send <MHz> down` uses the aircraft sync word instead, the bit-opposite of the ground station one: a receiver listening for ground stations ignores it).
 `tools/bench/fisb_bench.py <sender port> <receiver port> "METAR ..."` sets up a receiver, loads and
 sends the frame, and prints what the receiver posted (`--errors K` puts K bad bytes in every block,
 `--data <hex>` sends a real frame's data instead).

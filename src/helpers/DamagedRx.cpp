@@ -292,6 +292,8 @@ static uint16_t fp16(const uint8_t* p) {
 
 void fingerprint(const uint8_t* raw, int len, Fingerprint& out) {
   out.n = 0;
+  Layout l = parseHeader(raw, len);
+  out.payload_len = l.payload_off ? (uint16_t) l.payload_len : 0;
   for (int i = 0; i < MAX_PIECES && len - (i + 1) * PIECE >= 0; i++) {
     out.fp[i] = fp16(&raw[len - (i + 1) * PIECE]);
     out.n++;
@@ -309,8 +311,14 @@ bool sameMessage(const Fingerprint& intact, const uint8_t* raw, int len, const R
     matched++;
   }
   // the timestamp piece, or two pieces: under ECB a common ending ("lol") encrypts the same in
-  // different messages
-  return (r.first && (r.good & 1)) || matched >= 2;
+  // different messages. One piece will do when the payloads are the same length as well: a short
+  // message (two pieces) that lost the first would otherwise show although it was heard whole.
+  if ((r.first && (r.good & 1)) || matched >= 2) return true;
+  if (matched == 1 && intact.payload_len) {
+    Layout l = parseHeader(raw, len);
+    return l.payload_off && l.payload_len == intact.payload_len;
+  }
+  return false;
 }
 
 void takeCopy(const uint8_t* raw, const Result& r, bool fixed, Copy& c) {

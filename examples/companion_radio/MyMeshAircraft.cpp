@@ -309,9 +309,23 @@ void MyMesh::aircraftLoop() {
     if (is_new) {
       if (_n_planes < MAX_PLANES) {
         p = &_planes[_n_planes++];
-      } else {   // replace the one heard longest ago
-        p = &_planes[0];
-        for (int i = 1; i < _n_planes; i++) if ((int32_t)(_planes[i].heard_at - p->heard_at) < 0) p = &_planes[i];
+      } else {
+        // full: make room. Drop one outside the range and height limits (or with no position yet) if
+        // there is one, else the one heard longest ago. Busy airspace can hold more aircraft than
+        // fit: this keeps the nearby ones steady, and the far ones take turns.
+        int pick = -1;
+        bool pick_wanted = true;
+        for (int i = 0; i < _n_planes; i++) {
+          bool wanted = aircraftWanted(_planes[i], NULL);
+          if (pick < 0 || (pick_wanted && !wanted) ||
+              (wanted == pick_wanted && (int32_t)(_planes[i].heard_at - _planes[pick].heard_at) < 0)) {
+            pick = i;
+            pick_wanted = wanted;
+          }
+        }
+        // out of the list, the others keeping their order (apps read it a page at a time)
+        memmove(&_planes[pick], &_planes[pick + 1], (_n_planes - pick - 1) * sizeof(Plane));
+        p = &_planes[_n_planes - 1];
       }
       memset(p, 0, sizeof(*p));
       p->address = r.address;
@@ -370,11 +384,14 @@ void MyMesh::aircraftLoop() {
     }
   }
 
-  // forget aircraft long gone
-  for (int i = 0; i < _n_planes;) {
-    if (now - _planes[i].heard_at > AIR_GONE_MS) _planes[i] = _planes[--_n_planes];
-    else i++;
+  // forget aircraft long gone (the others keep their order: apps read the list a page at a time)
+  int kept = 0;
+  for (int i = 0; i < _n_planes; i++) {
+    if (now - _planes[i].heard_at > AIR_GONE_MS) continue;
+    if (kept != i) _planes[kept] = _planes[i];
+    kept++;
   }
+  _n_planes = kept;
 
   // the radio's listen
   int st = _radio->fskListenState();
@@ -464,7 +481,7 @@ bool MyMesh::handleAircraftCommand(const char* command, char* reply) {
   if (strncmp(command, "air test", 8) == 0) {
     if (!_air_active) { strcpy(reply, "Error: aircraft is off ('air on')"); return true; }
     int n = strcmp(&command[8], " off") == 0 ? 0 : command[8] ? atoi(&command[9]) : 6;
-    if (n < 0 || n > MAX_PLANES) { strcpy(reply, "Error: 0-16 aircraft"); return true; }
+    if (n < 0 || n > MAX_PLANES) { sprintf(reply, "Error: 0-%d aircraft", MAX_PLANES); return true; }
     for (int i = 0; i < _n_planes;) {   // take away the old ones
       if ((_planes[i].address & 0xFFFF00) == 0xF0F000) _planes[i] = _planes[--_n_planes];
       else i++;

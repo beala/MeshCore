@@ -179,6 +179,12 @@ TEST(DamagedShow, CutCharactersAreDropped) {
   EXPECT_EQ("Hal: aaaaaabbbbbbbbbbbbbb\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92\xE2\x96\x92ssage", shown(r, KIND_CHANNEL));
 }
 
+static uint16_t fingerprint_last(const std::vector<uint8_t>& p) {
+  Fingerprint f;
+  fingerprint(p.data(), (int)p.size(), f);
+  return f.fp[0];
+}
+
 TEST(DamagedMatch, DamagedCopyMatchesTheIntactOne) {
   uint8_t s[32]; secretFor(10, s);
   auto p = channelPacket(s, "Ivan: heard twice, once damaged and once whole", NOW, 1);
@@ -194,6 +200,27 @@ TEST(DamagedMatch, DamagedCopyMatchesTheIntactOne) {
   EXPECT_TRUE(sameMessage(pr, p.data(), (int)p.size(), r));
   auto other = channelPacket(s, "Ivan: something else that day, the same length!", NOW + 9, 1);
   fingerprint(other.data(), (int)other.size(), pr);
+  EXPECT_FALSE(sameMessage(pr, p.data(), (int)p.size(), r));
+}
+
+TEST(DamagedMatch, ShortMessageThatLostItsFirstPieceMatches) {
+  // two pieces; the intact copy came over 5 hops, the damaged one over 4 and lost the first piece
+  uint8_t s[32]; secretFor(10, s);
+  auto whole = channelPacket(s, "Heltec KE4IQR-1: Test", NOW, 5);
+  auto p = channelPacket(s, "Heltec KE4IQR-1: Test", NOW, 4);
+  Fingerprint pr;
+  fingerprint(whole.data(), (int)whole.size(), pr);
+  int ct = (int)p.size() - 2 * 16;
+  p[ct + 3] ^= 0x40;
+  Result r;
+  decode(s, p.data(), (int)p.size(), KIND_CHANNEL, ct, NOW, r);
+  ASSERT_EQ(0x2, r.good);
+  EXPECT_TRUE(sameMessage(pr, p.data(), (int)p.size(), r));
+  // a longer message whose last piece is the very same bytes (ECB): one piece and a different
+  // length is not enough
+  auto other = channelPacket(s, "Bob: xxxxxxxxxxxxxxxxxxxxxxQR-1: Test", NOW + 5, 5);
+  fingerprint(other.data(), (int)other.size(), pr);
+  ASSERT_EQ(pr.fp[0], fingerprint_last(p));
   EXPECT_FALSE(sameMessage(pr, p.data(), (int)p.size(), r));
 }
 

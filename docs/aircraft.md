@@ -45,7 +45,7 @@ Nearby: N713SA 5,300 ft 2.1 mi N; N25430 6,100 ft 4.0 mi NE (+12 higher or farth
 | `set air.band 978\|1090\|both` | which to listen to (default both, taking turns) |
 | `set air.duty <percent>` | share of the time spent listening when not scanning all the time (default 10) |
 | `air`, `get air` | the settings |
-| `get air.planes` | aircraft heard in the last 5 minutes |
+| `get air.planes` | aircraft heard in the last 5 minutes (up to 48; when more are heard, those outside the range and height limits make room first, so the nearby ones stay) |
 | `get air.list [start]` | the same for apps, as numbers, a page at a time (below) |
 | `get air.stats` | messages (and how many on 1090; UAT ones corrected by Reed-Solomon, and beyond repair), aircraft, posts, time listening |
 | `get radio.fsk`, `get radio.fsk.rx`, `get radio.ook.rx` | the radio's listens, and its receiver counters (UAT, 1090) |

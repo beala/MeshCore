@@ -67,6 +67,7 @@ private:
   bool _fifo_big = false;             // the receive FIFO is in its 1 KB region (a long FSK listen)
   uint32_t _fifo_rx_base = 0, _fifo_rx_size = 0;   // its usual place, to put it back
   int16_t rxFifoBig(bool on);
+  int16_t resetRxStats();
   int16_t ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits, uint8_t pktLen,
                    uint8_t crcLen, uint8_t manchester, uint8_t threshDb, uint8_t gain, int8_t threshDbm);
   int16_t scanCmd(const uint8_t* req, size_t req_len, ScanStatus* st);

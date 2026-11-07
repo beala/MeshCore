@@ -461,7 +461,7 @@ private:
     uint32_t cpr_lat[2], cpr_lon[2], cpr_at[2], pos_at;
     uint8_t bands;   // where it's been heard: 1 = 978, 2 = 1090
   };
-  static const int MAX_PLANES = 16;
+  static const int MAX_PLANES = 48;   // near a busy airport 1090 MHz hears dozens within 5 minutes
   Plane _planes[MAX_PLANES];
   int _n_planes = 0;
   bool _air_active = false, _air_forever = false, _air_listening = false;

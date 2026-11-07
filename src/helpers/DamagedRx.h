@@ -101,9 +101,12 @@ uint32_t timestampOf(const Result& r);
 struct Fingerprint {
   uint8_t n;
   uint16_t fp[MAX_PIECES];   // fp[0] is the last piece of the packet
+  uint16_t payload_len;      // the same in every copy (paths differ); 0 if the header didn't read
 };
 void fingerprint(const uint8_t* raw, int len, Fingerprint& out);
-// Whether the damaged packet's good pieces (by r) match an intact packet's print
+// Whether the damaged packet's good pieces (by r) match an intact packet's print: the piece with the
+// timestamp, or two pieces, or one when the payload is the same length too (a two-piece message that
+// lost its first)
 bool sameMessage(const Fingerprint& intact, const uint8_t* raw, int len, const Result& r);
 
 // A message read from one or more damaged copies: its pieces as received and as decrypted, and the MAC

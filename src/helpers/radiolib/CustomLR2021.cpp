@@ -190,6 +190,12 @@ int16_t CustomLR2021::scanGetStatus(ScanStatus* st) {
 
 // ---- FSK listen ----
 
+// The chip's receive counters (GetGfskRxStats and the like) run on until reset, across packet types:
+// each listen starts them at zero, and its counts are added up when it ends (fskStopInternal)
+int16_t CustomLR2021::resetRxStats() {
+  return SPIcommand(RADIOLIB_LR2021_CMD_RESET_RX_STATS, true, NULL, 0);
+}
+
 static uint8_t gfskRxBwCode(float khz) {
   static const struct { float khz; uint8_t code; } table[] = {
     { 38.5f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_38_5 }, { 59.5f, RADIOLIB_LR2021_GFSK_OOK_RX_BW_59_5 },
@@ -233,6 +239,7 @@ int16_t CustomLR2021::fskStart(float fMHz, float kbps, float devKHz, float rxbwK
   if (state != RADIOLIB_ERR_NONE) return state;
   _fsk_active = true;          // from here on, standby()/transmit/sleep put LoRa back
   state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_GFSK);
+  if (state == RADIOLIB_ERR_NONE) state = resetRxStats();   // the chip keeps counting across listens otherwise
   if (state == RADIOLIB_ERR_NONE) {
     state = setGfskModulationParams((uint32_t)(kbps * 1000.0f + 0.5f), RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE,
                                     gfskRxBwCode(rxbwKHz), (uint32_t)(devKHz * 1000.0f + 0.5f));
@@ -371,6 +378,7 @@ int16_t CustomLR2021::ookStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t
   _fsk_active = true;
   _fsk_ook = true;
   state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_OOK);
+  if (state == RADIOLIB_ERR_NONE) state = resetRxStats();
   if (state == RADIOLIB_ERR_NONE) {
     state = setOokModulationParams(bps, RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_NONE, gfskRxBwCode(rxbwKHz), 0);
   }
@@ -478,6 +486,7 @@ int16_t CustomLR2021::linkConfig(uint8_t mode) {
   int16_t state;
   if (mode == mesh::Radio::LINK_GFSK) {
     state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_GFSK);
+    if (state == RADIOLIB_ERR_NONE) state = resetRxStats();
     if (state == RADIOLIB_ERR_NONE) {
       state = setGfskModulationParams((uint32_t)(LINK_GFSK_KBPS * 1000.0f + 0.5f), RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_GAUSS_BT_0_5,
                                       gfskRxBwCode(LINK_GFSK_RXBW_KHZ), (uint32_t)(LINK_GFSK_DEV_KHZ * 1000.0f + 0.5f));
@@ -492,6 +501,7 @@ int16_t CustomLR2021::linkConfig(uint8_t mode) {
     if (state == RADIOLIB_ERR_NONE) state = setGfskCrcParams(LINK_GFSK_CRC_POLY, LINK_GFSK_CRC_INIT);
   } else if (mode == mesh::Radio::LINK_FLRC) {
     state = setPacketType(RADIOLIB_LR2021_PACKET_TYPE_FLRC);
+    if (state == RADIOLIB_ERR_NONE) state = resetRxStats();
     if (state == RADIOLIB_ERR_NONE) {
       state = setFlrcModulationParams(RADIOLIB_LR2021_FLRC_BR_1300, RADIOLIB_LR2021_FLRC_CR_3_4,
                                       RADIOLIB_LR2021_GFSK_BPSK_FLRC_OOK_SHAPING_GAUSS_BT_0_5);
@@ -505,7 +515,7 @@ int16_t CustomLR2021::linkConfig(uint8_t mode) {
   return state;
 }
 
-// adds the chip's receive counts for the mode it's leaving (they start again with each packet type)
+// adds the chip's receive counts for the mode it's leaving (reset when the mode was set up: linkConfig)
 void CustomLR2021::linkCollectStats() {
   uint16_t rx = 0, crc = 0, len = 0, pre = 0, sok = 0, sfail = 0, to = 0;
   int16_t st = _link_mode == mesh::Radio::LINK_FLRC ? getFlrcRxStats(&rx, &crc, &len)
