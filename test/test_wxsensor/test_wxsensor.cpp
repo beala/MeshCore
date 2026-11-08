@@ -8,6 +8,7 @@
 #include <string>
 #include <helpers/weather/FineOffset.h>
 #include <helpers/weather/SensorTracker.h>
+#include "vectors.inc"
 
 using namespace wxsensor;
 
@@ -207,7 +208,7 @@ struct Sim {
       bool target = false;
       for (size_t i = 0; i < sensors.size(); i++) {
         auto& s = sensors[i];
-        if (!s.alive) continue;
+        if (!s.alive || s.r.proto != w.proto) continue;   // heard only in its own format
         // packets that start inside the window and end before it closes (15 ms on air)
         for (uint32_t p = s.phase + ((w.start > s.phase) ? ((w.start - s.phase + s.period - 1) / s.period) * s.period : 0);
              p + 15 <= wend; p += s.period) {
@@ -232,6 +233,7 @@ static Reading make(uint8_t model, uint32_t id) {
   memset(&r, 0, sizeof(r));
   r.model = model;
   r.id = id;
+  if (model == LTV_TH || model == LTV_WSDTH || model == LTV_W1 || model == LTV_R1 || model == LTV_WR1) r.proto = PROTO_LACROSSE;
   return r;
 }
 
@@ -440,12 +442,13 @@ TEST(Tracker, BothFormatsScanInTurnAndWindowsUseTheSensorsFormat) {
   EXPECT_EQ(w.len, Tracker::SCAN_LEN);
   ASSERT_TRUE(t.nextWindow(Tracker::SCAN_LEN + 5, &w));
   EXPECT_EQ(w.proto, PROTO_LACROSSE);
-  EXPECT_EQ(w.len, Tracker::SCAN_LEN - 5);
+  EXPECT_EQ(w.len, Tracker::scanLen(PROTO_LACROSSE) - 5);
+  EXPECT_EQ(t.scanTotal(), Tracker::SCAN_LEN + Tracker::scanLen(PROTO_LACROSSE));
   Reading la = make(LTV_TH, 0x123456);
   t.onPacket(Tracker::SCAN_LEN + 1000, la, -90);
   Reading fo = make(WH65, 7);
   t.onPacket(Tracker::SCAN_LEN + 2000, fo, -90);
-  uint32_t after = 2 * Tracker::SCAN_LEN + 1;
+  uint32_t after = t.scanTotal() + 1;
   ASSERT_FALSE(t.scanning(after));
   // each sensor's windows come up in its own format
   bool saw_la = false, saw_fo = false;
@@ -514,6 +517,220 @@ TEST(Tracker, ARestartedSensorIsPickedUpOnItsNominalInterval) {
   const Tracker::Sensor* s = sim.t.find(sensorKey(make(WH31, 2)));
   EXPECT_EQ(s->period, 61000u);
   EXPECT_GE(got[0], 20);   // found again by hunting (~13% of the time: some minutes), then every packet
+}
+
+
+// rtl_433's recordings of real sensors: the firmware reads the same model and values
+TEST(Recordings, ReadAsRtl433ReadsThem) {
+  for (const WxVector& v : WX_VECTORS) {
+    auto b = hex(v.hex);
+    Reading r;
+    ASSERT_TRUE(decodeAs(v.proto, b.data(), (int) b.size(), &r)) << v.name;
+    EXPECT_STREQ(v.model, modelName(r.model)) << v.name;
+    if (v.temp_c10 != -9999) { EXPECT_TRUE(r.have & HAVE_TEMP) << v.name; EXPECT_EQ(v.temp_c10, r.temp_c10) << v.name; }
+    if (v.humidity != -9999) { EXPECT_TRUE(r.have & HAVE_HUM) << v.name; EXPECT_EQ(v.humidity, r.humidity) << v.name; }
+    if (v.wind_dms != -9999) { EXPECT_TRUE(r.have & HAVE_WIND) << v.name; EXPECT_NEAR(v.wind_dms, r.wind_dms, 1) << v.name; }
+    if (v.wind_dir != -9999) { EXPECT_TRUE(r.have & HAVE_DIR) << v.name; EXPECT_NEAR(v.wind_dir, r.wind_dir, 1) << v.name; }
+    if (v.rain_um != -9999) { EXPECT_TRUE(r.have & HAVE_RAIN) << v.name; EXPECT_NEAR(v.rain_um, (long) r.rain_um, 60) << v.name; }
+    if (v.pressure_dhpa != -9999) { EXPECT_TRUE(r.have & HAVE_PRESSURE) << v.name; EXPECT_EQ(v.pressure_dhpa, r.pressure_dhpa) << v.name; }
+    if (v.pm25_x10 != -9999) { EXPECT_TRUE(r.have & HAVE_PM) << v.name; EXPECT_EQ(v.pm25_x10, r.pm25_x10) << v.name; }
+    if (v.moisture != -9999) { EXPECT_TRUE(r.have & HAVE_MOISTURE) << v.name; EXPECT_EQ(v.moisture, r.moisture) << v.name; }
+  }
+}
+
+TEST(Recordings, EachFormatReadsOnlyItsOwn) {
+  // a packet fed to another listen's decoder (on the air it can't be: another bit rate) reads
+  // only by an 8-bit check, taken once heard twice. Except an LTV-R1 whose ID starts with a Fine
+  // Offset family byte: it ends with the same CRC-8 and sum
+  for (const WxVector& v : WX_VECTORS) {
+    auto b = hex(v.hex);
+    for (int p = 0; p < PROTO_COUNT; p++) {
+      Reading r;
+      if (p == v.proto || !decodeAs(p, b.data(), (int) b.size(), &r) || r.weak) continue;
+      auto family = [](int q) { return q == PROTO_FO_WIDE ? PROTO_FINEOFFSET : q == PROTO_LTV_SLOW || q == PROTO_LTV_W1 ? PROTO_LACROSSE : q; };
+      if (family(p) == family(v.proto)) continue;   // the same packets at another rate or deviation
+      EXPECT_TRUE(strcmp(v.model, "LTV-R1") == 0 && packetLength(b[0]) == 9) << v.name << " as " << modelName(r.model);
+    }
+  }
+}
+
+TEST(FineOffset, MoreFamiliesFromTheirNotes) {
+  // rtl_433's published examples
+  Reading r = dec("46 00 27 f1 02 b5 33 40 32 40 39 03 0b 00 2a 00 36 01 90 e4 16");
+  EXPECT_EQ(WH46, r.model);
+  EXPECT_EQ(0x0027f1u, r.id);
+  EXPECT_EQ(293, r.temp_c10);
+  EXPECT_EQ(51, r.humidity);
+  EXPECT_EQ(50, r.pm25_x10);
+  EXPECT_EQ(57, r.pm10_x10);
+  EXPECT_EQ(42, r.pm1_x10);
+  EXPECT_EQ(779, r.co2_ppm);
+  EXPECT_FALSE(r.battery_low);   // 5 bars
+
+  r = dec("55 30 cf 55 04 02 89 be ae a4 20 10");
+  EXPECT_EQ(WH55, r.model);
+  EXPECT_EQ(4, r.channel);
+  EXPECT_EQ(0xcf55u, r.id);
+  EXPECT_FALSE(r.leak);
+  EXPECT_TRUE(r.weak);
+  EXPECT_EQ("WH55 cf55 ch4: dry", fmt(r, true));
+
+  r = dec("68 00 00 c5 01 07 4b 0f ff ff 00 2e 00 02 a6 63");
+  EXPECT_EQ(WS68, r.model);
+  EXPECT_EQ(2630u, r.light_lux);
+  EXPECT_EQ(46, r.wind_dir);
+  EXPECT_EQ(2, r.uv_x10);
+
+  r = dec("41 c7 41 ae 01 c2 f9 b3");
+  EXPECT_EQ(WH41, r.model);
+  EXPECT_EQ(430, r.pm25_x10);
+  EXPECT_FALSE(r.have & HAVE_PM10);   // an estimate from the PM2.5: not shown
+
+  r = dec("e5 02 72 28 27 21 c9 bb");
+  EXPECT_EQ(WH25, r.model);
+  EXPECT_FALSE(r.weak);   // the sum and the XOR
+  EXPECT_EQ("WH25 50: 22.6C 40% 1001.7 hPa", fmt(r, true));
+}
+
+TEST(FineOffset, WH43) {
+  // the WH41's fields after a 24-bit ID (rtl_433's notes); the example there has a placeholder ID,
+  // so this one is built: PM2.5 12.3, 4 battery bars, then the CRC-8 and sum
+  uint8_t b[32] = { 0x43, 0x12, 0x34, 0x56, 0x40 | 0x00, 123, 0x00, 140 };
+  b[8] = crc8(b, 8);
+  uint8_t sum = 0;
+  for (int i = 0; i < 9; i++) sum += b[i];
+  b[9] = sum;
+  Reading r;
+  ASSERT_TRUE(decode(b, sizeof(b), &r));
+  EXPECT_EQ(WH43, r.model);
+  EXPECT_EQ(0x123456u, r.id);
+  EXPECT_EQ(123, r.pm25_x10);
+  EXPECT_FALSE(r.battery_low);
+}
+
+TEST(FineOffset, WS69Pressure) {
+  // a WH65 packet with the WS69's 8 more bytes: pressure 0x018b8a = 1012.58 hPa, their own CRC and sum
+  auto b = hex("24 50 67 e2 87 41 00 00 00 01 00 02 00 00 00 8c 14");
+  ASSERT_TRUE(checkPacket(b.data(), 17));
+  b.resize(25);
+  b[17] = 0x01; b[18] = 0x8b; b[19] = 0x8a; b[20] = 0x00; b[21] = 0x2f; b[22] = 0x00;
+  b[23] = crc8(b.data(), 23);
+  uint8_t sum = 0;
+  for (int i = 0; i < 24; i++) sum += b[i];
+  b[24] = sum;
+  Reading r;
+  ASSERT_TRUE(decode(b.data(), (int) b.size(), &r));
+  EXPECT_EQ(WH65, r.model);
+  EXPECT_TRUE(r.have & HAVE_PRESSURE);
+  EXPECT_EQ(10126, r.pressure_dhpa);
+  b[24]++;   // the extension's check fails: the WH65 part still reads, without pressure
+  ASSERT_TRUE(decode(b.data(), (int) b.size(), &r));
+  EXPECT_FALSE(r.have & HAVE_PRESSURE);
+}
+
+TEST(FineOffset, ItPlusAndTheWS90ShareAFamilyByte) {
+  // an IT+ sensor with ID 0..3 starts 0x90 like a WS90; each check tells them apart
+  uint8_t it[32] = { 0x90, 0x46, 0x13, 0x45 };   // ID 1, 24.6 + 40 BCD, humidity 69
+  memset(&it[5], 0xAA, sizeof(it) - 5);
+  it[4] = crc8(it, 4);
+  Reading r;
+  ASSERT_TRUE(decode(it, sizeof(it), &r));
+  EXPECT_EQ(TX29IT, r.model);
+  EXPECT_EQ(1u, r.id);
+  EXPECT_EQ(213, r.temp_c10);
+  EXPECT_EQ(69, r.humidity);
+  EXPECT_TRUE(r.weak);
+  it[3] = 0x6A;   // no humidity sensor
+  it[4] = crc8(it, 4);
+  ASSERT_TRUE(decode(it, sizeof(it), &r));
+  EXPECT_FALSE(r.have & HAVE_HUM);
+}
+
+TEST(LaCrosse, AnEightBytePacketFollowedByZerosIsNotAnElevenByteOne) {
+  // a TH3 packet then 3 zero bytes: CRC-8 over all 11 is 0 too (rtl_433's recording g498)
+  auto b = hex("110851081c405513000000");
+  Reading r;
+  ASSERT_TRUE(decodeLaCrosse(b.data(), (int) b.size(), &r));
+  EXPECT_EQ(LTV_TH, r.model);
+  EXPECT_EQ(52, r.temp_c10);
+  EXPECT_EQ(85, r.humidity);
+}
+
+TEST(LaCrosse, ThermoProTX7B) {
+  // rtl_433's examples
+  auto b = hex("e8 00 29 30 17 aa 55 aa 83 d2 d2 d2 d2");
+  Reading r;
+  ASSERT_TRUE(decodeAs(PROTO_TX7B, b.data(), (int) b.size(), &r));
+  EXPECT_EQ(TP_TX7B, r.model);
+  EXPECT_EQ(1, r.channel);
+  EXPECT_EQ(259, r.temp_c10);
+  EXPECT_EQ(23, r.humidity);
+  EXPECT_FALSE(r.weak);
+  b = hex("25 20 2c a0 0d aa 55 aa bb d2 d2 d2 d2");
+  ASSERT_TRUE(decodeAs(PROTO_TX7B, b.data(), (int) b.size(), &r));
+  EXPECT_EQ(3, r.channel);
+  EXPECT_EQ(314, r.temp_c10);
+  b[2] ^= 1;
+  EXPECT_FALSE(decodeAs(PROTO_TX7B, b.data(), (int) b.size(), &r));
+}
+
+TEST(LaCrosse, TX22UQuartets) {
+  // rtl_433's example: ID a2, 5 quartets: 17.2 °C, 58 %, rain 0, wind 0 from 180°, gust 0
+  auto b = hex("a2 a5 05 72 10 58 20 00 38 00 40 00 fc 00");
+  Reading r;
+  ASSERT_TRUE(decodeAs(PROTO_TX22U, b.data(), (int) b.size(), &r));
+  EXPECT_EQ(TX22U, r.model);
+  EXPECT_EQ(172, r.temp_c10);
+  EXPECT_EQ(58, r.humidity);
+  EXPECT_EQ(180, r.wind_dir);
+  EXPECT_TRUE(r.have & HAVE_GUST);
+  EXPECT_TRUE(r.weak);
+  // 3 quartets: humidity, rain 28 tips, wind
+  b = hex("a2 83 10 72 20 1c 38 00 33 00");
+  ASSERT_TRUE(decodeAs(PROTO_TX22U, b.data(), (int) b.size(), &r));
+  EXPECT_EQ(72, r.humidity);
+  EXPECT_EQ(28u * 518, r.rain_um);
+  EXPECT_FALSE(r.have & HAVE_TEMP);
+}
+
+TEST(Unknown, ACheckedPacketOfANewFamilyShowsItsLength) {
+  // a made-up family 0x63, 12 bytes, with the CRC-8 and sum every Fine Offset packet ends with
+  uint8_t b[32] = { 0x63, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+  b[10] = crc8(b, 10);
+  uint8_t sum = 0;
+  for (int i = 0; i < 11; i++) sum += b[i];
+  b[11] = sum;
+  for (int i = 12; i < 32; i++) b[i] = (uint8_t)(i * 37);
+  Reading r;
+  EXPECT_FALSE(decode(b, sizeof(b), &r));
+  EXPECT_EQ(12, checkedLength(b, sizeof(b)));
+  // the WH31E's radio clock packet is known, and not counted as unknown
+  auto c = hex("52 27 4a 20 10 20 02 06 55 05 75");
+  EXPECT_FALSE(decode(c.data(), (int) c.size(), &r));
+  EXPECT_TRUE(ignoredFamily(c[0]));
+  // a 9.6k packet: the shortest length its CRC-8 covers
+  uint8_t d[13] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
+  d[6] = crc8(d, 6);
+  EXPECT_EQ(7, crcLength(d, sizeof(d)));
+}
+
+TEST(Noise, StronglyCheckedReadsAreRare) {
+  // random packets after each sync word: weakly checked reads are expected now and then (they count
+  // only when heard twice); strongly checked ones about never
+  uint32_t s = 4242;
+  int strong = 0, weak = 0, unknown = 0;
+  for (int k = 0; k < 200000; k++) {
+    uint8_t x[32];
+    for (auto& v : x) { s = s * 1103515245u + 12345u; v = (uint8_t)(s >> 16); }
+    for (int p = 0; p < PROTO_COUNT; p++) {
+      Reading r;
+      if (decodeAs(p, x, p ? 13 : 32, &r)) { if (r.weak) weak++; else strong++; }
+      else if (p == 0 && checkedLength(x, 32)) unknown++;
+    }
+  }
+  EXPECT_LE(strong, 40);    // eg. the WH25's sum and XOR, the La Crosse View's CRC and value checks
+  EXPECT_LE(unknown, 400);  // 30 lengths × 2^-16 each: about 1 in 2,200
+  printf("of 1200000 random packets: %d strong, %d weak, %d 'unknown'\n", strong, weak, unknown);
 }
 
 int main(int argc, char** argv) {

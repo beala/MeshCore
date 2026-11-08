@@ -14,8 +14,10 @@ using namespace wxsensor;
 
 static void fuzzDecode(uint8_t proto, const uint8_t* d, size_t n) {
   Reading r;
+  int cl = checkedLength(d, (int)n), crl = crcLength(d, (int)n);
+  if (cl < 0 || cl > (int)n || crl < 0 || crl > (int)n) abort();
   if (!decodeAs(proto, d, (int)n, &r)) return;
-  if (protocolOf(r.model) != proto) abort();
+  if (r.proto != proto) abort();
   char buf[200];
   for (size_t size = 0; size <= sizeof(buf); size += 7) {
     int w = format(r, size & 1, size ? buf : NULL, size);
@@ -32,7 +34,7 @@ static void fuzzTracker(const uint8_t* d, size_t n) {
   if (n >= 4) { memcpy(&now, d, 4); d += 4; n -= 4; }
   t.reset(now);
   t.setSeed(now | 1);
-  t.setProtocols((uint8_t)(now >> 8) & 3);
+  t.setProtocols((uint8_t)(now >> 8) & ((1 << PROTO_COUNT) - 1));
   t.scanFor(now, 1000 + (now & 0xFFFF));
   Window w = {};
   bool open = false;
@@ -69,6 +71,6 @@ static void fuzzTracker(const uint8_t* d, size_t n) {
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size < 1) return 0;
   if (data[0] & 1) fuzzTracker(data + 1, size - 1);
-  else fuzzDecode((data[0] >> 1) & 1, data + 1, size - 1);
+  else fuzzDecode((uint8_t)((data[0] >> 1) % PROTO_COUNT), data + 1, size - 1);
   return 0;
 }

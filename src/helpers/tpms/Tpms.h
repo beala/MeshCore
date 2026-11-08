@@ -47,11 +47,12 @@ struct Air {
   uint8_t pre_det;        // GFSK: 1010.. preamble bits the radio waits for before the sync word (0: none; the
                           // makes that send one are heard far more reliably with it: 8 of 8 against 3-5)
   bool listen;            // in the rotation (false: read in tests, not yet heard over the air)
+  float dev_khz;          // GFSK: the sensors' deviation (the receiver takes about ±20% of its setting)
 };
 static const int AIRS = 8;
 const Air& air(int i);   // 0 .. AIRS-1
 static const float FREQ_MHZ = 315.0f;
-static const float DEV_KHZ = 40.0f;      // the sensors' deviation is 20-50 kHz
+static const float DEV_KHZ = 40.0f;      // most sensors' deviation (Air::dev_khz: each make's own)
 static const float RX_BW_KHZ = 185.2f;   // that, and +-50 kHz of crystal error
 
 // Reads one packet from air setting i: chips as the radio hands them over after the sync word.

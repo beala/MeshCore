@@ -28,7 +28,9 @@ public:
   static constexpr uint32_t HUNT_LEN = 400;          // ms per hunting window
   static constexpr uint32_t HUNT_GAP_MIN = 1500;     // ms between hunting windows: random in [min, max)
   static constexpr uint32_t HUNT_GAP_MAX = 4500;
-  static constexpr uint32_t SCAN_LEN = 85000;     // a scan: longer than the slowest common sensor's interval
+  static constexpr uint32_t SCAN_LEN = 85000;     // a scan of Ecowitt's format: longer than the slowest common sensor's interval
+  // a scan's time in each format: longer than its sensors' intervals
+  static uint32_t scanLen(uint8_t proto);
   static constexpr uint32_t MARGIN = 150;            // ms either side of an expected packet
   static constexpr uint32_t MARGIN_STEP = 150;       // added per missed packet
   static constexpr uint8_t MAX_MISSES = 4;           // then the sensor is hunted again
@@ -66,9 +68,11 @@ public:
   void setProtocols(uint8_t mask) { _protos = mask ? mask : 1; }
   uint8_t protocols() const { return _protos; }
   int protocolCount() const;
-  // Listen without a break for ms from now, in each format in turn (finds every sensor that sends
-  // at least that often)
-  void scanFor(uint32_t now, uint32_t ms = SCAN_LEN);
+  // Listen without a break in each format in turn, for scanLen() each, or ms each if given (finds
+  // every sensor that sends at least that often)
+  void scanFor(uint32_t now, uint32_t ms = 0);
+  // a scan's total time, ms
+  uint32_t scanTotal() const;
   bool scanning(uint32_t now) const;
   // Listen all the time (eg. driving around looking for sensors), in each format in turn for
   // SCAN_SLICE ms at a time, until turned off
@@ -86,14 +90,14 @@ public:
 
   // nominal interval for a model, or 0 if unknown
   static uint32_t nominalPeriod(uint8_t model);
-  static uint8_t maxMisses(uint8_t model);
+  static uint8_t maxMisses(const Reading& r);
 
 private:
   Sensor _s[MAX_SENSORS];
   int _n;
   uint32_t _hunt_until;      // hunt at least until then
   uint32_t _scan_until;      // listen without a break until then
-  uint32_t _scan_start, _scan_each;   // the scan's start and time per format
+  uint32_t _scan_start, _scan_each;   // the scan's start and time per format (0: scanLen() each)
   uint8_t _protos = 1;
   bool _scan_forever = false;
   uint8_t _hunt_turn = 0;    // hunting windows take turns between formats

@@ -412,15 +412,17 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Usage:**
 - `wx on`, `wx off`
 - `wx` or `get wx`: the settings
-- `wx scan`: listen for sensors without a break for 85 s per brand (the mesh isn't heard meanwhile), then list them in the console
+- `wx scan`: listen for sensors without a break in each radio format in turn (6 minutes for both brands; the mesh isn't heard meanwhile), then list them in the console
 - `wx scan on`, `wx scan off`: listen all the time, with a console note for each new sensor (eg. while driving around; not saved)
-- `set wx.kind ecowitt|lacrosse|both` (default both)
+- `set wx.kind ecowitt|lacrosse|both` (default both): Ecowitt's two formats (Ecowitt, Ambient and other Fine Offset models, La Crosse TX29-IT), or La Crosse's and ThermoPro's six slower ones (La Crosse View at three rates, IT+, TX22U-IT, ThermoPro TX-7B)
 - `set wx.freq <MHz>` (default 915)
 - `set wx.units us|metric` (default `us`: °F, mph, inches)
 - `set wx.every <minutes>`: how often each sensor's readings are posted (default 30; 0 = only the first post and alerts)
 - `set wx.only <labels>` or `set wx.only all`: show and follow only these sensors, by the label in their posts (eg. `5a,ch2`)
 - `get wx.sensors`: the sensors heard, with packet count, interval, signal and when last heard
 - `get wx.stats`, `get radio.fsk`: packets, listens, and the share of time away from the mesh
+- `set wx.dbg <kbps> <rxbw kHz> <dev kHz> <preamble bits> [sync hex]`: every listen with these settings (0 = its own), until reboot; `set wx.dbgmask <hex>`: only these formats (bits of 1 << format) until `set wx.kind`; for experiments
+- `get wx.unknown [n]`: packets that checked out but didn't decode, from models the firmware doesn't know yet; with a number, that one's bytes
 
 **Example reply:** `> WH65 5a x39 every 15s -108dBm 0s ago; WH31 ch2 x10 every 60s -107dBm 51s ago`
 

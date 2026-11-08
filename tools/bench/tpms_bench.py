@@ -4,6 +4,11 @@
 925 MHz, another listens with 'tpms on'. Never 909-922 MHz (the sender refuses it).
 
   tpms_bench.py <tx port> <rx port> [--mhz 925] [--count 8] [--only FORD_0,GM_1] [--rxbw kHz]
+               [--heltec <port>]
+
+--heltec sends the FSK makes from a Heltec V4 console (tools/heltec_v4_tx, an SX1262) instead, at
+the rates and deviations measured on real sensors (the receiver's settings), so a wrong setting
+shows: the XIAO's LR2021 rounds its rates as the receiving LR2021 does.
 """
 import argparse
 import re
@@ -24,6 +29,20 @@ def vectors(path):
     return out
 
 
+# what the sensors send (measured on rtl_433's recordings): bit rate, deviation, by setting
+REAL = {0: (19.21, 41), 1: (19.231, 40), 2: (20.15, 25), 3: (20.0, 40), 4: (20.29, 28), 5: (8.198, 41), 6: (9.915, 41)}
+SYNCS = {0: ("5556", 16), 1: ("aaaaaaa9", 32), 2: ("a9e0", 11), 3: ("ed71", 16), 4: ("dae354", 23), 5: ("f5555555e0", 36),
+         6: ("fc", 8)}
+
+
+def heltec_frame(air, chips):
+    """sync bits then chips, as one bit string padded to bytes; the Heltec puts 40 bits of 1010.. first"""
+    sh, sb = SYNCS[air]
+    bits = bin(int(sh, 16))[2:].zfill(len(sh) * 4)[:sb] + "".join(f"{b:08b}" for b in chips)
+    bits += "0" * (-len(bits) % 8)
+    return "%0*x" % (len(bits) // 4, int(bits, 2))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tx")
@@ -33,9 +52,14 @@ def main():
     ap.add_argument("--gap", type=float, default=0.3)
     ap.add_argument("--only")
     ap.add_argument("--rxbw", default="0")
+    ap.add_argument("--heltec")
     ap.add_argument("--vectors", default=__file__.rsplit("/", 3)[0] + "/test/test_tpms/vectors.inc")
     a = ap.parse_args()
     tx, rx = Companion(a.tx), Companion(a.rx)
+    h = None
+    if a.heltec:
+        import serial
+        h = serial.Serial(a.heltec, 115200, timeout=0.3)
     vs = vectors(a.vectors)
     if a.only:
         vs = [v for v in vs if v[0] in a.only.split(",")]
@@ -47,8 +71,17 @@ def main():
         before = rx.cli("get tpms.stats")
         sent = 0
         for _ in range(a.count):
-            r = tx.cli(f"tpms tx {air} {a.mhz} {chips.hex()}")
-            sent += bool(r and r.startswith("OK"))
+            if h is not None and air in REAL:
+                kbps, dev = REAL[air]
+                fr = heltec_frame(air, chips)
+                # the Heltec needs a sync word: the first byte of the frame
+                h.reset_input_buffer()
+                h.write(f"fskraw {a.mhz} {kbps} {dev} {fr[:2]} {fr[2:]}\n".encode())
+                time.sleep(0.15)
+                sent += "OK" in h.read(200).decode(errors="replace")
+            else:
+                r = tx.cli(f"tpms tx {air} {a.mhz} {chips.hex()}")
+                sent += bool(r and r.startswith("OK"))
             time.sleep(a.gap)
         time.sleep(1.0)
         print(f"{name}: sent {sent}; before: {before}")

@@ -426,6 +426,23 @@ private:
   bool _wx_scan_report = false;      // post what the scan found to the Radio console when it ends
   void weatherScanReport();
   uint32_t _wx_heard = 0, _wx_bad = 0, _wx_shown = 0, _wx_windows = 0, _wx_listen_ms = 0, _wx_since = 0;
+  // A new sensor whose packets carry only an 8-bit check is taken once heard twice (a stray packet
+  // passes one in 256)
+  // 'set wx.dbg': listen settings for experiments (0 = the default), until reboot
+  float _wx_dbg_kbps = 0, _wx_dbg_rxbw = 0, _wx_dbg_dev = 0;
+  uint8_t _wx_dbg_pre = 0, _wx_dbg_sync_len = 0, _wx_dbg_sync[8] = {};
+  struct WxPending { uint32_t key, at; };
+  WxPending _wx_pending[6] = {};
+  bool weatherConfirmed(const wxsensor::Reading& r, uint32_t now);
+  uint8_t weatherProtocols() const;   // the formats 'set wx.kind' asks for
+  // Packets that checked out but didn't decode: models not known yet ('get wx.unknown')
+  struct WxUnknown { uint32_t at; uint16_t count; int16_t rssi; uint8_t proto, len, n; uint8_t pkt[32]; };
+  WxUnknown _wx_unk[6] = {};
+  void weatherUnknown(const uint8_t* buf, int n, float rssi, uint32_t now);
+  int weatherUnknownCount() const;
+#ifdef FISB_BENCH_TX
+  bool weatherBenchTx(const char* command, char* reply);
+#endif
   void applyWeather();
   void weatherLoop();
   bool handleWeatherCommand(const char* command, char* reply);

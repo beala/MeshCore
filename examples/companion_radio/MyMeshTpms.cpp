@@ -44,7 +44,7 @@ static mesh::Radio::FskListen tpmsListen(int i, float freq) {
     cfg.rxbw_khz = tpms_dbg.rxbw > 0 ? tpms_dbg.rxbw : 38.5f;   // OOK: a few times the chip rate at most
     cfg.thresh_db = tpms_dbg.thresh;
   } else {
-    cfg.dev_khz = tpms_dbg.dev > 0 ? tpms_dbg.dev : tpms::DEV_KHZ;
+    cfg.dev_khz = tpms_dbg.dev > 0 ? tpms_dbg.dev : a.dev_khz;
     cfg.pre_det_bits = tpms_dbg.pre_det ? tpms_dbg.pre_det : a.pre_det;
     cfg.rxbw_khz = tpms_dbg.rxbw > 0 ? tpms_dbg.rxbw : tpms::RX_BW_KHZ;
     cfg.sync_bits = a.sync_bits;
@@ -283,7 +283,7 @@ static bool tpmsBenchTx(const char* cmd, char* reply) {
       int v = k < lead ? ((lead - k) & 1) ^ first : (a.sync[(k - lead) >> 3] >> (7 - ((k - lead) & 7))) & 1;
       if (v) { int at = k + shift; sync[at >> 3] |= 0x80 >> (at & 7); }
     }
-    st = radio_driver.benchFskTx(mhz, a.kbps, tpms::DEV_KHZ, sync, (uint8_t) nbytes, (uint8_t) bits, chips, (uint16_t) n);
+    st = radio_driver.benchFskTx(mhz, a.kbps, a.dev_khz, sync, (uint8_t) nbytes, (uint8_t) bits, chips, (uint16_t) n);
   }
   if (st == RADIOLIB_ERR_NONE) sprintf(reply, "OK - sent %s, %d bytes", a.name, n);
   else sprintf(reply, "Error: %d", st);

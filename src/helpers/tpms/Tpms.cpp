@@ -346,17 +346,24 @@ bool decodeRow(uint8_t proto, const uint8_t* bits, int nbits, Reading* r) {
 
 // ---- the radio settings ----
 
+// The bit rates and deviations are the sensors' own, measured on rtl_433's recordings of real ones:
+// the LR2021's FSK receiver takes a rate only within about 0.1-0.3% of its setting and a deviation
+// within about 20%. Rates: Ford 19.17-19.27 kchip/s over 3 sensors and Jeep 19.17 straddle one;
+// Toyota PMV-C210 20.14-20.17 over 15 recordings, PMV-107J 9.91-9.92 over 29; Honda 20.29; Nissan
+// 8.20 over 10; GM 8.39-8.42 over 4. Deviations: Ford, Jeep, Nissan, PMV-107J 40-41 kHz, Citroen
+// 35, Toyota PMV-C210 24-25, Honda 28. Hyundai's and Kia's have no recordings: their published
+// rates, and 40 kHz.
 static const Air AIRS_[AIRS] = {
-  // name         kbps     sync (first sync_bits bits)          bits pkt invert protocols                    ook  pre listen
-  { "Ford/Jeep",  19.231f, { 0x55, 0x56 }, 16, 21, true, (1 << P_FORD) | (1 << P_JEEP), false, 8, true },
-  { "Hyundai",    19.231f, { 0xaa, 0xaa, 0xaa, 0xa9 }, 32, 20, false, 1 << P_HYUNDAI, false, 8, true },
-  { "Toyota",     19.231f, { 0xa9, 0xe0 }, 11, 19, false, 1 << P_TOYOTA, false, 8, true },
-  { "Kia",        20.0f,   { 0xed, 0x71 }, 16, 18, false, 1 << P_KIA, false, 0, true },
-  { "Honda",      20.0f,   { 0xda, 0xe3, 0x54 }, 23, 16, false, 1 << P_HONDA, false, 0, true },   // no preamble
-  // Nissan: its frames came through garbled on the bench (8.33 kbps): read in tests only, for now
-  { "Nissan",     8.333f,  { 0xf5, 0x55, 0x55, 0x55, 0xe0 }, 36, 10, false, 1 << P_NISSAN, false, 8, false },
-  { "PMV-107J",   10.0f,   { 0xfc }, 8, 18, false, 1 << P_PMV107J, false, 8, true },
-  { "GM",         8.130f,  { 0x55, 0x65, 0xa5 }, 24, 18, false, 1 << P_GM, true, 0, true },
+  // name         kbps     sync (first sync_bits bits)          bits pkt invert protocols                    ook  pre listen dev
+  { "Ford/Jeep",  19.21f,  { 0x55, 0x56 }, 16, 21, true, (1 << P_FORD) | (1 << P_JEEP), false, 8, true, 40.0f },
+  { "Hyundai",    19.231f, { 0xaa, 0xaa, 0xaa, 0xa9 }, 32, 20, false, 1 << P_HYUNDAI, false, 8, true, 40.0f },
+  { "Toyota",     20.15f,  { 0xa9, 0xe0 }, 11, 19, false, 1 << P_TOYOTA, false, 8, true, 25.0f },
+  { "Kia",        20.0f,   { 0xed, 0x71 }, 16, 18, false, 1 << P_KIA, false, 0, true, 40.0f },
+  { "Honda",      20.29f,  { 0xda, 0xe3, 0x54 }, 23, 16, false, 1 << P_HONDA, false, 0, true, 28.0f },   // no preamble
+  // Nissan: its frames came through garbled on the bench at 8.33 kbps: read in tests only, for now
+  { "Nissan",     8.198f,  { 0xf5, 0x55, 0x55, 0x55, 0xe0 }, 36, 10, false, 1 << P_NISSAN, false, 8, false, 41.0f },
+  { "PMV-107J",   9.915f,  { 0xfc }, 8, 18, false, 1 << P_PMV107J, false, 8, true, 41.0f },
+  { "GM",         8.40f,   { 0x55, 0x65, 0xa5 }, 24, 18, false, 1 << P_GM, true, 0, true, 0.0f },
 };
 
 const Air& air(int i) { return AIRS_[i >= 0 && i < AIRS ? i : 0]; }

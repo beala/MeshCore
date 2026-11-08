@@ -50,21 +50,24 @@ about 7 times as often.
 ## Makes
 
 Each maker's sensors frame their data their own way. These follow rtl_433's decoders, and were
-checked against rtl_433's recordings of real sensors and sent over the air on the bench:
+checked against rtl_433's recordings of real sensors and sent over the air on the bench, from an
+SX1262 (a Heltec V4) at the rates and deviations the real sensors use (GM's from the XIAO, on-off
+keyed):
 
 | Make | Sensor | Radio | Over the air (bench) |
 |---|---|---|---|
 | Ford | Continental/VDO | FSK, 19.2 kbps, Manchester, a sum | 16 of 16 frames |
 | Jeep, Chrysler, Dodge, Ram | Continental (the same frames as Citroen/Peugeot) | FSK, 19.2 kbps, Manchester, XOR | 16 of 16 |
-| Toyota, Lexus (newer) | Pacific PMV-C210 | FSK, 19.2 kbps, differential Manchester, CRC-8 | 16 of 16 |
-| Toyota, Lexus (older) | Pacific PMV-107J | FSK, 10 kbps, differential Manchester, CRC-8 | 16 of 16 |
-| GM: Chevrolet, GMC, Buick, Cadillac | Schrader EG53MA4 | OOK, 8.1 kchip/s, Manchester, a sum | 16 of 16 |
-| Honda | TRW PPA-GF33 | FSK, 20 kbps, Manchester, CRC-8 | 10 of 16 |
+| Toyota, Lexus (newer) | Pacific PMV-C210 | FSK, 20.15 kbps, differential Manchester, CRC-8 | 16 of 16 |
+| Toyota, Lexus (older) | Pacific PMV-107J | FSK, 9.92 kbps, differential Manchester, CRC-8 | 16 of 16 |
+| GM: Chevrolet, GMC, Buick, Cadillac | Schrader EG53MA4 | OOK, 8.40 kchip/s, Manchester, a sum | 15 of 16 |
+| Honda | TRW PPA-GF33 | FSK, 20.29 kbps, Manchester, CRC-8 | 8 of 16 |
 | Hyundai, Kia, Mazda, Mitsubishi | Continental/VDO | FSK, 19.2 kbps, Manchester, CRC-8 | (no recording to send) |
 | Kia Rio, some Hyundai | | FSK, 20 kbps, Manchester, CRC-8 | (no recording to send) |
 
-Nissan's FSK sensors are read from recordings (`test/test_tpms`), but their frames came through
-garbled over the air on the bench at 8.33 kbps, so they aren't listened for yet.
+Nissan's FSK sensors are read from recordings (`test/test_tpms`), but their frames don't come
+through over the air on the bench (at 8.33 kbps, nor at the 8.20 their sensors use), so they aren't
+listened for yet.
 
 Ford's, Jeep's, GM's and Nissan's checks are weak (a sum, an XOR or 2 bits): a frame from them only
 counts when the same one comes again within 15 s. Sensors send several in a row, so a real one
@@ -95,15 +98,33 @@ in turn; once one of the chosen sensors has been heard, only its make's.
 
 | Setting | Bit rate | Sync word (bits) | Then | Preamble wait |
 |---|---|---|---|---|
-| Ford/Jeep | 19.23 kbps | `5556` (16) | 21 bytes | 8 bits |
+| Ford/Jeep | 19.21 kbps | `5556` (16) | 21 bytes | 8 bits |
 | Hyundai | 19.23 kbps | `aaaaaaa9` (32) | 20 bytes | 8 bits |
-| Toyota | 19.23 kbps | `a9e` (11) | 19 bytes | 8 bits |
+| Toyota | 20.15 kbps | `a9e` (11) | 19 bytes | 8 bits |
 | Kia | 20 kbps | `ed71` (16) | 18 bytes | none |
-| Honda | 20 kbps | `dae354` (23) | 16 bytes | none (its frames start with the marker) |
-| PMV-107J | 10 kbps | `fc` (8) | 18 bytes | 8 bits |
-| GM | 8.13 kchip/s OOK | `5565a5` (24), after a `1010` detector pattern | 18 bytes | – |
+| Honda | 20.29 kbps | `dae354` (23) | 16 bytes | none (its frames start with the marker) |
+| PMV-107J | 9.915 kbps | `fc` (8) | 18 bytes | 8 bits |
+| GM | 8.40 kchip/s OOK | `5565a5` (24), after a `1010` detector pattern | 18 bytes | – |
 
-FSK: 40 kHz deviation, 185 kHz receiver (the sensors' crystals are off by tens of kHz). GM's OOK:
+**The bit rates and deviations are the sensors' own.** The LR2021's FSK receiver takes a bit rate
+only within about 0.1-0.3% of its setting and a deviation within about 20% (measured on the bench
+with an SX1262 sending, see [weather sensors](weather_sensors.md#radio-formats)), so each listen is
+set to what was measured on rtl_433's recordings of real sensors (each recording matched against its
+bits rebuilt at every rate in 0.025% steps), not the round figures in the decoders' notes:
+
+| Make | Bit rate (recordings) | Deviation |
+|---|---|---|
+| Ford | 19.17–19.27 kbps (3 sensors) | 41 kHz |
+| Jeep, Citroen | 19.17, 19.24 | 40, 35 kHz |
+| Toyota PMV-C210 | 20.14–20.17 (15 recordings) | 24–25 kHz |
+| Toyota PMV-107J | 9.91–9.92 (29) | 41 kHz |
+| Honda | 20.29 | 28 kHz |
+| Nissan | 8.20 (10) | 41 kHz |
+| GM | 8.39–8.42 kchip/s (4) | (on-off keyed) |
+
+Hyundai and Kia have no recordings: their listens use the published rates and 40 kHz.
+
+FSK: each make's deviation (above), 185 kHz receiver (the sensors' crystals are off by tens of kHz). GM's OOK:
 a 38.5 kHz receiver, as the OOK receiver hears nothing much wider than a few times its chip rate
 (see [utility meters](utility_meters.md)).
 
@@ -121,7 +142,12 @@ and from the radio's cut, and nothing else.
 A companion built with `-D FISB_BENCH_TX` (never in releases) sends them: `tpms tx <setting 0-7>
 <MHz> <hex>`, at 902-909 or 922-928 MHz (bench tests use 925 MHz; never 315 MHz). A receiver with
 `set tpms.freq 925` hears them. `tools/bench/tpms_bench.py <sender port> <receiver port>` sends each
-vector 8 times and prints what the receiver read and posted.
+vector 8 times and prints what the receiver read and posted; `--heltec <port>` sends the FSK makes
+from a Heltec V4 console (tools/heltec_v4_tx) instead, at the real sensors' rates and deviations.
+Test with the Heltec: an LR2021 sending to an LR2021 hides a wrong rate (both round it the same way).
+Before the rates were measured, the Toyota, PMV-107J, Honda and GM listens were 0.8-4.8% off the
+real sensors' rates, which the receiver doesn't take; frames sent from the XIAO at those same
+wrong rates read fine.
 
 ```
 PLATFORMIO_BUILD_FLAGS="-D FISB_BENCH_TX" pio run -e AB_Xiao_nrf52_LR2021_companion_radio_usb -t upload

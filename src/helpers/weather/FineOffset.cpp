@@ -8,34 +8,67 @@ namespace wxsensor {
 static const char* const NAMES[MODEL_COUNT] = {
   "?", "WH65", "WH31", "WH40", "WH57", "WS80", "WS85", "WS90", "WN34", "WH45", "WH51",
   "LTV-TH", "LTV-WSDTH", "LTV-W1", "LTV-R1",
+  "WH25", "WN32B", "WH32", "WH41", "WH43", "WH46", "WH52", "WH55", "WN20", "WS68", "TX29-IT",
+  "LTV-WR1", "TX35-IT", "TX22U", "TX-7B",
 };
 
-uint8_t protocolOf(uint8_t model) {
-  return model >= LTV_TH && model < MODEL_COUNT ? PROTO_LACROSSE : PROTO_FINEOFFSET;
+const char* protocolName(uint8_t proto) {
+  static const char* const P[PROTO_COUNT] = { "Ecowitt 17.22k", "La Crosse View 9.61k", "La Crosse View 9.36k",
+                                              "La Crosse IT+ 9.58k", "La Crosse TX22U 8.62k", "ThermoPro 9.26k",
+                                              "Ecowitt 17.24k wide", "La Crosse View 9.33k" };
+  return proto < PROTO_COUNT ? P[proto] : "?";
 }
 
 const char* modelName(uint8_t model) {
   return model < MODEL_COUNT ? NAMES[model] : "?";
 }
 
-int packetLength(uint8_t family) {
+// How each family is checked
+enum Check : uint8_t {
+  CHK_CRC_SUM,   // CRC-8 over all but the last byte comes out 0, the last byte is the sum
+  CHK_CRC,       // CRC-8 over all comes out 0 (WH55, IT+)
+  CHK_SUM_XOR,   // WH25: byte 6 the sum of 0-5, byte 7 their XOR with its halves swapped
+  CHK_SUM,       // WH32, WN32B: byte 6 the sum of 0-5 (byte 7 not checked)
+};
+
+struct Layout { uint8_t len; uint8_t check; };
+
+static Layout layoutOf(uint8_t family) {
   switch (family) {
-    case 0x24: return 17;   // WH65 (WH24, WS69, HP1000)
-    case 0x30: case 0x37: return 7;   // WH31 (E), WH31B (Ecowitt WN31)
-    case 0x40: return 9;    // WH40
-    case 0x57: return 9;    // WH57
-    case 0x80: return 18;   // WS80
-    case 0x85: return 28;   // WS85
-    case 0x90: return 32;   // WS90
-    case 0x34: case 0x38: return 9;   // WN34, WN38
-    case 0x45: return 15;   // WH45
-    case 0x51: return 14;   // WH51
-    default: return 0;
+    case 0x24: return { 17, CHK_CRC_SUM };   // WH65 (WH24, WS69, HP1000)
+    case 0x30: case 0x37: return { 7, CHK_CRC_SUM };   // WH31 (E), WH31B (Ecowitt WN31)
+    case 0x40: return { 9, CHK_CRC_SUM };    // WH40
+    case 0x57: return { 9, CHK_CRC_SUM };    // WH57
+    case 0x80: return { 18, CHK_CRC_SUM };   // WS80
+    case 0x85: return { 28, CHK_CRC_SUM };   // WS85
+    case 0x90: return { 32, CHK_CRC_SUM };   // WS90
+    case 0x34: case 0x38: return { 9, CHK_CRC_SUM };   // WN34, WN38
+    case 0x45: return { 15, CHK_CRC_SUM };   // WH45
+    case 0x51: return { 14, CHK_CRC_SUM };   // WH51
+    case 0x20: return { 10, CHK_CRC_SUM };   // WN20
+    case 0x41: case 0x42: return { 8, CHK_CRC_SUM };   // WH0290, WH41
+    case 0x43: return { 10, CHK_CRC_SUM };   // WH43
+    case 0x46: return { 21, CHK_CRC_SUM };   // WH46
+    case 0x52: return { 11, CHK_CRC_SUM };   // WH31E radio clock time
+    case 0x55: return { 9, CHK_CRC };        // WH55
+    case 0x68: return { 16, CHK_CRC_SUM };   // WS68
+    case 0xA2: return { 24, CHK_CRC_SUM };   // WH52
   }
+  if ((family & 0xF0) == 0xE0) return { 8, CHK_SUM };   // WH25 (and its XOR), WN32B
+  if ((family & 0xF0) == 0xD0) return { 8, CHK_SUM };   // WH32
+  return { 0, CHK_CRC_SUM };
 }
 
-static uint8_t crc8(const uint8_t* b, int n) {
-  uint8_t c = 0;
+int packetLength(uint8_t family) {
+  return layoutOf(family).len;
+}
+
+bool ignoredFamily(uint8_t family) {
+  return family == 0x52;
+}
+
+uint8_t crc8(const uint8_t* b, int n, uint8_t init) {
+  uint8_t c = init;
   for (int i = 0; i < n; i++) {
     c ^= b[i];
     for (int k = 0; k < 8; k++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x31) : (uint8_t)(c << 1);
@@ -43,11 +76,61 @@ static uint8_t crc8(const uint8_t* b, int n) {
   return c;
 }
 
+static uint8_t sum8(const uint8_t* b, int n) {
+  uint8_t s = 0;
+  for (int i = 0; i < n; i++) s += b[i];
+  return s;
+}
+
 bool checkPacket(const uint8_t* b, int len) {
   if (len < 3) return false;
-  uint8_t sum = 0;
-  for (int i = 0; i < len - 1; i++) sum += b[i];
-  return crc8(b, len - 1) == 0 && sum == b[len - 1];
+  return crc8(b, len - 1) == 0 && sum8(b, len - 1) == b[len - 1];
+}
+
+// WH25: the XOR of bytes 0-5, its halves swapped
+static bool wh25Xor(const uint8_t* b) {
+  uint8_t x = 0;
+  for (int i = 0; i < 6; i++) x ^= b[i];
+  return (uint8_t)(x << 4 | x >> 4) == b[7];
+}
+
+static bool checkAs(const uint8_t* b, Layout l) {
+  switch (l.check) {
+    case CHK_CRC: return crc8(b, l.len) == 0;
+    case CHK_SUM_XOR: return sum8(b, 6) == b[6] && wh25Xor(b);
+    case CHK_SUM: return sum8(b, 6) == b[6];
+    default: return checkPacket(b, l.len);
+  }
+}
+
+int checkedLength(const uint8_t* b, int len) {
+  for (int n = 3; n <= len; n++) if (checkPacket(b, n)) return n;
+  return 0;
+}
+
+int crcLength(const uint8_t* b, int len) {
+  for (int n = 5; n <= len; n++) if (crc8(b, n) == 0) return n;
+  return 0;
+}
+
+static bool bcdOk(uint8_t v) { return (v >> 4) <= 9 && (v & 0x0F) <= 9; }
+
+bool decodeItPlus(const uint8_t* b, int len, uint8_t model, Reading* r) {
+  if (len < 5 || (b[0] >> 4) != 9 || crc8(b, 5) != 0) return false;
+  if ((b[1] & 0x0F) > 9 || !bcdOk(b[2])) return false;
+  memset(r, 0, sizeof(*r));
+  r->model = model;
+  r->weak = true;
+  r->id = (uint32_t)(b[0] & 0x0F) << 2 | b[1] >> 6;
+  r->temp_c10 = (int16_t)((b[1] & 0x0F) * 100 + (b[2] >> 4) * 10 + (b[2] & 0x0F) - 400);
+  r->battery_low = (b[3] & 0x80) != 0;
+  r->have = HAVE_TEMP | HAVE_BATTERY;
+  uint8_t hum = b[3] & 0x7F;
+  if (hum == 0x7D) r->id += 0x40;            // TX25U: its second probe's temperature
+  else if (hum == 0x6A) {}                    // no humidity sensor
+  else if (hum <= 100) { r->humidity = hum; r->have |= HAVE_HUM; }
+  else return false;
+  return true;
 }
 
 static uint32_t u24(const uint8_t* p) { return (uint32_t)p[0] << 16 | (uint32_t)p[1] << 8 | p[2]; }
@@ -105,17 +188,43 @@ static void ws80(const uint8_t* b, Reading* r) {   // also the first 14 bytes of
 }
 
 uint32_t sensorKey(const Reading& r) {
-  return (uint32_t)r.model << 24 ^ r.id ^ (uint32_t)r.channel << 20;
+  return (uint32_t)r.model << 24 ^ r.id ^ (uint32_t)r.channel << 21;
 }
+
+// battery bars out of 5 (6: on USB power), split over two bytes' top bits: low at 1 or 0
+static bool barsLow(uint8_t hi, uint8_t lo) { return ((hi & 0x40) >> 4 | (lo & 0xC0) >> 6) <= 1; }
 
 bool decode(const uint8_t* b, int len, Reading* r) {
   if (len < 1 || !r) return false;
-  int n = packetLength(b[0]);
-  if (n == 0 || len < n || !checkPacket(b, n)) return false;
+  Layout l = layoutOf(b[0]);
+  if (l.len == 0 || len < l.len || !checkAs(b, l) || ignoredFamily(b[0])) {
+    // a La Crosse IT+ sensor (model 9, then its ID): 0x90 is also the WS90's family
+    return (b[0] >> 4) == 9 && decodeItPlus(b, len, TX29IT, r);
+  }
   memset(r, 0, sizeof(*r));
+  if ((b[0] & 0xF0) == 0xD0 || (b[0] & 0xF0) == 0xE0) {   // 0xD_, 0xE_: WH32, WH25, WN32B
+    bool wh25 = (b[0] & 0xF0) == 0xE0 && wh25Xor(b);
+    r->model = (b[0] & 0xF0) == 0xD0 ? WH32 : wh25 ? WH25 : WN32B;
+    r->weak = !wh25;   // a sum only
+    r->id = (uint32_t)(b[0] & 0x0F) << 4 | b[1] >> 4;
+    r->battery_low = (b[1] & 0x08) != 0;
+    uint16_t temp = (uint16_t)(b[1] & 0x03) << 8 | b[2];
+    if (temp > 400 + 700 || b[3] > 100) return false;   // -40..70 °C, 0..100 %
+    r->temp_c10 = (int16_t)temp - 400;
+    r->humidity = b[3];
+    r->have = HAVE_TEMP | HAVE_HUM | HAVE_BATTERY;
+    uint16_t p = (uint16_t)b[4] << 8 | b[5];
+    if (r->model != WH32 && p != 0xFFFF && p != 0) { r->pressure_dhpa = p; r->have |= HAVE_PRESSURE; }
+    return true;
+  }
   switch (b[0]) {
     case 0x24:
       wh65(b, r);
+      // a WS69 adds 8 bytes, with their own check: pressure, 0.01 hPa (0x1FFFF: no sensor)
+      if (len >= 25 && checkPacket(b, 25)) {
+        uint32_t p = (uint32_t)(b[17] & 0x01) << 16 | (uint32_t)b[18] << 8 | b[19];
+        if (p < 0x1FFFF && p > 0) { r->pressure_dhpa = (uint16_t)((p + 5) / 10); r->have |= HAVE_PRESSURE; }
+      }
       break;
     case 0x30:
     case 0x37: {   // WH31B / WN31: the same layout (rtl_433 ambientweather_wh31e.c)
@@ -186,7 +295,7 @@ bool decode(const uint8_t* b, int len, Reading* r) {
       r->pm25_x10 = (uint16_t)(b[7] & 0x3F) << 8 | b[8];
       r->pm10_x10 = (uint16_t)(b[9] & 0x3F) << 8 | b[10];
       r->co2_ppm = (uint16_t)b[11] << 8 | b[12];
-      r->have = HAVE_TEMP | HAVE_HUM | HAVE_PM | HAVE_CO2;
+      r->have = HAVE_TEMP | HAVE_HUM | HAVE_PM | HAVE_PM10 | HAVE_CO2;
       break;
     }
     case 0x51:
@@ -196,6 +305,69 @@ bool decode(const uint8_t* b, int len, Reading* r) {
       r->moisture = b[6];
       r->have = HAVE_MOISTURE | HAVE_BATTERY;
       break;
+    case 0x20:
+      r->model = WN20;
+      r->id = (uint32_t)b[2] << 8 | b[3];
+      r->battery_low = b[4] <= 90;   // 0.02 V units, 2 × AAA: 1.8 V
+      r->rain_um = ((uint32_t)b[5] << 8 | b[6]) * 100;
+      r->have = HAVE_RAIN | HAVE_BATTERY;
+      break;
+    case 0x41: case 0x42:
+      r->model = WH41;
+      r->id = b[1];
+      r->battery_low = barsLow(b[2], b[4]);
+      r->pm25_x10 = (uint16_t)(b[2] & 0x3F) << 8 | b[3];
+      r->have = HAVE_PM | HAVE_BATTERY;   // its PM10 is an estimate from the PM2.5: not shown
+      break;
+    case 0x43:
+      r->model = WH43;
+      r->id = u24(&b[1]);
+      r->battery_low = barsLow(b[4], b[6]);
+      r->pm25_x10 = (uint16_t)(b[4] & 0x3F) << 8 | b[5];
+      r->have = HAVE_PM | HAVE_BATTERY;
+      break;
+    case 0x46: {
+      r->model = WH46;
+      r->id = u24(&b[1]);
+      uint16_t temp = (uint16_t)(b[4] & 0x07) << 8 | b[5];
+      r->temp_c10 = (int16_t)temp - 400;
+      r->humidity = b[6];
+      r->battery_low = barsLow(b[7], b[9]);
+      r->pm25_x10 = (uint16_t)(b[7] & 0x3F) << 8 | b[8];
+      r->pm10_x10 = (uint16_t)(b[9] & 0x3F) << 8 | b[10];
+      r->co2_ppm = (uint16_t)b[11] << 8 | b[12];
+      r->pm1_x10 = (uint16_t)b[13] << 8 | b[14];
+      r->have = HAVE_TEMP | HAVE_HUM | HAVE_PM | HAVE_PM10 | HAVE_PM1 | HAVE_CO2 | HAVE_BATTERY;
+      break;
+    }
+    case 0x55:
+      r->model = WH55;
+      r->weak = true;   // CRC only
+      r->channel = (uint8_t)((b[1] >> 4) + 1);
+      r->id = (uint32_t)(b[1] & 0x0F) << 16 | (uint32_t)b[2] << 8 | b[3];
+      r->battery_low = b[4] <= 1;   // fifths
+      r->leak = (b[7] & 0x40) != 0;
+      r->have = HAVE_LEAK | HAVE_BATTERY;
+      break;
+    case 0x68:
+      r->model = WS68;
+      r->id = (uint32_t)b[2] << 8 | b[3];
+      if (((uint16_t)b[4] << 8 | b[5]) != 0xFFFF) { r->light_lux = ((uint32_t)b[4] << 8 | b[5]) * 10; r->have |= HAVE_LIGHT; }
+      wsCommonWind(b[7], b[10], b[11], b[12], r);
+      if (b[13] != 0xFF) { r->uv_x10 = b[13]; r->have |= HAVE_UV; }
+      break;
+    case 0xA2: {
+      r->model = WH52;
+      r->id = u24(&b[1]);
+      uint16_t temp = (uint16_t)(b[4] & 0x1F) << 8 | b[5];
+      r->temp_c10 = (int16_t)temp - 400;
+      r->moisture = b[6];
+      uint32_t ec = (uint32_t)(b[8] & 0x0F) << 16 | (uint32_t)b[9] << 8 | b[10];
+      r->ec_us = (uint16_t)((ec * 10 + 128) / 256);   // ÷ 25.6
+      r->battery_low = b[20] * 20 < 1300;   // 0.02 V units, one AA
+      r->have = HAVE_TEMP | HAVE_MOISTURE | HAVE_EC | HAVE_BATTERY;
+      break;
+    }
   }
   return true;
 }
@@ -239,6 +411,7 @@ int format(const Reading& r, bool metric, char* buf, size_t size) {
   o.add("%s", modelName(r.model));
   if (r.model == WH31) o.add(" ch%u", r.channel);
   else o.add(" %lx", (unsigned long)r.id);
+  if (r.model != WH31 && r.channel) o.add(" ch%u", r.channel);
   o.add(":");
   if (r.have & HAVE_TEMP) {
     o.add(" ");
@@ -273,8 +446,12 @@ int format(const Reading& r, bool metric, char* buf, size_t size) {
     }
   }
   if (r.have & HAVE_MOISTURE) o.add(" soil %u%%", r.moisture);
-  if (r.have & HAVE_PM) { o.add(" PM2.5 "); tenths(o, r.pm25_x10); o.add(" PM10 "); tenths(o, r.pm10_x10); }
+  if (r.have & HAVE_EC) o.add(" EC %u uS/cm", r.ec_us);
+  if (r.have & HAVE_PM1) { o.add(" PM1 "); tenths(o, r.pm1_x10); }
+  if (r.have & HAVE_PM) { o.add(" PM2.5 "); tenths(o, r.pm25_x10); }
+  if (r.have & HAVE_PM10) { o.add(" PM10 "); tenths(o, r.pm10_x10); }
   if (r.have & HAVE_CO2) o.add(" CO2 %u ppm", r.co2_ppm);
+  if (r.have & HAVE_LEAK) o.add(r.leak ? " LEAK" : " dry");
   if ((r.have & HAVE_BATTERY) && r.battery_low) o.add(" (battery low)");
   return (int)o.n;
 }
