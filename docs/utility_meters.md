@@ -39,8 +39,11 @@ Water 7890: 1,204,601, +33 in 61 min. Leak: none now
   running toilet, a dripping tap, a broken pipe; also a long irrigation schedule or a water softener's
   regeneration). "On and off" means water in at least 50 of the day's 96 periods. "Leaking for 35+
   days" is how long the meter has seen it.
-- **Only your meters.** Every meter in range is heard and listed in `get meter.heard` (to find
-  yours), but only the ones in `set meter.ids` are ever posted: a neighbour's readings are theirs.
+- **Your meters.** Every meter in range is heard and listed in `get meter.heard` (to find yours),
+  but only the ones in `set meter.ids` are posted. `set meter.ids all` posts every meter heard (a
+  post when first heard, then at most every `meter.every` minutes, leak changes at once): with 30
+  or so in range, that's a busy channel. Timed listens are only for meters listed by ID; the
+  others are heard by the search (`meter.duty`).
 - Turning it on turns off Meshtastic, Weather, Aircraft or Airport weather (one listen at a time).
 
 ### Finding your meters
@@ -60,7 +63,7 @@ mesh isn't heard meanwhile), then back to `set meter.duty 10`.
 | Command | |
 |---|---|
 | `meter on` / `meter off` | start or stop (saved) |
-| `set meter.ids <IDs>` | the meters to show, by ID, comma-separated, up to 47 characters (`none`, the default: none shown) |
+| `set meter.ids <IDs>` | the meters to show, by ID, comma-separated, up to 47 characters; `all`: every meter heard; `none`, the default: none shown |
 | `set meter.every <minutes>` | between a meter's posts (default 60; 1-1440) |
 | `set meter.duty <percent>` | the search for meters not heard yet (default 10; 100 = all the time, and the mesh isn't heard) |
 | `meter`, `get meter` | the settings |

@@ -634,6 +634,7 @@ private:
   uint32_t _meter_timed_tries = 0, _meter_last_win = 1000;
   uint8_t _meter_search_ch[3] = {};
   bool meterWanted(uint32_t id) const;
+  bool meterAll() const;
   bool handleMeterCommand(const char* command, char* reply);
   bool isMeterChannel(int idx) const;
   // Tire pressure: TPMS sensors on 315 MHz (MyMeshTpms.cpp, docs/tire_pressure.md), the chosen ones

@@ -461,7 +461,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Usage:**
 - `meter on`, `meter off`
 - `get meter.heard [start]`: every meter heard, strongest first (yours are likely the strongest): type, ID, reading, signal, minutes since heard
-- `set meter.ids <IDs>` (eg. `1234567890,87654321`; `none`, the default: none shown), `set meter.every <minutes>` between a meter's posts (default 60; a leak or backflow change posts at once), `set meter.duty <percent>`: the search for meters not heard yet (default 10; 100 = all the time)
+- `set meter.ids <IDs>` (eg. `1234567890,87654321`; `all`: every meter heard; `none`, the default: none shown), `set meter.every <minutes>` between a meter's posts (default 60; a leak or backflow change posts at once), `set meter.duty <percent>`: the search for meters not heard yet (default 10; 100 = all the time)
 - `meter` or `get meter`, `get meter.stats`
 
 **Example reply:** `> 3: water 1234567890 1,204,511 -71dBm 2m, gas 87654321 48,210 -80dBm 5m, water 1580001234 602,118 -94dBm 9m`

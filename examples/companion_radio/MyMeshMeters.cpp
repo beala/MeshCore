@@ -66,6 +66,9 @@ void MyMesh::applyMeters() {
   }
 }
 
+// 'set meter.ids all': every meter heard is posted (and searched for; only listed ones get timed listens)
+bool MyMesh::meterAll() const { return strcmp(_prefs.meter.ids, "all") == 0; }
+
 // Is this meter in 'set meter.ids' (eg. "1234567890,87654321")?
 bool MyMesh::meterWanted(uint32_t id) const {
   const char* p = _prefs.meter.ids;
@@ -202,7 +205,7 @@ void MyMesh::meterFrame(uint8_t kind, const uint8_t* chips, int len, float rssi)
   m->rssi = (int16_t) rssi;
   if (m->count < 0xFFFF) m->count++;
   m->leak_days = r.leak_days;
-  if (meterWanted(r.id)) meterPost(*m, r);
+  if (meterWanted(r.id) || meterAll()) meterPost(*m, r);
 }
 
 #ifdef FISB_BENCH_TX
@@ -317,7 +320,7 @@ bool MyMesh::meterNextTimed(uint32_t now, int* which, uint32_t* start, uint32_t*
 // Kinds to search for: none once every chosen meter has been heard lately, else all
 uint8_t MyMesh::meterSearchKinds() const {
   if (meter_dbg.kind) return 1 << (meter_dbg.kind - 1);
-  if (!_prefs.meter.ids[0]) return 0x07;
+  if (!_prefs.meter.ids[0] || meterAll()) return 0x07;
   uint32_t now = millis();
   const char* p = _prefs.meter.ids;
   while (*p) {
@@ -508,20 +511,22 @@ bool MyMesh::handleMeterCommand(const char* command, char* reply) {
   if (strncmp(opt, "ids ", 4) == 0 || strcmp(opt, "ids") == 0) {
     const char* v = opt[3] ? &opt[4] : "";
     if (strcmp(v, "none") == 0) v = "";
+    bool all = strcmp(v, "all") == 0;
     if (strlen(v) >= sizeof(_prefs.meter.ids)) {
       sprintf(reply, "Error: at most %d characters", (int) sizeof(_prefs.meter.ids) - 1);
       return true;
     }
-    for (const char* p = v; *p; p++) {
+    for (const char* p = v; *p && !all; p++) {
       if (!isdigit((unsigned char)*p) && *p != ',' && *p != ' ') {
-        strcpy(reply, "Error: meter IDs (numbers, as in 'get meter.heard') separated by commas");
+        strcpy(reply, "Error: meter IDs (numbers, as in 'get meter.heard') separated by commas, or all");
         return true;
       }
     }
     StrHelper::strncpy(_prefs.meter.ids, v, sizeof(_prefs.meter.ids));
     for (int i = 0; i < _meter_seen_n; i++) _meter_seen[i].posted_at = 0;   // each one's reading again
     savePrefs();
-    if (v[0]) sprintf(reply, "OK - showing %s", _prefs.meter.ids);
+    if (all) strcpy(reply, "OK - showing every meter heard (a post when first heard, then at most every 'meter.every' min)");
+    else if (v[0]) sprintf(reply, "OK - showing %s", _prefs.meter.ids);
     else strcpy(reply, "OK - no meters shown (the table still fills: 'get meter.heard')");
     return true;
   }
@@ -561,6 +566,6 @@ bool MyMesh::handleMeterCommand(const char* command, char* reply) {
     else sprintf(reply, "OK - listening %d%% of the time", d);
     return true;
   }
-  strcpy(reply, "Error: set meter.ids <IDs>|none, meter.every <min>, meter.duty <1-100>");
+  strcpy(reply, "Error: set meter.ids <IDs>|all|none, meter.every <min>, meter.duty <1-100>");
   return true;
 }
