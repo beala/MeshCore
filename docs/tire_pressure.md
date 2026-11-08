@@ -37,6 +37,9 @@ Tire aaf9 LOW: 27.5 psi, 68°F
 - Turning it on turns off Meshtastic, Weather, Aircraft, Airport weather or Meters (one listen at
   a time).
 
+
+**In the [fluxcore app](https://fluxcore.party/app/)** (Chrome or Edge, or Bluefy on an iPhone), the Sensors tab lists everything heard with its latest readings: search and filter by name, ID or make, star the ones to post (it sets `tpms.ids`), name them, hide the neighbours', and see each one's readings over time (pressure and temperature, kept in the browser, exported as CSV). Settings and on/off are there too.
+
 ### Finding your car's sensors
 
 Turn it on and drive for a few minutes with the radio in the car, then `get tpms.heard`: your four
@@ -85,6 +88,7 @@ always does.
 | `set tpms.freq <MHz>` | 315 (the default; cars sold in the US) or 433.92 (Europe) |
 | `tpms`, `get tpms` | the settings |
 | `get tpms.heard [start]` | the sensors heard (up to 32), strongest first: make, ID, pressure, signal, minutes since heard |
+| `get tpms.list [start]` | the same for apps, as numbers, a page at a time: `> <sensors> <from> rec;rec..`, rec = make,ID,kPa ×10,°C (empty: not sent),dBm,age s,frames,posted |
 | `get tpms.stats` | frames (and those that didn't read), sensors, posts, time listening, frames read by each make |
 
 ## How it works

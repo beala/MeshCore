@@ -635,6 +635,7 @@ private:
     uint8_t seq_pos;               // R900: its place in the hop sequence when last heard (0xFF: not known)
     int16_t rssi;
     uint8_t kind, utility, leak_days, leak_now, backflow;   // leak_now, backflow: as last posted
+    uint8_t heard_flags;           // as last heard: leak_now | backflow << 2 (for 'get meter.list')
   };
   static const int METER_SEEN = 40;   // 36 meters were in range at the bench
   MeterSeen _meter_seen[METER_SEEN];

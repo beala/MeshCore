@@ -46,6 +46,9 @@ Water 7890: 1,204,601, +33 in 61 min. Leak: none now
   others are heard by the search (`meter.duty`).
 - Turning it on turns off Meshtastic, Weather, Aircraft or Airport weather (one listen at a time).
 
+
+**In the [fluxcore app](https://fluxcore.party/app/)** (Chrome or Edge, or Bluefy on an iPhone), the Sensors tab lists everything heard with its latest readings: search and filter by name, ID or type, star the ones to post (it sets `meter.ids`), name them, hide the neighbours', and see each one's readings over time (the reading and how much was used, kept in the browser, exported as CSV). Settings and on/off are there too.
+
 ### Finding your meters
 
 - **The label**: the ID is printed on the meter's radio module (a puck on the pit lid or a box on
@@ -68,6 +71,7 @@ mesh isn't heard meanwhile), then back to `set meter.duty 10`.
 | `set meter.duty <percent>` | the search for meters not heard yet (default 10; 100 = all the time, and the mesh isn't heard) |
 | `meter`, `get meter` | the settings |
 | `get meter.heard [start]` | the meters heard (up to 40), strongest first: type, ID, reading, signal, minutes since heard |
+| `get meter.list [start]` | the same for apps, as numbers, a page at a time: `> <meters> <from> rec;rec..`, rec = kind,utility,ID,reading,dBm,age s,frames,period ms,leak now (0-2),backflow (0-2),leak days (0-6),posted |
 | `get meter.stats` | frames (and those that didn't read), by kind; meters, posts; timed listens that caught their meter; time listening; "searching" while it is |
 | `get radio.fsk`, `get radio.ook.rx` | the radio's listens and its OOK receiver counters |
 

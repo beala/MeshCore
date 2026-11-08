@@ -190,6 +190,9 @@ The receiver is 238 kHz wide here, which covers the Breeze Pro's 914.938 MHz as 
   `set wx.freq 868` hears the Fine Offset and IT+ ones there.
 - ThermoPro's meat thermometers and Maverick's (not weather sensors).
 
+
+**In the [fluxcore app](https://fluxcore.party/app/)** (Chrome or Edge, or Bluefy on an iPhone), the Sensors tab lists everything heard with its latest readings: search and filter by name, ID or model, star the ones to post (it sets `wx.only`), name them, hide the neighbours', and see each one's readings over time (temperature, wind, rain and the rest, kept in the browser, exported as CSV). Settings and on/off are there too.
+
 ### Sensors the firmware doesn't know
 
 A packet that doesn't decode but still checks out the way its format's packets do (a Fine Offset
@@ -222,6 +225,7 @@ are what's needed to add the model.
 | `wx`, `get wx` | the settings |
 | `get wx.sensors` | each sensor: model, label, packets heard, interval, signal, last heard |
 | `get wx.stats` | packets (and bad ones), posts, listens, and the share of time away from the mesh |
+| `get wx.list [start]` | the same for apps, as numbers, a page at a time: `> <sensors> <from> rec;rec..`, rec = key,model,label,format,packets,interval s,dBm,age s,flags (1 battery low, 2 posted),readings (`t215 h45 w12 ..`: t 0.1 °C, h %, w/g wind and gust 0.1 m/s, d °, r rain µm, x raining, u UV ×10, l lux, p 0.1 hPa, k strikes, K storm km, m soil %, a/b/c PM2.5/PM10/PM1 ×10, o CO₂ ppm, e µS/cm, L leak) |
 | `get wx.unknown [n]` | packets that checked out but didn't decode (models not known yet); with a number, that one's bytes |
 | `get radio.fsk` | the radio's side: listens, time, listens cut short by a transmit, packets |
 

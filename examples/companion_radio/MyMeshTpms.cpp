@@ -330,6 +330,30 @@ bool MyMesh::handleTpmsCommand(const char* command, char* reply) {
     for (int i = 0; i < _tpms_last_len; i++) k += sprintf(&reply[k], "%02x", _tpms_last[i]);
     return true;
   }
+  if (strncmp(command, "get tpms.list", 13) == 0 && (command[13] == 0 || command[13] == ' ')) {
+    // For apps (the fluxcore app's Sensors tab): "> <sensors> <from> rec;rec..." as many as fit, in
+    // the table's order (sensors heard once and waiting for a second frame left out), rec =
+    // make,id hex,kPa x10,°C (empty: not sent),dBm,age s,frames,posted (0/1)
+    int start = command[13] == ' ' ? atoi(&command[14]) : 0;
+    if (start < 0) start = 0;
+    uint8_t order[TPMS_SEEN];
+    int n = 0;
+    for (int i = 0; i < _tpms_seen_n; i++) if (_tpms_seen[i].count) order[n++] = (uint8_t) i;
+    int k = sprintf(reply, "> %d %d", n, start);
+    uint32_t now = millis();
+    for (int i = start; i < n; i++) {
+      const TpmsSeen& s = _tpms_seen[order[i]];
+      char item[80], temp[8] = "";
+      if (s.temp_c != -128) snprintf(temp, sizeof(temp), "%d", s.temp_c);
+      int w = snprintf(item, sizeof(item), "%s%s,%lx,%d,%s,%d,%lu,%u,%d", i == start ? " " : ";", tpms::protoName(s.proto),
+                       (unsigned long) s.id, s.kpa10, temp, s.rssi, (unsigned long)((now - s.heard_at) / 1000), s.count,
+                       tpmsWanted(s.id) ? 1 : 0);
+      if (w >= (int) sizeof(item) || k + w > 150) break;
+      memcpy(&reply[k], item, w + 1);
+      k += w;
+    }
+    return true;
+  }
   if (strcmp(command, "get tpms.heard") == 0 || strncmp(command, "get tpms.heard ", 15) == 0) {
     if (_tpms_seen_n == 0) {
       strcpy(reply, _tpms_active ? "> no sensors heard yet" : "> tires are off ('tpms on')");

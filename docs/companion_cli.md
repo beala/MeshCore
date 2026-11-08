@@ -422,6 +422,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 - `get wx.sensors`: the sensors heard, with packet count, interval, signal and when last heard
 - `get wx.stats`, `get radio.fsk`: packets, listens, and the share of time away from the mesh
 - `set wx.dbg <kbps> <rxbw kHz> <dev kHz> <preamble bits> [sync hex]`: every listen with these settings (0 = its own), until reboot; `set wx.dbgmask <hex>`: only these formats (bits of 1 << format) until `set wx.kind`; for experiments
+- `get wx.list [start]`: every sensor and its readings as numbers, a page at a time, for apps (the [fluxcore app](https://fluxcore.party/app/)'s Sensors tab; format in [weather_sensors.md](weather_sensors.md#settings))
 - `get wx.unknown [n]`: packets that checked out but didn't decode, from models the firmware doesn't know yet; with a number, that one's bytes
 
 **Example reply:** `> WH65 5a x39 every 15s -108dBm 0s ago; WH31 ch2 x10 every 60s -107dBm 51s ago`
@@ -462,6 +463,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 #### Utility meters on 915 MHz (LR2021 only)
 **Usage:**
 - `meter on`, `meter off`
+- `get meter.list [start]`: every meter as numbers, a page at a time, for apps (format in [utility_meters.md](utility_meters.md#settings))
 - `get meter.heard [start]`: every meter heard, strongest first (yours are likely the strongest): type, ID, reading, signal, minutes since heard
 - `set meter.ids <IDs>` (eg. `1234567890,87654321`; `all`: every meter heard; `none`, the default: none shown), `set meter.every <minutes>` between a meter's posts (default 60; a leak or backflow change posts at once), `set meter.duty <percent>`: the search for meters not heard yet (default 10; 100 = all the time)
 - `meter` or `get meter`, `get meter.stats`
@@ -476,6 +478,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 #### Tire pressure on 315 MHz (LR2021 only)
 **Usage:**
 - `tpms on`, `tpms off`
+- `get tpms.list [start]`: every sensor as numbers, a page at a time, for apps (format in [tire_pressure.md](tire_pressure.md#settings))
 - `get tpms.heard [start]`: every sensor heard, strongest first (your car's are the closest): make, ID, pressure, signal, minutes since heard
 - `set tpms.ids <hex IDs>` (`none`, the default: none shown), `set tpms.low <psi>` (an alert below it; default 0: off), `set tpms.every <minutes>` (default 30), `set tpms.duty <percent>` (default 10), `set tpms.freq <MHz>` (default 315; 433.92 in Europe)
 - `tpms` or `get tpms`, `get tpms.stats`

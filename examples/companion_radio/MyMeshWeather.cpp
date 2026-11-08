@@ -412,6 +412,42 @@ bool MyMesh::handleWeatherCommand(const char* command, char* reply) {
     }
     return true;
   }
+  if (strncmp(command, "get wx.list", 11) == 0 && (command[11] == 0 || command[11] == ' ')) {
+    // For apps (the fluxcore app's Sensors tab): "> <sensors> <from> rec;rec..." as many as fit, rec =
+    // key hex,model,label,format,packets,every s,dBm,age s,flags (1 battery low, 2 posted: in
+    // 'wx.only' or it's empty),readings: space-separated letter+number, in the units sent (t 0.1 °C,
+    // h %, w g wind/gust 0.1 m/s, d °, r rain µm, x raining, u UV x10, l lux, p 0.1 hPa, k strikes,
+    // K storm km, m soil %, a b c PM2.5/PM10/PM1 x10, o CO2 ppm, e µS/cm, L leak)
+    int start = command[11] == ' ' ? atoi(&command[12]) : 0;
+    if (start < 0) start = 0;
+    int k = sprintf(reply, "> %d %d", _wx.count(), start);
+    uint32_t now = millis();
+    for (int i = start; i < _wx.count(); i++) {
+      const wxsensor::Tracker::Sensor* s = _wx.get(i);
+      const wxsensor::Reading& r = s->last;
+      char label[12], item[160];
+      sensorLabel(r, label, sizeof(label));
+      int w = snprintf(item, sizeof(item), "%s%lx,%s,%s,%u,%lu,%lu,%d,%lu,%d,", i == start ? " " : ";",
+                       (unsigned long) s->key, wxsensor::modelName(r.model), label, r.proto, (unsigned long) s->count,
+                       (unsigned long)(s->period / 1000), s->rssi, (unsigned long)((now - s->heard_at) / 1000),
+                       (r.battery_low ? 1 : 0) | (weatherShown(r) ? 2 : 0));
+      const char* sep = "";
+#define WXV(bit, tag, val) if ((r.have & wxsensor::bit) && w < (int) sizeof(item)) { \
+        w += snprintf(&item[w], sizeof(item) - w, "%s" tag "%ld", sep, (long)(val)); sep = " "; }
+      WXV(HAVE_TEMP, "t", r.temp_c10) WXV(HAVE_HUM, "h", r.humidity) WXV(HAVE_WIND, "w", r.wind_dms)
+      WXV(HAVE_GUST, "g", r.gust_dms) WXV(HAVE_DIR, "d", r.wind_dir) WXV(HAVE_RAIN, "r", r.rain_um)
+      WXV(HAVE_RAINING, "x", r.raining) WXV(HAVE_UV, "u", r.uv_x10) WXV(HAVE_LIGHT, "l", r.light_lux)
+      WXV(HAVE_PRESSURE, "p", r.pressure_dhpa) WXV(HAVE_LIGHTNING, "k", r.strike_count)
+      WXV(HAVE_LIGHTNING, "K", r.strike_km) WXV(HAVE_MOISTURE, "m", r.moisture) WXV(HAVE_PM, "a", r.pm25_x10)
+      WXV(HAVE_PM10, "b", r.pm10_x10) WXV(HAVE_PM1, "c", r.pm1_x10) WXV(HAVE_CO2, "o", r.co2_ppm)
+      WXV(HAVE_EC, "e", r.ec_us) WXV(HAVE_LEAK, "L", r.leak)
+#undef WXV
+      if (w >= (int) sizeof(item) || k + w > 150) break;
+      memcpy(&reply[k], item, w + 1);
+      k += w;
+    }
+    return true;
+  }
   if (strcmp(command, "get wx.unknown") == 0 || strncmp(command, "get wx.unknown ", 15) == 0) {
     // packets that checked out but didn't decode, by kind; with a number, that one's bytes
     const int N = (int)(sizeof(_wx_unk) / sizeof(_wx_unk[0]));

@@ -205,6 +205,7 @@ void MyMesh::meterFrame(uint8_t kind, const uint8_t* chips, int len, float rssi)
   m->rssi = (int16_t) rssi;
   if (m->count < 0xFFFF) m->count++;
   m->leak_days = r.leak_days;
+  m->heard_flags = (uint8_t)((r.leak_now & 3) | (r.backflow & 3) << 2);
   if (meterWanted(r.id) || meterAll()) meterPost(*m, r);
 }
 
@@ -454,6 +455,28 @@ bool MyMesh::handleMeterCommand(const char* command, char* reply) {
   if (strcmp(command, "get meter.last") == 0) {   // the last frame that didn't read: its raw chips
     int k = sprintf(reply, "> %s %d:", meters::kindName(_meter_last_bad_kind), _meter_last_bad_len);
     for (int i = 0; i < _meter_last_bad_len; i++) k += sprintf(&reply[k], "%02x", _meter_last_bad[i]);
+    return true;
+  }
+  if (strncmp(command, "get meter.list", 14) == 0 && (command[14] == 0 || command[14] == ' ')) {
+    // For apps (the fluxcore app's Sensors tab): "> <meters> <from> rec;rec..." as many as fit, in the
+    // table's order, rec = kind,utility,id,reading,dBm,age s,frames,period ms (0: not yet),leak now
+    // (0-2),backflow (0-2),leak days (0-6),posted (0/1)
+    int start = command[14] == ' ' ? atoi(&command[15]) : 0;
+    if (start < 0) start = 0;
+    int k = sprintf(reply, "> %d %d", _meter_seen_n, start);
+    uint32_t now = millis();
+    for (int i = start; i < _meter_seen_n; i++) {
+      const MeterSeen& m = _meter_seen[i];
+      char item[96];
+      int w = snprintf(item, sizeof(item), "%s%s,%s,%lu,%lu,%d,%lu,%u,%lu,%u,%u,%u,%d", i == start ? " " : ";",
+                       meters::kindName(m.kind), meters::utilityName(m.utility), (unsigned long) m.id,
+                       (unsigned long) m.total, m.rssi, (unsigned long)((now - m.heard_at) / 1000), m.count,
+                       (unsigned long)(m.period_us / 1000), m.heard_flags & 3, (m.heard_flags >> 2) & 3, m.leak_days,
+                       meterWanted(m.id) || meterAll() ? 1 : 0);
+      if (w >= (int) sizeof(item) || k + w > 150) break;
+      memcpy(&reply[k], item, w + 1);
+      k += w;
+    }
     return true;
   }
   if (strcmp(command, "get meter.heard") == 0 || strncmp(command, "get meter.heard ", 16) == 0) {
