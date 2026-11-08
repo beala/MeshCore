@@ -3,7 +3,9 @@
 //              direct message, repair, show into buffers of every size, join readings.
 // Mode byte bit 0 set: the rest is [hops][flips][flip positions...][text]: a real channel message with
 //              those bits flipped, read and joined with a second copy flipped elsewhere. Checks what's
-//              read is what was sent.
+//              read is what was sent, or else (a copy marked fixed) that its bytes really match its MAC:
+//              the MAC is 2 bytes, and libFuzzer solves memcmp, so it finds true collisions on demand;
+//              those are the packet format's limit, not a bug. A fixed copy that fails its MAC is one.
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -53,6 +55,20 @@ static void readAll(const uint8_t* secret, uint8_t* raw, int len, Copy* out) {
     (void)sameMessage(f, raw, len, r);
     if (out && kind == KIND_CHANNEL) { takeCopy(raw, r, fixed, *out); out = NULL; }
   }
+}
+
+// a fixed copy's bytes against its MAC (or the other copy's, for a merged one)
+static bool macMatches(const uint8_t* secret, const Copy& c, const uint8_t* other_mac) {
+  uint8_t buf[CIPHER_MAC_SIZE + MAX_PIECES * PIECE], tmp[MAX_PIECES * PIECE];
+  int ct_len = c.r.n * PIECE;
+  memcpy(&buf[CIPHER_MAC_SIZE], c.ct, ct_len);
+  const uint8_t* macs[2] = { c.mac, other_mac };
+  for (const uint8_t* mac : macs) {
+    if (!mac) continue;
+    memcpy(buf, mac, CIPHER_MAC_SIZE);
+    if (mesh::Utils::MACThenDecrypt(secret, tmp, buf, CIPHER_MAC_SIZE + ct_len) > 0) return true;
+  }
+  return false;
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
@@ -129,12 +145,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       int pi = first_piece + i;
       if (pi * PIECE >= ct_len) abort();
       // a piece judged good is real except by chance: AES noise passing the text test (1 in 87,000)
-      if (memcmp(&c->r.pt[i * PIECE], &real[pi * PIECE], PIECE) != 0 && c->fixed) abort();
+      if (memcmp(&c->r.pt[i * PIECE], &real[pi * PIECE], PIECE) != 0 && c->fixed && !macMatches(secret, *c, NULL)) abort();
     }
   }
+  uint8_t b_mac[CIPHER_MAC_SIZE];
+  memcpy(b_mac, b.mac, sizeof(b_mac));
   if (a.r.n && b.r.n && merge(a, b, secret)) {
     checkShow(a.r, KIND_CHANNEL);
-    if (a.fixed && a.r.first && memcmp(a.r.pt, real, a.r.n * PIECE) != 0) abort();
+    if (a.fixed && a.r.first && memcmp(a.r.pt, real, a.r.n * PIECE) != 0 && !macMatches(secret, a, b_mac)) abort();
   }
   return 0;
 }

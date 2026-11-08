@@ -44,7 +44,7 @@ run uat -max_len=300 .pio/fuzz/corpus_uat
 run fisb -max_len=600 .pio/fuzz/corpus_fisb
 run meters -max_len=64 .pio/fuzz/corpus_meters
 run clone -max_len=2000 .pio/fuzz/corpus_clone
-run damaged -max_len=300 .pio/fuzz/corpus_damaged
+run damaged -max_len=300 .pio/fuzz/corpus_damaged test/fuzz/regress/damaged   # inputs that found bugs: replayed first
 wait
 
 found=0

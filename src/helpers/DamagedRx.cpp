@@ -41,16 +41,16 @@ static int textStart(const uint8_t* p, Kind kind) {
   return (kind == KIND_DIRECT && txt_type == 2) ? 9 : 5;   // signed: 4 bytes of the sender's key first
 }
 
-bool isFirstPiece(const uint8_t* p, Kind kind, uint32_t now) {
+// A timestamp and flags as a message's first piece has them (its text not looked at)
+static bool hasStamp(const uint8_t* p, Kind kind, uint32_t now) {
   uint32_t ts = (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
   if (ts < TS_2023) return false;
   if (now >= TS_2023 ? ts > now + YEAR : ts > 0x7FFFFFFFUL) return false;
-  uint8_t flags = p[4];
-  if (kind == KIND_CHANNEL) {
-    if (flags > 3) return false;               // plain text only, a few attempt bits
-  } else {
-    if ((flags >> 2) > 2) return false;        // plain, CLI or signed
-  }
+  return kind == KIND_CHANNEL ? p[4] <= 3 : (p[4] >> 2) <= 2;
+}
+
+bool isFirstPiece(const uint8_t* p, Kind kind, uint32_t now) {
+  if (!hasStamp(p, kind, now)) return false;   // channel: plain text, a few attempt bits; direct: plain, CLI or signed
   int s = textStart(p, kind);
   if (s >= PIECE) return true;
   if (p[s] == 0) return false;                 // an empty message
@@ -170,14 +170,19 @@ int decode(const uint8_t* secret, const uint8_t* raw, int len, Kind kind, int ct
   // where the message starts: a piece with a timestamp (the one the header points to, if it has one),
   // else where the header says, else the first piece that reads as text
   int s = -1;
-  if (hint >= 0 && first[hint]) s = hint;
+  // the header's start, when its piece has a timestamp: even if its text doesn't read (damaged, or
+  // not UTF-8), a later piece whose text happens to look like a timestamp isn't the start
+  if (hint >= 0 && (first[hint] || hasStamp(&pt[hint * PIECE], kind, now))) s = hint;
   for (int i = 0; s < 0 && i < total; i++) if (first[i]) s = i;
   if (s < 0) s = hint;
   for (int i = 0; s < 0 && i < total; i++) if (text[i]) s = i;
   if (s < 0) return 0;
 
-  out.first = first[s];
-  out.start_known = first[s] || s == hint;
+  // a timestamp somewhere the header (read intact) doesn't point is text that happens to look like
+  // one, or a wrongly read header: shown, but not taken as the start (no repair or MAC check from it)
+  bool agrees = hint < 0 || s == hint;
+  out.first = first[s] && agrees;
+  out.start_known = out.first || s == hint;
   out.n = total - s;
   out.ct_off = start + s * PIECE;
   for (int i = 0; i < out.n; i++) {
@@ -203,8 +208,11 @@ bool repair(const uint8_t* secret, uint8_t* raw, int len, Result& r, Kind kind) 
   uint16_t all = (uint16_t)((1u << r.n) - 1);
   int bad = r.n - countGood(r.good);
   if (bad > 1) return false;
-  if (macOk(secret, &raw[mac_off], ct_len)) {   // every piece came through: the damage was elsewhere
-    r.good = all;
+  if (macOk(secret, &raw[mac_off], ct_len)) {
+    // every piece came through: the damage was elsewhere. With a piece that doesn't read as text,
+    // the match may be chance (1 in 65,536) on damaged bytes: leave that piece lost, or joining this
+    // copy with another would check the same bytes against the same MAC and take it as proof
+    if (bad == 0) r.good = all;
     return bad == 0;
   }
   int from, to;   // the bytes to try flipping
@@ -357,6 +365,8 @@ bool merge(Copy& m, const Copy& in_, const uint8_t* secret) {
   bool same = shared_first || shared >= 2 ||
               (m.r.start_known && in_.r.start_known && m.r.n == in_.r.n && memcmp(m.mac, in_.mac, CIPHER_MAC_SIZE) == 0);
   if (!same) return false;
+  if (m.fixed) return true;                // checked against its MAC already: nothing to take
+  if (in_.fixed) { m = in_; return true; }   // the checked copy wins over pieces that only read as text
 
   static Copy in;   // big: not on the stack
   in = in_;
@@ -375,9 +385,7 @@ bool merge(Copy& m, const Copy& in_, const uint8_t* secret) {
     memcpy(m.mac, in.mac, CIPHER_MAC_SIZE);
   }
   if (in.r.first) m.r.first = true;
-  if (in.fixed) {
-    m.fixed = true;
-  } else if (!m.fixed && m.r.first && m.r.good == (uint16_t)((1u << n) - 1)) {
+  if (m.r.first && m.r.good == (uint16_t)((1u << n) - 1)) {
     // whole now: check it against either copy's MAC
     uint8_t buf[CIPHER_MAC_SIZE + MAX_PIECES * PIECE];
     int ct_len = n * PIECE;
