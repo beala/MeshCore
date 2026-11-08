@@ -28,7 +28,6 @@
 #include <RTClib.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/meters/Meters.h>
-#include <helpers/tpms/Tpms.h>
 #include <helpers/BaseSerialInterface.h>
 #include <helpers/DamagedRx.h>
 #include <helpers/FreqPrint.h>
@@ -451,11 +450,11 @@ private:
   // The synthetic channels have fixed slots after the regular ones, whichever are on, so a client
   // never sees one move: Meshtastic, then Weather, then Aircraft. A slot whose feature is off reads
   // as an empty channel.
-  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3, VCH_METAR = 4, VCH_METERS = 5, VCH_TPMS = 6 };
+  enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3, VCH_METAR = 4, VCH_METERS = 5 };
   // One listen at a time: Meshtastic, weather and aircraft each take the radio away from the mesh
   // in their own way, so turning one on turns the others off. 'radar' and copying a radio pause
   // whichever is on while they run.
-  enum { LISTEN_MT = 1, LISTEN_WX = 2, LISTEN_AIR = 4, LISTEN_METAR = 8, LISTEN_METERS = 16, LISTEN_TPMS = 32 };
+  enum { LISTEN_MT = 1, LISTEN_WX = 2, LISTEN_AIR = 4, LISTEN_METAR = 8, LISTEN_METERS = 16 };
   void listenOthersOff(uint8_t keep, char* off, size_t n);   // off: a note for the reply, "" if none were on
   void pauseListens();
   void resumeListens();
@@ -463,7 +462,7 @@ private:
   bool listensBusy(char* reply) const;
   void drainFsk();                   // drop packets queued by a listen that's over   // paused: an error in reply, and true
   int virtualChannelCount() const {
-    return _tpms_active ? 7 : _meter_active ? 6 : _metar_active ? 5 : _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0;
+    return _meter_active ? 6 : _metar_active ? 5 : _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0;
   }
   bool isVirtualChannelSlot(int idx) const;
 
@@ -655,34 +654,6 @@ private:
   bool meterAll() const;
   bool handleMeterCommand(const char* command, char* reply);
   bool isMeterChannel(int idx) const;
-  // Tire pressure: TPMS sensors on 315 MHz (MyMeshTpms.cpp, docs/tire_pressure.md), the chosen ones
-  // shown in a "Tires" channel
-  bool _tpms_active = false, _tpms_listening = false;
-  uint8_t _tpms_turn = 0, _tpms_air = 0;   // the listen's setting, in turn
-  uint32_t _tpms_next = 0, _tpms_since = 0, _tpms_listen_ms = 0;
-  uint32_t _tpms_frames = 0, _tpms_bad = 0, _tpms_shown = 0;
-  uint16_t _tpms_air_ok[8] = {};
-  uint8_t _tpms_last[26], _tpms_last_len = 0, _tpms_last_air = 0;
-  struct TpmsSeen {
-    uint32_t id, heard_at, posted_at, pending_at;
-    uint16_t count;
-    int16_t kpa10, pending_kpa10, posted_psi10, rssi;
-    int8_t temp_c;                 // -128: not sent
-    uint8_t proto, air;
-    bool low_posted;
-  };
-  static const int TPMS_SEEN = 32;   // a parking lot's worth
-  TpmsSeen _tpms_seen[TPMS_SEEN];
-  uint8_t _tpms_seen_n = 0;
-  TpmsSeen* tpmsSeen(uint8_t proto, uint32_t id);
-  void applyTpms();
-  void tpmsLoop();
-  void tpmsFrame(int air, const uint8_t* chips, int len, float rssi);
-  void tpmsPost(TpmsSeen& s, const tpms::Reading& r);
-  uint16_t tpmsAirs() const;
-  bool tpmsWanted(uint32_t id) const;
-  bool handleTpmsCommand(const char* command, char* reply);
-  bool isTpmsChannel(int idx) const;
   void describePlane(const Plane& p, char* out, size_t n);
   bool weatherShown(const wxsensor::Reading& r) const;
   void showWeather(const char* text, int8_t snr_x4);
