@@ -307,6 +307,25 @@ private:
       def("every", every);
     }
   };
+  // Tire pressure sensors (TPMS) on 315 MHz, the chosen ones shown as an extra channel
+  class TpmsPrefs : public ConfigSerializer {
+  public:
+    uint8_t en = 0;
+    uint8_t duty = 10;            // % of the time spent listening (100 = all the time)
+    float freq = 315.0f;          // MHz: 315 (US), 433.92 (Europe); 902-928 for bench tests
+    char ids[48] = "";            // comma-separated sensor IDs (hex) to show (empty: none)
+    uint16_t every = 30;          // minutes between a sensor's posts (a change of a psi, and alerts: at once)
+    uint8_t low = 0;              // psi: an alert below this (0 = off)
+  protected:
+    void structure() override {
+      def("en", en);
+      def("duty", duty);
+      def("freq", freq);
+      def("ids", ids, sizeof(ids));
+      def("every", every);
+      def("low", low);
+    }
+  };
   // Packets that fail their CRC check: read what came through and show it in an extra channel
   class DamagedPrefs : public ConfigSerializer {
   public:
@@ -327,6 +346,7 @@ public:
   DamagedPrefs dmg;
   MetarPrefs metar;
   MeterPrefs meter;
+  TpmsPrefs tpms;
 private:
 
   class CompanionPrefs : public ConfigSerializer {
@@ -434,6 +454,7 @@ protected:
     def("dmg", dmg);
     def("metar", metar);
     def("meter", meter);
+    def("tpms", tpms);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif

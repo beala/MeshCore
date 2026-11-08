@@ -123,11 +123,32 @@ TEST(Meters, ChannelsCoverWhereTheyWereHeard) {
   }
   EXPECT_NEAR(910.30f, channelMHz(KIND_R900, 0), 0.01f);
   EXPECT_NEAR(920.35f, channelMHz(KIND_R900, channels(KIND_R900) - 1), 0.01f);
-  EXPECT_NEAR(910.2f, channelMHz(KIND_SCMPLUS, 0), 0.001f);
+  EXPECT_NEAR(910.0f, channelMHz(KIND_SCMPLUS, 0), 0.001f);   // one was heard at 910.0
   EXPECT_NEAR(920.0f, channelMHz(KIND_SCMPLUS, channels(KIND_SCMPLUS) - 1), 0.001f);
   EXPECT_NEAR(910.3f, channelMHz(KIND_R900, -5), 0.01f);    // clamped
   EXPECT_EQ(14000u, periodMs(KIND_R900));
   EXPECT_EQ(15000u, periodMs(KIND_SCMPLUS));
+}
+
+TEST(Meters, R900HopSequence) {
+  // 50 different channels, all on the grid; a channel's place and the place's channel agree
+  bool seen[78] = {};
+  for (int p = 0; p < R900_HOPS; p++) {
+    int ch = r900HopChannel(p);
+    ASSERT_GE(ch, 0);
+    ASSERT_LT(ch, channels(KIND_R900));
+    EXPECT_FALSE(seen[ch]) << ch;
+    seen[ch] = true;
+    EXPECT_EQ(p, r900HopPos(ch));
+  }
+  EXPECT_EQ(-1, r900HopPos(0));   // not in the sequence
+  EXPECT_EQ(r900HopChannel(3), r900HopChannel(53));
+  EXPECT_EQ(r900HopChannel(49), r900HopChannel(-1));
+  // a meter seen in the recordings: channels 11, 21, 17 (as indexes from 910.3035) 2 and 4 sends apart
+  int p = r900HopPos(11);
+  ASSERT_GE(p, 0);
+  EXPECT_EQ(21, r900HopChannel(p + 2));
+  EXPECT_EQ(17, r900HopChannel(p + 6));
 }
 
 TEST(Meters, Names) {

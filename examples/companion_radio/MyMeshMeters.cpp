@@ -98,6 +98,7 @@ MyMesh::MeterSeen* MyMesh::meterSeen(uint8_t kind, uint32_t id) {
   memset(e, 0, sizeof(*e));
   e->id = id;
   e->kind = kind;
+  e->seq_pos = 0xFF;
   return e;
 }
 
@@ -194,6 +195,10 @@ void MyMesh::meterFrame(uint8_t kind, const uint8_t* chips, int len, float rssi)
   m->utility = r.utility;
   m->total = r.total;
   m->heard_at = now;
+  if (kind == meters::KIND_R900 && _meter_listen_ch >= 0) {   // where it is in the hop sequence
+    int p = meters::r900HopPos(_meter_listen_ch);
+    if (p >= 0) m->seq_pos = (uint8_t) p;
+  }
   m->rssi = (int16_t) rssi;
   if (m->count < 0xFFFF) m->count++;
   m->leak_days = r.leak_days;
@@ -281,7 +286,7 @@ static uint32_t meterSlack(uint8_t kind, uint32_t periods) {
 static const uint32_t METER_TRACK_MAX_MS = 3UL * 3600 * 1000;   // not heard for 3 h: search for it again
 
 // The next timed listen: the wanted meter due soonest. False if there's none to time.
-bool MyMesh::meterNextTimed(uint32_t now, int* which, uint32_t* start, uint32_t* end) const {
+bool MyMesh::meterNextTimed(uint32_t now, int* which, uint32_t* start, uint32_t* end, uint32_t* periods) const {
   bool found = false;
   for (int i = 0; i < _meter_seen_n; i++) {
     const MeterSeen& m = _meter_seen[i];
@@ -303,6 +308,7 @@ bool MyMesh::meterNextTimed(uint32_t now, int* which, uint32_t* start, uint32_t*
       *which = i;
       *start = s;
       *end = t + w;
+      *periods = n;
     }
   }
   return found;
@@ -358,14 +364,21 @@ void MyMesh::meterLoop() {
 
   // a chosen meter due: its listen first
   int which = -1;
-  uint32_t t_start = 0, t_end = 0;
-  bool timed = meterNextTimed(now, &which, &t_start, &t_end);
+  uint32_t t_start = 0, t_end = 0, periods = 0;
+  bool timed = meterNextTimed(now, &which, &t_start, &t_end, &periods);
   if (timed && (int32_t)(t_start - now) <= 0) {
     MeterSeen& m = _meter_seen[which];
-    int nch = meters::channels(m.kind);
-    m.ch_turn = (uint8_t)((m.ch_turn + 11) % nch);   // 11: no common factor with 50 or 78
+    int ch;
+    if (m.kind == meters::KIND_R900 && m.seq_pos != 0xFF) {   // where its hop sequence says it'll be
+      ch = meters::r900HopChannel(m.seq_pos + (int) periods);
+    } else {   // a channel in turn: one try in 50-78
+      int nch = meters::channels(m.kind);
+      m.ch_turn = (uint8_t)((m.ch_turn + 11) % nch);   // 11: no common factor with 51 or 78
+      ch = m.ch_turn;
+    }
     _meter_kind = m.kind;
-    float freq = _meter_center > 0 ? _meter_center : meters::channelMHz(m.kind, m.ch_turn);
+    _meter_listen_ch = (int16_t)(_meter_center > 0 ? -1 : ch);
+    float freq = _meter_center > 0 ? _meter_center : meters::channelMHz(m.kind, ch);
     if (_radio->startFskListen(meterListen(m.kind, freq), t_end - now)) {
       _meter_listening = true;
       _meter_timed = true;
@@ -393,6 +406,7 @@ void MyMesh::meterLoop() {
   int nch = meters::channels(kind);
   _meter_search_ch[_meter_turn] = (uint8_t)((_meter_search_ch[_meter_turn] + 7) % nch);
   float freq = _meter_center > 0 ? _meter_center : meters::channelMHz(kind, _meter_search_ch[_meter_turn]);
+  _meter_listen_ch = (int16_t)(_meter_center > 0 ? -1 : _meter_search_ch[_meter_turn]);
   _meter_kind = kind;
   if (_radio->startFskListen(meterListen(kind, freq), win)) {
     _meter_listening = true;

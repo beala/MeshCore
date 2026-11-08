@@ -51,10 +51,16 @@ bool read(uint8_t kind, const uint8_t* chips, int n_bytes, Reading* r);
 const char* kindName(uint8_t kind);   // "R900", "SCM", "SCM+"
 
 // Where and how often each kind sends, as measured near the bench (an RTL-SDR, 2026-11-07): R900s
-// hop over channels 130.5 kHz apart (910.30-920.35 MHz) every 14.0 s; Itron SCM+ over a 200 kHz grid
-// (910.2-920.0 MHz) every 15.000 s (SCM taken as the same). The LR2021's OOK receiver takes one
+// hop over channels 130.5 kHz apart (910.30-920.35 MHz) every 14.000 s; Itron SCM+ over a 200 kHz grid
+// (910.0-920.0 MHz) every 15.000 s (SCM taken as the same). The LR2021's OOK receiver takes one
 // channel at a time: 153.8 kHz is its widest bandwidth that works at 32.768 kchip/s.
 int channels(uint8_t kind);
+// R900s all hop through the same 50 channels in the same order, each meter at its own place in it
+// (measured with an RTL-SDR: frames a multiple of 50 sends apart always on the same channel). One
+// frame heard on a channel tells where a meter is; its next frame is on the following one.
+static const int R900_HOPS = 50;
+int r900HopChannel(int pos);       // the channel (0..77) at a place in the sequence (any int: taken mod 50)
+int r900HopPos(int ch);            // the place of a channel in the sequence, -1 if it isn't in it
 float channelMHz(uint8_t kind, int i);   // i in 0 .. channels(kind)-1
 uint32_t periodMs(uint8_t kind);
 static const float RX_BW_KHZ = 153.8f;

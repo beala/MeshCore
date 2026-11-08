@@ -31,13 +31,35 @@ static const Air AIR[KINDS] = {
   { 0x966A, 16, { 0x99, 0x5A, 0x56, 0xA9 }, 4, 26 },   // SCM+
 };
 
-int channels(uint8_t kind) { return kind == KIND_R900 ? 78 : 50; }
+int channels(uint8_t kind) { return kind == KIND_R900 ? 78 : 51; }
+
+// R900 channel numbers (910.3035 + 0.1305 * n MHz) in hop order, from an hour of RTL-SDR recordings
+// at 910.1-919.7 MHz (2026-11-07): 6 meters, 49 places seen (place 8, channel 8, fills the gap in its
+// run 6-10). From each meter's first frame it gives the channel of all 328 of its later ones.
+static const int8_t R900_SEQ[R900_HOPS] = {
+  17, 54, 39, 64, 12, 49, 22, 59,  8, 45,
+  18, 55, 40, 65, 13, 50, 35, 60,  9, 46,
+  19, 56, 41, 66, 14, 51, 36, 61, 10, 47,
+  20, 57, 42, 67, 15, 52, 37, 62,  6, 43,
+  16, 53, 38, 63, 11, 48, 21, 58,  7, 44,
+};
+
+int r900HopChannel(int pos) {
+  pos %= R900_HOPS;
+  if (pos < 0) pos += R900_HOPS;
+  return R900_SEQ[pos];
+}
+
+int r900HopPos(int ch) {
+  for (int i = 0; i < R900_HOPS; i++) if (R900_SEQ[i] == ch) return i;
+  return -1;
+}
 
 float channelMHz(uint8_t kind, int i) {
   if (i < 0) i = 0;
   int n = channels(kind);
   if (i >= n) i = n - 1;
-  return kind == KIND_R900 ? 910.3035f + 0.1305f * i : 910.2f + 0.2f * i;
+  return kind == KIND_R900 ? 910.3035f + 0.1305f * i : 910.0f + 0.2f * i;
 }
 
 uint32_t periodMs(uint8_t kind) { return kind == KIND_R900 ? 14000 : 15000; }

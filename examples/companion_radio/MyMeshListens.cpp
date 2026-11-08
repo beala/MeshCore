@@ -38,6 +38,11 @@ void MyMesh::listenOthersOff(uint8_t keep, char* off, size_t n) {
     applyMeters();
     addName(off, n, "Meters");
   }
+  if (!(keep & LISTEN_TPMS) && _prefs.tpms.en) {
+    _prefs.tpms.en = 0;
+    applyTpms();
+    addName(off, n, "Tires");
+  }
   drainFsk();   // packets the last listen left queued belong to the one turned off
   if (off[0]) {   // as a note for the reply: " (Weather off: one at a time)"
     char names[40];
@@ -66,6 +71,7 @@ void MyMesh::pauseListens() {
   _air_listening = false;
   _metar_listening = false;
   _meter_listening = false;
+  _tpms_listening = false;
   drainFsk();
   if (_mt_active && _radio->isSideListening()) {
     _radio->stopSideListen();   // Semtech's patch back in the chip while the radio is busy elsewhere

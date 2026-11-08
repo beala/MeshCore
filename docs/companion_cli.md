@@ -406,7 +406,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - The radio also listens to a Meshtastic channel, and its texts show in the app as one more channel, "Meshtastic LongFast", after your own. Receive only: text typed there is not sent. See [Meshtastic channel](meshtastic_channel.md).
 - Settings are saved. Reconnect the app after `mt on` so it lists the new channel.
-- Meshtastic (`mt`), weather (`wx`), aircraft (`air`), airport weather (`metar`) and meters (`meter`) are one at a time: turning one on turns the others off (the reply says which). `radar`, copying a radio (`clone`) and `find range` pause whichever is on until they finish. A radio updated from firmware that let several be on keeps the first of Meshtastic, Weather, Aircraft, Airport weather, Meters.
+- Meshtastic (`mt`), weather (`wx`), aircraft (`air`), airport weather (`metar`), meters (`meter`) and tires (`tpms`) are one at a time: turning one on turns the others off (the reply says which). `radar`, copying a radio (`clone`) and `find range` pause whichever is on until they finish. A radio updated from firmware that let several be on keeps the first of Meshtastic, Weather, Aircraft, Airport weather, Meters, Tires.
 
 #### Weather sensors (LR2021 only)
 **Usage:**
@@ -427,7 +427,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - Ecowitt, Ambient Weather, other Fine Offset and La Crosse View sensors show in the app as one more channel, "Weather", after your own and the Meshtastic slot. Receive only. See [Weather sensors](weather_sensors.md).
 - Settings are saved. Reconnect the app after `wx on` so it lists the new channel.
-- One at a time with `mt`, `air`, `metar` and `meter` (see above).
+- One at a time with `mt`, `air`, `metar`, `meter` and `tpms` (see above).
 
 #### Aircraft on 978 MHz (LR2021 only)
 **Usage:**
@@ -441,7 +441,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 
 **Notes:**
 - Aircraft reporting on UAT (978 MHz) and 1090 MHz ADS-B show in the app as one more receive-only channel, "Aircraft". See [Aircraft](aircraft.md).
-- One at a time with `mt`, `wx`, `metar` and `meter` (see above).
+- One at a time with `mt`, `wx`, `metar`, `meter` and `tpms` (see above).
 - `radar [seconds] [threshold] [MHz]`, `get radar`, `get radar.bursts`, `radar stop`: listen on 1030 MHz and work out how fast the radars around turn (LR2021). See [Radar sweep detector](radar.md). Meshtastic, weather or aircraft pause meanwhile.
 
 #### Airport weather on 978 MHz (LR2021 only)
@@ -455,7 +455,7 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - METARs from FAA ground stations (FIS-B) show in the app in plain words as one more receive-only channel, "Airport weather", each report once: `KLMO: 53°F, humidity 43%. Few clouds at 8,000 ft. Wind NW 14 mph. Visibility 10+ mi. Pressure 30.02 inHg. (7 min ago)`. See [Airport weather](airport_weather.md).
 - Settings are saved. Reconnect the app after `metar on` so it lists the new channel.
-- One at a time with `mt`, `wx`, `air` and `meter` (see above).
+- One at a time with `mt`, `wx`, `air`, `meter` and `tpms` (see above).
 
 #### Utility meters on 915 MHz (LR2021 only)
 **Usage:**
@@ -469,7 +469,21 @@ Radio parameters are common to all roles and handled by `CommonRadioPrefs`.
 **Notes:**
 - Neptune R900 water meters and Itron ERT modules (SCM, SCM+: gas, electric, water) send their readings around 915 MHz. The ones chosen with `set meter.ids` show in the app as one more receive-only channel, "Meters": `Water 7890: 1,204,568, +57 in 60 min. Leak: on and off (water in half the day's 15 min)`. See [Utility meters](utility_meters.md).
 - Settings are saved. Reconnect the app after `meter on` so it lists the new channel.
-- One at a time with `mt`, `wx`, `air` and `metar` (see above).
+- One at a time with `mt`, `wx`, `air`, `metar` and `tpms` (see above).
+
+#### Tire pressure on 315 MHz (LR2021 only)
+**Usage:**
+- `tpms on`, `tpms off`
+- `get tpms.heard [start]`: every sensor heard, strongest first (your car's are the closest): make, ID, pressure, signal, minutes since heard
+- `set tpms.ids <hex IDs>` (`none`, the default: none shown), `set tpms.low <psi>` (an alert below it; default 0: off), `set tpms.every <minutes>` (default 30), `set tpms.duty <percent>` (default 10), `set tpms.freq <MHz>` (default 315; 433.92 in Europe)
+- `tpms` or `get tpms`, `get tpms.stats`
+
+**Example reply:** `> 4: GM 2fc871 35.5 psi -61dBm 0m, GM 2eaaf9 34.0 psi -63dBm 0m, GM 3495ac 35.0 psi -64dBm 0m, GM 2fc780 34.5 psi -66dBm 1m`
+
+**Notes:**
+- Tire pressure sensors (Ford, Jeep/Chrysler, Toyota/Lexus, GM, Honda, Hyundai/Kia) send while the car moves. The ones chosen with `set tpms.ids` show in the app as one more receive-only channel, "Tires": `Tire c871: 35.5 psi, 72°F`, with LOW and DROPPING alerts. See [Tire pressure](tire_pressure.md).
+- Settings are saved. Reconnect the app after `tpms on` so it lists the new channel.
+- One at a time with `mt`, `wx`, `air`, `metar` and `meter` (see above).
 
 #### Damaged packets
 **Usage:**

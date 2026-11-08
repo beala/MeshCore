@@ -78,8 +78,8 @@ mesh isn't heard meanwhile), then back to `set meter.duty 10`.
 | Start | 31 chips `1010..`, sync `A9666965` | no preamble: the frame starts with its sync `16 A3` | no preamble: a 21-bit sync `1F2A60` |
 | Then | 168 chips: 42 groups of 4, each one of six codes (a base-6 digit); two digits carry 5 bits: 104 bits | 14 bytes: protocol `1E`, endpoint type, ID (4), reading (4), tamper (2), CRC-16/CCITT (init `0971`) | 75 bits: ID, tamper, type, reading (24 bits), CRC-16 (poly `6F63`) |
 | Checked by | the codes (no CRC: a stray frame passes all 42 code checks about once in 10^18) | the CRC | the CRC |
-| Channels | 78, 130.5 kHz apart, 910.30-920.35 MHz | 50, 200 kHz apart, 910.2-920.0 MHz | as SCM+ |
-| Every | 14.0 s | 15.000 s | 15 s |
+| Channels | 50 of 78 places 130.5 kHz apart (910.30-920.35 MHz), in a fixed order | 51, 200 kHz apart, 910.0-920.0 MHz | as SCM+ |
+| Every | 14.000 s | 15.000 s | 15 s |
 
 The LR2021's OOK receiver finds a frame by a detector pattern (up to 16 chips) and then a sync
 word (up to 32 chips), and hands over a fixed number of bytes after it. It's set to take the raw
@@ -100,11 +100,18 @@ meter's 50-78 channels, and a frame lands on it about one time in 50-78.
 ### Timed listens
 
 Each meter sends like clockwork: an Itron module every 15.000 s to the millisecond, an R900 every
-14.0 s within about 20 ms. Once one of your meters has been heard, the radio opens a short listen
-just when its next frame is due (30-60 ms either side, more the longer it's been), each on another
-of its channels, and learns its exact period from the frames it catches. That's under 1% of the
-mesh's time per meter, for a reading every 15-20 minutes on average (one try in 50-78 hits).
-Meters not heard for 3 hours are searched for again.
+14.000 s within about 20 ms. Once one of your meters has been heard, the radio opens a short listen
+just when its next frame is due (30-60 ms either side, more the longer it's been), and learns its
+exact period from the frames it catches. That's under 1% of the mesh's time per meter. Meters not
+heard for 3 hours are searched for again.
+
+**Where to listen.** R900s hop through the same 50 channels in the same order, each meter at its own
+place in the sequence: in an hour of RTL-SDR recordings across the band, every pair of frames from
+one meter a multiple of 50 sends apart was on the same channel (114 of 114), and 6 meters all fit
+one sequence. So one frame heard on a channel tells where that meter is in it, and each timed listen
+after that goes to the channel its next frame will be on. Before that first catch, and for Itron
+meters (they also repeat every 50 sends, but each seems to have its own order), each timed listen
+takes the next of its channels in turn: one try in 50 or so hits.
 
 ### The search
 
