@@ -72,7 +72,7 @@ void initVariant()
   pinMode(EXT_CHRG_DETECT, INPUT);
   pinMode(EXT_PWR_DETECT, INPUT);
   pinMode(GPS_RESETB, INPUT_PULLUP);
-  pinMode(PIN_BUTTON1, INPUT);
+  pinMode(PIN_BUTTON1, INPUT_PULLDOWN);   // active HIGH: hold it LOW when released, not floating
 
   pinMode(PIN_3V3_EN, OUTPUT);
   pinMode(PIN_3V3_ACC_EN, OUTPUT);

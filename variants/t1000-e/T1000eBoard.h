@@ -67,7 +67,7 @@ public:
     #endif
 
     #ifdef BUTTON_PIN
-    nrf_gpio_cfg_sense_input(BUTTON_PIN, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_SENSE_HIGH);
+    nrf_gpio_cfg_sense_input(BUTTON_PIN, NRF_GPIO_PIN_PULLDOWN, NRF_GPIO_PIN_SENSE_HIGH);
     #endif
 
     NRF52Board::powerOff();

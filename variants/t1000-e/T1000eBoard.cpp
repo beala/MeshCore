@@ -8,7 +8,7 @@ void T1000eBoard::begin() {
 
 #ifdef BUTTON_PIN
   pinMode(BATTERY_PIN, INPUT);
-  pinMode(BUTTON_PIN, INPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLDOWN);   // active HIGH: hold it LOW when released, not floating
   pinMode(LED_PIN, OUTPUT);
 #endif
 
