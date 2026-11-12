@@ -95,7 +95,8 @@ protected:
 
   /**
    * \brief  A v2 packet from a known peer (contact) verified. Sub-classes can use this to start
-   *         sending v2 to that peer. It is never called for channel or anonymous packets.
+   *         sending v2 to that peer. It is never called for channel or anonymous packets
+   *         (channels have onChannelCryptoV2Recv).
    */
   virtual void onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) { }
 

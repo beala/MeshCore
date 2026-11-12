@@ -798,7 +798,7 @@ Each contact and channel has an encryption policy:
 | `v2` | v2 (AES-SIV, 16-byte tag) | v1 and v2 |
 | `v2only` | v2 | v2 only |
 
-Firmware with v2 support always understands v2 packets. Firmware without it silently drops them, so only switch a contact or channel to `v2` once the other side (for a channel, every member) runs v2 firmware.
+Firmware with v2 support always understands v2 packets. Firmware without it silently drops them, so only switch a contact or channel to `v2` once the other side (for a channel, every member) runs v2 firmware. Both also switch by themselves the first time a v2 message arrives from that contact or on that channel.
 
 #### View the encryption policies
 **Usage:**
