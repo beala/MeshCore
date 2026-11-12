@@ -208,6 +208,8 @@ protected:
   // If saved policies were lost or rolled back, fail closed: v2 only for everything until 'set crypto.recover'
   uint8_t getCryptoPolicy(const uint8_t* secret) override { return _crypto_lost ? CRYPTO_POLICY_V2_ONLY : crypto_policies.get(secret); }
   void onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) override;
+  void onChannelCryptoV2Recv(const mesh::GroupChannel& channel) override;
+  void upgradeCryptoToV2(const uint8_t* secret);
   bool saveCryptoPolicies();
   bool setCryptoPolicy(const uint8_t* secret, uint8_t policy, char* reply);
   ContactInfo* findContactForCLI(const char* arg);

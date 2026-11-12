@@ -441,6 +441,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
           bool was_v2;
           int len = decryptPayload(channels[j].secret, data, macAndData, pkt->payload_len - i, ctx, sizeof(ctx), was_v2);
           if (len > 0) {  // success!
+            if (was_v2) onChannelCryptoV2Recv(channels[j]);
             onGroupDataRecv(pkt, pkt->getPayloadType(), channels[j], data, len);
             break;
           }

@@ -105,6 +105,9 @@ public:
   void onPeerCryptoV2Recv(int, const uint8_t* secret) override {
     if (policies.get(secret) == CRYPTO_POLICY_LEGACY && policies.set(secret, CRYPTO_POLICY_V2)) upgrades++;
   }
+  void onChannelCryptoV2Recv(const mesh::GroupChannel& ch) override {
+    if (policies.get(ch.secret) == CRYPTO_POLICY_LEGACY && policies.set(ch.secret, CRYPTO_POLICY_V2)) upgrades++;
+  }
 
   int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel dest[], int max) override {
     if (!has_channel || channel.hash[0] != hash[0] || max < 1) return 0;
@@ -298,6 +301,7 @@ TEST_F(Pair, ChannelV2AndV2Only) {
   };
 
   deliver(send("Alice: v1 hi"));
+  EXPECT_EQ(CRYPTO_POLICY_LEGACY, bob.node.policies.get(ch.secret));   // v1 doesn't upgrade
   alice.node.policies.set(ch.secret, CRYPTO_POLICY_V2);
   mesh::Packet* p = send("Alice: v2 hi");
   EXPECT_FALSE(mesh::CryptoV2::isLegacyEnvelope(p->payload_len - 1));
@@ -305,7 +309,8 @@ TEST_F(Pair, ChannelV2AndV2Only) {
   ASSERT_EQ(2u, bob.node.group_messages.size());
   EXPECT_EQ("Alice: v1 hi", bob.node.group_messages[0]);
   EXPECT_EQ("Alice: v2 hi", bob.node.group_messages[1]);
-  EXPECT_EQ(CRYPTO_POLICY_LEGACY, bob.node.policies.get(ch.secret));   // channels never auto-upgrade
+  EXPECT_EQ(CRYPTO_POLICY_V2, bob.node.policies.get(ch.secret));   // one member on v2 upgrades the channel
+  EXPECT_EQ(1, bob.node.upgrades);
 
   bob.node.policies.set(ch.secret, CRYPTO_POLICY_V2_ONLY);
   alice.node.policies.set(ch.secret, CRYPTO_POLICY_LEGACY);

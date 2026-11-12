@@ -838,7 +838,7 @@ Repeaters and room servers with v2 firmware accept v2 requests but still reply i
 
 **Default:** `legacy`
 
-**Note:** Channels never switch automatically: one member sending v2 doesn't mean every member can read it. Anyone with the channel key can still read and send on the channel, and can claim any sender name.
+**Note:** A channel also switches to v2 by itself the first time a member sends v2 on it, after which members still on old firmware can't read what you send there. Anyone with the channel key can still read and send on the channel, and can claim any sender name.
 
 ---
 

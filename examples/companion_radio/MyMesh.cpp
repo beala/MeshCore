@@ -2688,20 +2688,29 @@ int MyMesh::findChannelForCLI(const char* arg, ChannelDetails& ch) {
   return -1;
 }
 
-// a known contact sent us a verified v2 packet, so it can receive v2 too: start sending it v2.
-// This only ever raises the policy, never lowers it.
-void MyMesh::onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) {
+// A verified v2 packet came from a contact or on a channel: start sending v2 to it too.
+// This only ever raises the policy (legacy -> v2), never lowers it.
+void MyMesh::upgradeCryptoToV2(const uint8_t* secret) {
   if (_crypto_lost) return;
   if (crypto_policies.get(secret) == CRYPTO_POLICY_LEGACY) {
     if (crypto_policies.set(secret, CRYPTO_POLICY_V2)) {
       // Applies right away. The flash write waits a few seconds, so it doesn't hold up this
-      // packet or its ACK. If it's lost (reboot first, or the write fails) the contact is back on
-      // legacy, which still accepts v2, and the upgrade is relearned from its next v2 packet.
+      // packet or its ACK. If it's lost (reboot first, or the write fails) it's back on legacy,
+      // which still accepts v2, and the upgrade is relearned from the next v2 packet.
       _crypto_save_pending = true;
       _crypto_save_at = millis() + 5000;
-      MESH_DEBUG_PRINTLN("contact upgraded to v2 encryption");
+      MESH_DEBUG_PRINTLN("upgraded to v2 encryption");
     }
   }
+}
+
+void MyMesh::onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) {
+  upgradeCryptoToV2(secret);
+}
+
+// One member sending v2 is enough: everyone on the channel is expected to move to v2 together.
+void MyMesh::onChannelCryptoV2Recv(const mesh::GroupChannel& channel) {
+  upgradeCryptoToV2(channel.secret);
 }
 
 // Saves the policy table to a new file, then records its seq in prefs. A later boot that can only

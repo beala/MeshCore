@@ -33,7 +33,7 @@ v2 replaces this with **AES-SIV**, a published, standardized encryption method (
 - **Repeaters need no update.** A v2 message looks like any other message from the outside, so every repeater relays it.
 - **Radios without v2 ignore v2 messages.** Since v1.18.0 they drop them cleanly instead of showing junk.
 - **You choose who gets v2.** Each contact and channel starts on the old format (`legacy`). You switch one to `v2` once the other side has v2 firmware (for a channel, every member).
-- **It upgrades by itself, but never downgrades.** If a contact sends you a v2 message, your radio starts replying in v2. Nothing ever switches a contact back to the old format automatically, so an attacker can't trick your radio into falling back by jamming replies.
+- **It upgrades by itself, but never downgrades.** If a contact sends you a v2 message, your radio starts replying in v2. The same goes for a channel: one member sending v2 switches the channel to v2 on your radio, so members still on old firmware stop being able to read what you send there. Nothing ever switches a contact or channel back to the old format automatically, so an attacker can't trick your radio into falling back by jamming replies.
 - **`v2only` locks out the old format.** Set a contact or channel to `v2only` and your radio refuses old-format messages from it entirely, closing off the weak 2-byte seal for good.
 - **Your phone app keeps working.** Phone apps only understand the old format. Your radio translates v2 messages it can read into the old format before passing them to the app's packet log, so features like "heard N repeats" still recognise your messages.
 
@@ -168,7 +168,7 @@ Each contact and each channel has a policy:
 | `v2only` | v2 | v2 |
 
 - **Automatic upgrade.** A verified v2 packet from a known contact switches that contact from `legacy` to `v2`, because it can clearly receive v2.
-- **Channels never switch automatically.** One member sending v2 says nothing about the others.
+- **Channels switch too.** A verified v2 packet on a channel switches that channel from `legacy` to `v2`. One member on v2 is taken as the signal that the channel is moving to v2: members still on old firmware can no longer read what this radio sends there. Only someone holding the channel key can trigger it.
 - **No automatic downgrade.** A missing ACK, a timeout or anything else an attacker can cause never lowers a policy. Only the user lowers a policy.
 - **`v2only` is only set by the user.** Accepting v1 is a deliberate migration trade-off: v1's 2-byte MAC is still accepted from that contact or channel until the user sets `v2only`.
 - **Storage.** Policies are stored by an 8-byte ID: `SHA256("MeshCore policy id" || secret)[0..7]`. A policy therefore follows the key, not the contact's slot or the channel's slot.
@@ -224,7 +224,7 @@ This only happens on the local link to the app, which already has the keys and t
 
 The reply also says whether AES is running on hardware (`aes=hw`) or in software (`aes=sw`). These numbers haven't been collected on real boards yet.
 
-**Auto-upgrade write.** When a contact is upgraded to v2 automatically, the upgrade applies at once. The flash write waits 5 seconds, so it doesn't delay that packet or its ACK. If the radio reboots before the write, the contact is back on `legacy`, which still accepts v2, and the upgrade is relearned from the contact's next v2 packet.
+**Auto-upgrade write.** When a contact or channel is upgraded to v2 automatically, the upgrade applies at once. The flash write waits 5 seconds, so it doesn't delay that packet or its ACK. If the radio reboots before the write, it is back on `legacy`, which still accepts v2, and the upgrade is relearned from the next v2 packet.
 
 ## What v2 does not do
 

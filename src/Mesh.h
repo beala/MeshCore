@@ -100,6 +100,12 @@ protected:
   virtual void onPeerCryptoV2Recv(int sender_idx, const uint8_t* secret) { }
 
   /**
+   * \brief  A v2 packet on a channel verified (with that channel's key). Sub-classes can use this
+   *         to start sending v2 on the channel.
+   */
+  virtual void onChannelCryptoV2Recv(const GroupChannel& channel) { }
+
+  /**
    * \brief  A (now decrypted) data packet has been received (by a known peer).
    *         NOTE: these can be received multiple times (per sender/msg-id), via different routes
    * \param  type  one of: PAYLOAD_TYPE_TXT_MSG, PAYLOAD_TYPE_REQ, PAYLOAD_TYPE_RESPONSE
