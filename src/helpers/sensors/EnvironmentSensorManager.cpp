@@ -419,7 +419,7 @@ static uint8_t init_ina226(TwoWire*, uint8_t) {
   // begin() only checks the address ACK; 0x44 may also be an SHT4X or
   // OPT3001, so verify the chip's ID registers before writing calibration.
   if (!INA226.begin()) return 0;
-  if (INA226.getManufacturerID() != 0x5449 || INA226.getDieID() != 0x2260) return 0;
+  if (INA226.getManufacturerID() != 0x5449 || (INA226.getDieID() & 0xFFF0) != 0x2260) return 0;  // low nibble is the die revision
   INA226.setMaxCurrentShunt(TELEM_INA226_MAX_AMP, TELEM_INA226_SHUNT_VALUE);
   return 1;
 }
@@ -463,7 +463,9 @@ static uint8_t init_opt3001(TwoWire* wire, uint8_t addr) {
 static void query_opt3001(uint8_t ch, uint8_t, CayenneLPP& lpp) {
   float lux;
   if (OPT3001.readLux(lux)) {
-    lpp.addLuminosity(ch, lux);
+    // LPP luminosity is 2 bytes, whole lux: clamp so full sun (OPT3001 reads
+    // up to 83865 lux) doesn't wrap, and anything under 1 lux reads as 0.
+    lpp.addLuminosity(ch, lux > 65535.0f ? 65535u : (uint32_t)lux);
   }
 }
 #endif
