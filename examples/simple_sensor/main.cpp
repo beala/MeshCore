@@ -136,7 +136,7 @@ void loop() {
     command[0] = 0;
     len = 0;
   }
-  while (Serial.available() && len < sizeof(command)-1) {
+  while (Serial.available() && len < (int)sizeof(command)-1) {
     char c = Serial.read();
     if (c != '\n') {
       command[len++] = c;

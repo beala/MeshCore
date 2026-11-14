@@ -23,7 +23,7 @@ public:
   RefCountedDigitalPin periph_power;
   LoRaFEMControl loRaFEMControl;
 
-  T096Board() :periph_power(PIN_VEXT_EN,PIN_VEXT_EN_ACTIVE), NRF52Board("T096_OTA") {}
+  T096Board() : NRF52Board("T096_OTA"), periph_power(PIN_VEXT_EN,PIN_VEXT_EN_ACTIVE) {}
   void begin();
   void attachDynamicPrefs(KeyValueStore* prefs);
   bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) override;
