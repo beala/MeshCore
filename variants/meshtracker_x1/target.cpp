@@ -75,18 +75,18 @@ bool MeshTrackerX1SensorManager::querySensors(uint8_t requester_permissions, Cay
 }
 
 void MeshTrackerX1SensorManager::loop() {
-  static long next_gps_update = 0;
+  static uint32_t last_gps_update = 0;
 
 
   _nmea->loop();
 
-  if ((long) millis() > next_gps_update) {
+  if ((uint32_t)(millis() - last_gps_update) >= 1000) {
     if (gps_active && _nmea->isValid()) {
       node_lat = ((double)_nmea->getLatitude())/1000000.;
       node_lon = ((double)_nmea->getLongitude())/1000000.;
       node_altitude = ((double)_nmea->getAltitude()) / 1000.0;
     }
-    next_gps_update = millis() + 1000;
+    last_gps_update = millis();
   }
 }
 

@@ -33,7 +33,7 @@ static int8_t ntc_temp2[136] = {
 
 static float get_heater_temperature(unsigned int vcc_volt, unsigned int ntc_volt) {
   if (ntc_volt == 0) {
-    return 0.0f;  // avoid division by zero on open circuit / sensor fault
+    return (float)ntc_temp2[0];  // open NTC: Rt is infinite, past the table's cold end like any reading there
   }
   int i = 0;
   float Rt = 0, temp = 0;
