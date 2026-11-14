@@ -69,16 +69,6 @@
 
 #define ALERT_ACK_EXPIRY_MILLIS         8000   // wait 8 secs for ACKs to alert messages
 
-static File openAppend(FILESYSTEM* _fs, const char* fname) {
-  #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
-    return _fs->open(fname, FILE_O_WRITE);
-  #elif defined(RP2040_PLATFORM)
-    return _fs->open(fname, "a");
-  #else
-    return _fs->open(fname, "a", true);
-  #endif
-}
-
 /* --------------------- Cayenne LPP helpers ----------------------------*/
 
 static float findTelemValue(const uint8_t* buf, uint8_t size, uint8_t channel, uint8_t type, float def_value) {
@@ -201,7 +191,7 @@ uint8_t SensorMesh::handleRequest(ClientInfo* from, uint32_t sender_timestamp, u
     uint8_t res2 = payload[1];
     if (res1 == 0 && res2 == 0) {
       uint8_t ofs = 4;
-      for (int i = 0; i < acl.getNumClients() && ofs + 7 <= sizeof(reply_data) - 4; i++) {
+      for (int i = 0; i < acl.getNumClients() && ofs + 7 <= (int)sizeof(reply_data) - 4; i++) {
         auto c = acl.getClientByIdx(i);
         if (c->permissions == 0) continue;  // skip deleted entries
         memcpy(&reply_data[ofs], c->id.pub_key, 6); ofs += 6;  // just 6-byte pub_key prefix
@@ -214,7 +204,7 @@ uint8_t SensorMesh::handleRequest(ClientInfo* from, uint32_t sender_timestamp, u
     memcpy(&from->extra.sensor.push_tag, &payload[0], 4);
     uint16_t timeout_secs;
     memcpy(&timeout_secs, &payload[4], 2);
-    uint8_t  reserved = payload[6];
+    // payload[6] is reserved
     uint8_t  min_deltas_len = payload[7];
     RegionEntry* r;
     if (recv_pkt_region && !recv_pkt_region->isWildcard()) {   // use request scope
@@ -498,7 +488,7 @@ void SensorMesh::handleCommand(ClientInfo* from, uint32_t sender_timestamp, char
     reply[0] = 0;
   } else if (memcmp(command, "io ", 2) == 0) { // io {value}: write, io: read 
     if (command[2] == ' ') { // it's a write
-      uint32_t val;
+      unsigned int val;   // matches %x on every platform; uint32_t is long on ARM
       uint32_t g = board.getGpio();
       if (command[3] == 'r') { // reset bits
         sscanf(&command[4], "%x", &val);
@@ -514,7 +504,7 @@ void SensorMesh::handleCommand(ClientInfo* from, uint32_t sender_timestamp, char
       }
       board.setGpio(val);
     }
-    sprintf(reply, "%x", board.getGpio());
+    sprintf(reply, "%x", (unsigned int)board.getGpio());
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
@@ -783,9 +773,9 @@ void SensorMesh::onAckRecv(mesh::Packet* packet, uint32_t ack_crc) {
 
 SensorMesh::SensorMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables)
      : mesh::Mesh(radio, ms, rng, rtc, *new StaticPoolPacketManager(32), tables),
-      region_map(key_store), temp_map(key_store),
       _cli(board, rtc, sensors, region_map, acl, &_prefs, this),
-      telemetry(MAX_PACKET_PAYLOAD - 4)
+      telemetry(MAX_PACKET_PAYLOAD - 4),
+      region_map(key_store), temp_map(key_store)
 {
   next_local_advert = next_flood_advert = 0;
   dirty_contacts_expiry = 0;
