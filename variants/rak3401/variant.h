@@ -164,7 +164,7 @@ static const uint8_t AREF = PIN_AREF;
 #define SX126X_POWER_EN (21)        // P0.21 = IO3 -> SKY66122 CSD+CPS (FEM enable)
 
 // CTX is driven by SX1262 DIO2, not a GPIO
-#define SX126X_DIO2_AS_RF_SWITCH
+#define SX126X_DIO2_AS_RF_SWITCH true
 #define SX126X_DIO3_TCXO_VOLTAGE 1.8
 
 #define P_LORA_SCLK PIN_SPI1_SCK

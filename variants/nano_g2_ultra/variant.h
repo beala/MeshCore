@@ -119,7 +119,7 @@ External serial flash W25Q16JV_IQ
 #define SX126X_BUSY (32 + 11)
 #define SX126X_RESET (32 + 15)
 //  DIO2 controlls an antenna switch and the TCXO voltage is controlled by DIO3
-#define SX126X_DIO2_AS_RF_SWITCH
+#define SX126X_DIO2_AS_RF_SWITCH true
 #define SX126X_DIO3_TCXO_VOLTAGE 1.8
 
     // #define LORA_DISABLE_SENDING // Define this to disable transmission for testing (power testing etc...)

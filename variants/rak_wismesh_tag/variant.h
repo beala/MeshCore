@@ -90,7 +90,7 @@
 #define SX126X_BUSY             (46)
 #define SX126X_RESET            (38)
 #define SX126X_POWER_EN         (37)
-#define SX126X_DIO2_AS_RF_SWITCH
+#define SX126X_DIO2_AS_RF_SWITCH true
 #define SX126X_DIO3_TCXO_VOLTAGE 1.8
 
 ////////////////////////////////////////////////////////////////////////////////

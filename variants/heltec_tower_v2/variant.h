@@ -41,7 +41,7 @@
 #define SX126X_DIO1  (0 + 20)
 #define SX126X_BUSY  (0 + 17)
 #define SX126X_RESET (0 + 25)
-#define SX126X_DIO2_AS_RF_SWITCH
+#define SX126X_DIO2_AS_RF_SWITCH true
 #define SX126X_DIO3_TCXO_VOLTAGE 1.8
 
 #define P_LORA_NSS   LORA_CS

@@ -58,7 +58,7 @@
 // CTRL PIN (GPIO 21) controls LNA - must be HIGH during RX
 // Truth table: DIO2=1,CTRL=0 -> TX (PA on, LNA off)
 //              DIO2=0,CTRL=1 -> RX (PA off, LNA on)
-#define SX126X_DIO2_AS_RF_SWITCH
+#define SX126X_DIO2_AS_RF_SWITCH true
 #define SX126X_RXEN 21  // LNA enable - HIGH during RX
 
 // TCXO voltage - required for radio init
