@@ -73,7 +73,7 @@ bool NanoG2UltraSensorManager::querySensors(uint8_t requester_permissions, Cayen
 }
 
 void NanoG2UltraSensorManager::loop() {
-  static long next_gps_update = 0;
+  static uint32_t last_gps_update = 0;
 
   if (!gps_active) {
     return; // GPS is not active, skip further processing
@@ -81,7 +81,7 @@ void NanoG2UltraSensorManager::loop() {
 
   _location->loop();
 
-  if (millis() > next_gps_update) {
+  if ((uint32_t)(millis() - last_gps_update) >= 1000) {
     if (_location->isValid()) {
       node_lat = ((double)_location->getLatitude()) / 1000000.;
       node_lon = ((double)_location->getLongitude()) / 1000000.;
@@ -91,7 +91,7 @@ void NanoG2UltraSensorManager::loop() {
       MESH_DEBUG_PRINTLN("INVALID location, waiting for fix");
     }
     MESH_DEBUG_PRINTLN("GPS satellites: %d", _location->satellitesCount());
-    next_gps_update = millis() + 1000;
+    last_gps_update = millis();
   }
 }
 
