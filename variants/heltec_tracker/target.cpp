@@ -71,18 +71,18 @@ bool HWTSensorManager::querySensors(uint8_t requester_permissions, CayenneLPP& t
 }
 
 void HWTSensorManager::loop() {
-  static long next_gps_update = 0;
+  static uint32_t last_gps_update = 0;
 
   _location->loop();
 
-  if (millis() > next_gps_update) {
+  if ((uint32_t)(millis() - last_gps_update) >= 1000) {
     if (gps_active && _location->isValid()) {
       node_lat = ((double)_location->getLatitude())/1000000.;
       node_lon = ((double)_location->getLongitude())/1000000.;
       node_altitude = ((double)_location->getAltitude()) / 1000.0;
       MESH_DEBUG_PRINTLN("lat %f lon %f", node_lat, node_lon);
     }
-    next_gps_update = millis() + 1000;
+    last_gps_update = millis();
   }
 }
 
