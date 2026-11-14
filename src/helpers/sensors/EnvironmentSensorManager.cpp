@@ -1006,7 +1006,6 @@ void EnvironmentSensorManager::loop() {
   #endif
   #if ENV_INCLUDE_BME680_BSEC
   if (bsec_active && bsec_iaq.run()) {
-    uint8_t prev_accuracy = bsec_accuracy;
     bsec_temperature  = bsec_iaq.temperature;
     bsec_humidity     = bsec_iaq.humidity;
     bsec_pressure_hpa = bsec_iaq.pressure / 100.0f;

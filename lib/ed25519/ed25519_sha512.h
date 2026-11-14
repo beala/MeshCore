@@ -1,5 +1,5 @@
-#ifndef SHA512_H
-#define SHA512_H
+#ifndef ED25519_SHA512_H
+#define ED25519_SHA512_H
 
 #include <stddef.h>
 

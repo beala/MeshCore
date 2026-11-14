@@ -1,5 +1,5 @@
 #include "ed_25519.h"
-#include "sha512.h"
+#include "ed25519_sha512.h"
 #include "ge.h"
 
 
