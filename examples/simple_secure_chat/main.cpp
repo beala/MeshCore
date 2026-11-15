@@ -214,13 +214,13 @@ protected:
   }
 
   void onContactPathUpdated(const ContactInfo& contact) override {
-    Serial.printf("PATH to: %s, path_len=%d\n", contact.name, (uint32_t) contact.out_path_len);
+    Serial.printf("PATH to: %s, path_len=%d\n", contact.name, (int) contact.out_path_len);
     saveContacts();
   }
 
   ContactInfo* processAck(const uint8_t *data) override {
     if (memcmp(data, &expected_ack_crc, 4) == 0) {     // got an ACK from recipient
-      Serial.printf("   Got ACK! (round trip: %d millis)\n", _ms->getMillis() - last_msg_sent);
+      Serial.printf("   Got ACK! (round trip: %lu millis)\n", (unsigned long)(_ms->getMillis() - last_msg_sent));
       // NOTE: the same ACK can be received multiple times!
       expected_ack_crc = 0;  // reset our expected hash, now that we have received ACK
       return NULL;  // TODO: really should return ContactInfo pointer 
@@ -545,7 +545,7 @@ public:
       command[0] = 0;
       len = 0;
     }
-    while (Serial.available() && len < sizeof(command)-1) {
+    while (Serial.available() && len < (int)sizeof(command)-1) {
       char c = Serial.read();
       if (c != '\n') { 
         command[len++] = c;

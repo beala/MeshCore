@@ -24,8 +24,8 @@ void TDeckBoard::begin() {
 
   esp_reset_reason_t reason = esp_reset_reason();
   if (reason == ESP_RST_DEEPSLEEP) {
-    long wakeup_source = esp_sleep_get_ext1_wakeup_status();
-    if (wakeup_source & (1 << P_LORA_DIO_1)) {
+    uint64_t wakeup_source = esp_sleep_get_ext1_wakeup_status();
+    if (wakeup_source & (1ULL << P_LORA_DIO_1)) {
       startup_reason = BD_STARTUP_RX_PACKET; // received a LoRa packet (while in deep sleep)
     }
 

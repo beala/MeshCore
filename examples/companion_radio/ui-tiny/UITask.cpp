@@ -300,13 +300,13 @@ public:
       LPPReader r(sensors_lpp.getBuffer(), sensors_lpp.getSize());
 
       for (int i = 0; i < sensors_scroll_offset; i++) {
-        uint8_t channel, type;
+        uint8_t channel = 0, type = 0;
         r.readHeader(channel, type);
         r.skipData(type);
       }
 
       for (int i = 0; i < (sensors_scroll?UI_RECENT_LIST_SIZE:sensors_nb); i++) {
-        uint8_t channel, type;
+        uint8_t channel = 0, type = 0;
         if (!r.readHeader(channel, type)) { // reached end, reset
           r.reset();
           r.readHeader(channel, type);
@@ -350,7 +350,7 @@ public:
             break;
           default:
             r.skipData(type);
-            strcpy(name, "unk"); sprintf(buf, "");
+            strcpy(name, "unk"); buf[0] = 0;
         }
         display.setColor(UIColor::secondary_txt);
         display.setCursor(0, y);

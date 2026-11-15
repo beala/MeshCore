@@ -205,7 +205,7 @@ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t
     uint8_t res2 = payload[2];
     if (res1 == 0 && res2 == 0) {
       uint8_t ofs = 4;
-      for (int i = 0; i < acl.getNumClients() && ofs + 7 <= sizeof(reply_data) - 4; i++) {
+      for (int i = 0; i < acl.getNumClients() && ofs + 7 <= (int)sizeof(reply_data) - 4; i++) {
         auto c = acl.getClientByIdx(i);
         if (!c->isAdmin()) continue;  // skip non-Admin entries
         memcpy(&reply_data[ofs], c->id.pub_key, 6); ofs += 6;  // just 6-byte pub_key prefix
@@ -690,7 +690,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   next_post_idx = 0;
   next_client_idx = 0;
   next_push = 0;
-  memset(posts, 0, sizeof(posts));
+  memset((void*)posts, 0, sizeof(posts));   // (all zero bytes: an empty Identity, as before)
   _num_posted = _num_post_pushes = 0;
 
   memset(default_scope.key, 0, sizeof(default_scope.key));

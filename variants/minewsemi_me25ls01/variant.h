@@ -10,7 +10,6 @@
 // Power
 #define BATTERY_PIN             (31)
 #define BATTERY_IMMUTABLE
-#define ADC_MULTIPLIER          (2.0F)
 
 #define ADC_RESOLUTION          (14)
 #define BATTERY_SENSE_RES       (12)

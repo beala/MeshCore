@@ -22,7 +22,9 @@
 // buttons
 #define PIN_BUTTON1              (32 + 6)
 #define BUTTON_PIN               PIN_BUTTON1
+#ifndef PIN_USER_BTN   // also given by platformio.ini
 #define PIN_USER_BTN             BUTTON_PIN
+#endif
 
 // GPS
 #define GPS_EN                   PIN_GPS_STANDBY

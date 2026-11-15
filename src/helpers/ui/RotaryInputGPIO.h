@@ -13,7 +13,7 @@ class RotaryInputGPIO: public RotaryInput {
   bool _pull_b;
   bool b_prec;
 public:
-  RotaryInputGPIO(int8_t pin_a, int8_t pin_b, bool pull_a=false, bool pull_b=false): _pin_a(pin_a), _pin_b(pin_b), _pull_a(pull_a), _pull_b(pull_b) {}
+  RotaryInputGPIO(int8_t pin_a, int8_t pin_b, bool pull_a=false, bool pull_b=false): _pin_a(pin_a), _pull_a(pull_a), _pin_b(pin_b), _pull_b(pull_b) {}
 
   bool begin() override;
   RotaryInputEvent poll() override;

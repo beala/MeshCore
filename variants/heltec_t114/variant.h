@@ -128,8 +128,12 @@
 
 #define GPS_EN                  (21)
 #define GPS_RESET               (38)
+#ifndef PIN_GPS_RX   // also given by platformio.ini
 #define PIN_GPS_RX              (39)  // This is for bits going TOWARDS the GPS
+#endif
+#ifndef PIN_GPS_TX
 #define PIN_GPS_TX              (37)  // This is for bits going TOWARDS the CPU
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // TFT

@@ -6,18 +6,6 @@
 
 //static BLEDfu bledfu;
 
-static void connect_callback(uint16_t conn_handle) {
-  (void)conn_handle;
-  MESH_DEBUG_PRINTLN("BLE client connected");
-}
-
-static void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
-  (void)conn_handle;
-  (void)reason;
-
-  MESH_DEBUG_PRINTLN("BLE client disconnected");
-}
-
 void PicoWBoard::begin() {
   // for future use, sub-classes SHOULD call this from their begin()
   startup_reason = BD_STARTUP_NORMAL;

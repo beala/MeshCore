@@ -68,8 +68,6 @@
 #define PIN_QSPI_IO2            (7)
 #define PIN_QSPI_IO3            (5)
 
-#define EXTERNAL_FLASH_DEVICES ZD25WQ16BUIGR
-#define EXTERNAL_FLASH_USE_QSPI
 
 ////////////////////////////////////////////////////////////////////////////////
 // Builtin LEDs

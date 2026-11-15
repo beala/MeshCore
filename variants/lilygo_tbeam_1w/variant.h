@@ -30,7 +30,9 @@
 // SD Card
 #define HAS_SDCARD
 #define SDCARD_USE_SPI1
+#ifndef SDCARD_CS   // pins_arduino.h has it too (10)
 #define SDCARD_CS SPI_CS
+#endif
 
 // LoRa Radio - SX1262 with 1W PA
 #define USE_SX1262

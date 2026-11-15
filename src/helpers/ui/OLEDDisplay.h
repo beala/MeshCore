@@ -329,6 +329,7 @@ class OLEDDisplay : public Stream {
     uint16_t getHeight(void);
 
     // Implement needed function to be compatible with Print class
+    using Print::write;   // keeps Print's write(buffer, size) visible
     size_t write(uint8_t c);
     size_t write(const char* s);
 

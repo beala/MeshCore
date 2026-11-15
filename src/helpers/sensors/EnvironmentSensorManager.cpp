@@ -770,6 +770,7 @@ int EnvironmentSensorManager::getNumSettings() const {
 
 const char* EnvironmentSensorManager::getSettingName(int i) const {
   int settings = 0;
+  (void)settings;
   #if ENV_INCLUDE_GPS
     if (gps_detected && i == settings++) {
       return "gps";
@@ -785,6 +786,7 @@ const char* EnvironmentSensorManager::getSettingName(int i) const {
 
 const char* EnvironmentSensorManager::getSettingValue(int i) const {
   int settings = 0;
+  (void)settings;
   #if ENV_INCLUDE_GPS
     if (gps_detected && i == settings++) {
       return gps_active ? "1" : "0";

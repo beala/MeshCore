@@ -276,7 +276,7 @@ class ST7789Spi : public OLEDDisplay {
   void setRGB(uint16_t c)
   {
 
-    this->_RGB=0x00|c>>8|c<<8&0xFF00;
+    this->_RGB=0x00|c>>8|((c<<8)&0xFF00);
   }
   
   void displayOn(void) {

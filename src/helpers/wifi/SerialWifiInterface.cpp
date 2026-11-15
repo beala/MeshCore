@@ -25,7 +25,7 @@ size_t SerialWifiInterface::writeFrame(const uint8_t src[], size_t len) {
   }
 
   if (deviceConnected && len > 0) {
-    if (send_queue_len >= FRAME_QUEUE_SIZE) {
+    if (send_queue_len >= WIFI_FRAME_QUEUE_SIZE) {
       WIFI_DEBUG_PRINTLN("writeFrame(), send_queue is full!");
       return 0;
     }
@@ -54,7 +54,7 @@ void SerialWifiInterface::resetReceivedFrameHeader() {
 
 size_t SerialWifiInterface::checkRecvFrame(uint8_t dest[]) {
   // check if new client connected
-  auto newClient = server.available();
+  auto newClient = server.accept();   // (ESP32: the same call; the Pico core deprecates available())
   if (newClient) {
 
     // disconnect existing client

@@ -91,10 +91,14 @@ extern "C"
 #define LED_STATE_ON 1 // State when LED is lit
 
 /* Buttons */
+#ifndef PIN_USER_BTN   // also given by platformio.ini
 #define PIN_USER_BTN (26)
+#endif
 
 /* Buzzer */
+#ifndef PIN_BUZZER   // also given by platformio.ini
 #define PIN_BUZZER    (3)
+#endif
 
 /* Analog pins */
 // Arduino makes me angry
@@ -123,9 +127,15 @@ extern "C"
    static const uint8_t AREF = PIN_AREF;
 
 /* Serial interfaces */
+#ifndef PIN_GPS_TX   // also given by platformio.ini (25, 24)
 #define PIN_GPS_TX (GPS_TX)
+#endif
+#ifndef PIN_GPS_RX
 #define PIN_GPS_RX (GPS_RX)
+#endif
+#ifndef PIN_GPS_EN   // also given by platformio.ini (33)
 #define PIN_GPS_EN (GPS_EN)
+#endif
 
 #define PIN_SERIAL1_TX (PIN_GPS_TX)
 #define PIN_SERIAL1_RX (PIN_GPS_RX)

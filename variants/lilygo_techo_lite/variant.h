@@ -97,7 +97,9 @@
 
 #define USE_SX1262
 #define LORA_CS                 _PINNUM(0, 11)
+#ifndef SX126X_POWER_EN   // also given by platformio.ini
 #define SX126X_POWER_EN         _PINNUM(0, 30)
+#endif
 #define SX126X_DIO1             _PINNUM(1, 8)
 #define SX126X_DIO2             _PINNUM(0, 5)
 #define SX126X_BUSY             _PINNUM(0, 14)

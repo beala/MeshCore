@@ -102,7 +102,9 @@
 #define ADC_MULTIPLIER (4.916F)
 #define MV_LSB (3000.0F / 4096.0F)
 
+#ifndef NRF52_POWER_MANAGEMENT   // also given by platformio.ini
 #define NRF52_POWER_MANAGEMENT
+#endif
 #define PWRMGT_VOLTAGE_BOOTLOCK 3100
 #define PWRMGT_LPCOMP_AIN 2
 #define PWRMGT_LPCOMP_REFSEL 1
