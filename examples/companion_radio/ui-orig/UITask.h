@@ -37,7 +37,6 @@ class UITask : public AbstractUITask {
   bool _need_refresh = true;
   bool _displayWasOn = false;  // Track display state before button press
   unsigned long ui_started_at;
-  unsigned long _press_flash_until = 0;   // LED flash for a button press that counted
 
   // Button handlers
 #ifdef PIN_USER_BTN

@@ -8,8 +8,6 @@
 #endif
 #define BOOT_SCREEN_MILLIS   3000   // 3 seconds
 
-#define PRESS_FLASH_MILLIS 80     // LED flash when a button press counts
-
 #if defined(PIN_STATUS_LED) || defined(PIN_STATUS_LED_R)
 #define LED_ON_MILLIS     20
 #define LED_ON_MSG_MILLIS 200
@@ -340,29 +338,25 @@ static void statusLedWheel(uint8_t pos) {   // smooth hue sweep, 0..255
 
 void UITask::userLedHandler() {
 #if defined(STATUS_LED_RGB) || defined(PIN_STATUS_LED)
-  // a short flash for each button press that counted; shown even with 'set led off', which stops the
-  // idle blinking, since it only answers a press
-  static bool press_flash = false;
-  if (_press_flash_until && (long)(millis() - _press_flash_until) < 0) {
-    if (!press_flash) {
+  // the LED is on while the button is held down (even with 'set led off', which stops the idle blinking),
+  // so each press shows as it happens
+  bool held = false;
+#ifdef PIN_USER_BTN
+  if (_userButton && _userButton->isPressed()) held = true;
+#endif
+#ifdef PIN_USER_BTN_ANA
+  if (_userButtonAnalog && _userButtonAnalog->isPressed()) held = true;
+#endif
+  static bool press_led = false;
+  if (held != press_led) {
+    press_led = held;
   #ifdef STATUS_LED_RGB
-      statusLedWrite(90, 90, 90);
+    if (held) statusLedWrite(90, 90, 90); else statusLedWrite(0, 0, 0);
   #else
-      digitalWrite(PIN_STATUS_LED, LED_STATE_ON);
+    digitalWrite(PIN_STATUS_LED, held ? LED_STATE_ON : !LED_STATE_ON);
   #endif
-      press_flash = true;
-    }
-    return;
   }
-  if (press_flash) {
-  #ifdef STATUS_LED_RGB
-    statusLedWrite(0, 0, 0);
-  #else
-    digitalWrite(PIN_STATUS_LED, !LED_STATE_ON);
-  #endif
-    press_flash = false;
-    _press_flash_until = 0;
-  }
+  if (held) return;
 
   static bool led_was_off = false;
   if (_node_prefs->led_off) {   // turned off with 'set led off'
@@ -587,10 +581,6 @@ void UITask::handleButtonAnyPress() {
   // called on any button press before other events, to wake up the display quickly
   // do not refresh the display here, as it may block the button handler
   stopFindMe();   // found it
-  _press_flash_until = millis() + PRESS_FLASH_MILLIS;   // feedback: this press counted
-#ifdef PIN_BUZZER
-  if (!buzzer.isQuiet()) buzzer.play("tick:d=32,o=7,b=250:c");
-#endif
   if (_display != NULL) {
     _displayWasOn = _display->isOn();  // Track display state before any action
     if (!_displayWasOn) {
