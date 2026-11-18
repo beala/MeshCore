@@ -1,6 +1,17 @@
 # Bluetooth pairing: design
 
-Status: proposal, not built. nRF52 first; ESP32 and RP2040 follow once their libraries are checked.
+Status: partly built, on nRF52 (in `beala/main` since 2026-11-18):
+
+- **Built and bench-tested** (T1000-E, iPhone): Secure Connections (section 1) and the pairing window
+  with the five-press gesture (section 2), including the disconnect outside the window, the power-on
+  window for builds with no button, and a note in the Radio console for each new bond or failed attempt.
+- **Differs from section 2:** boards with a screen use the PIN they already show (random per boot)
+  rather than a fresh one per window; the window's chirp plays only when the buzzer is on.
+- **Not built yet:** `ble pair` (2), a second device during the window (3), presence gating (4), the
+  unsecured timeout and back-off (5), bond clearing and the upgrade wipe (6), PIN reporting (7), ESP32
+  and RP2040.
+
+"The problem today" below describes the firmware before this work.
 
 ## The problem today
 
@@ -234,7 +245,7 @@ Both need checking against their library sources before work starts.
 5. Second device during the window (3).
 6. ESP32, then RP2040.
 
-## Until this ships
+## Until this ships (ESP32 and RP2040 boards; nRF52 builds before 2026-11-18)
 
 Change the PIN from 123456 (`set pin <6 digits>`), reboot, forget the radio on the phone and
 pair again somewhere private. That stops pairing with the default PIN. It doesn't stop someone
