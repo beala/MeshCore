@@ -93,8 +93,9 @@ passkey to swap, so this fallback depends entirely on the second enforcement in 
 - **Every pairing request counts as new**, including from an address that already has a bond.
   Bluefruit lets a pairing overwrite an existing bond, so a bonded address is no exemption.
   Reconnects using an existing bond (`BLE_GAP_EVT_SEC_INFO_REQUEST`) need no window.
-- While open: a distinct LED pattern, and a beep that sounds even when the buzzer is quiet
-  (the T1000-E ships with `BUZZER_DEFAULT_OFF=1`). On a new bond, the Radio console says so.
+- While open: a fast LED blink, even with `set led off`. A chirp when it opens and closes, only
+  when the buzzer is on (the T1000-E ships with `BUZZER_DEFAULT_OFF=1`, so the blink is the sign
+  there). On a new bond, the Radio console says so.
 
 Why tap first rather than approve a pending request: a request that waits for a press can be
 kept pending by an attacker, and then any habitual press approves it.
@@ -224,7 +225,10 @@ Both need checking against their library sources before work starts.
 ## Order of work
 
 1. ~~Bench test of section 1 on nRF52~~ done: static passkey with Secure Connections works.
-2. Pairing window and five-press gesture (2), unsecured timeout and back-off (5).
+2. ~~Pairing window and five-press gesture (2)~~ done; bench 2026-11-18, T1000-E and iPhone: refused
+   with the window closed, paired at level 4 inside it and closed after, timed out at 60 s, a wrong
+   PIN failed and a retry in the same window worked, the bonded phone reconnected with no press.
+   Still to do: unsecured timeout and back-off (5).
 3. Presence gating (4).
 4. Bonds: clear command and upgrade wipe (6); PIN reporting (7).
 5. Second device during the window (3).

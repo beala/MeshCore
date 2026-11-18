@@ -551,17 +551,15 @@ void UITask::loop() {
 #endif
 #ifdef PIN_BUZZER
   {
-    // the pairing window opening (rising) or closing (falling) is heard even with the buzzer off
+    // the pairing window opening (rising) or closing (falling), when the buzzer is on (the LED blinks either way)
     static bool pairing_was_open = false;
     bool pairing_open = isPairingWindowOpen();
     if (pairing_open != pairing_was_open) {
       pairing_was_open = pairing_open;
-      _pair_tune_until = millis() + 1500;
-      buzzer.quiet(false);
-      buzzer.play(pairing_open ? "PairOpen:d=16,o=6,b=200:c,e,g,c7" : "PairShut:d=16,o=6,b=200:c7,g,e,c");
+      if (!_node_prefs->buzzer_quiet && !finding)
+        buzzer.play(pairing_open ? "PairOpen:d=16,o=6,b=200:c,e,g,c7" : "PairShut:d=16,o=6,b=200:c7,g,e,c");
     }
-    bool chirp = (long)(millis() - _pair_tune_until) < 0;
-    bool quiet = _node_prefs->buzzer_quiet && !finding && !chirp;   // 'find me' beeps even if the buzzer is off
+    bool quiet = _node_prefs->buzzer_quiet && !finding;   // 'find me' beeps even if the buzzer is off
     if (was_finding && !finding) buzzer.stop();
     if (buzzer.isQuiet() != quiet) buzzer.quiet(quiet);
     if (finding && !buzzer.isPlaying()) buzzer.play(FIND_ME_TUNE);
