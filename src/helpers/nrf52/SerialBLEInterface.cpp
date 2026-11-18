@@ -110,6 +110,22 @@ void SerialBLEInterface::onPairingComplete(uint16_t connection_handle, uint8_t a
 
 void SerialBLEInterface::onBLEEvent(ble_evt_t* evt) {
   if (!instance) return;
+
+  // bench test: what each pairing used, for the Radio console (takePairingReport)
+  if (evt->header.evt_id == BLE_GAP_EVT_SEC_PARAMS_REQUEST) {
+    const ble_gap_sec_params_t* p = &evt->evt.gap_evt.params.sec_params_request.peer_params;
+    instance->_pr_peer_lesc = p->lesc;
+    instance->_pr_peer_mitm = p->mitm;
+    instance->_pr_peer_io = p->io_caps;
+    instance->_pr_peer_seen = true;
+  } else if (evt->header.evt_id == BLE_GAP_EVT_AUTH_STATUS) {
+    const ble_gap_evt_auth_status_t* a = &evt->evt.gap_evt.params.auth_status;
+    instance->_pr_status = a->auth_status;
+    instance->_pr_lesc = a->lesc;
+    instance->_pr_bonded = a->bonded;
+    instance->_pr_lv = a->sm1_levels.lv4 ? 4 : a->sm1_levels.lv3 ? 3 : a->sm1_levels.lv2 ? 2 : 1;
+    instance->_pr_pending = true;
+  }
   
   if (evt->header.evt_id == BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST) {
     uint16_t conn_handle = evt->evt.gap_evt.conn_handle;
@@ -179,9 +195,19 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
   Bluefruit.setTxPower(BLE_TX_POWER);
   Bluefruit.setName(dev_name);
 
+  // Not Security.setPIN(): it turns Secure Connections off (lesc = 0), and Legacy pairing derives its
+  // keys from the 6-digit passkey, so one recorded pairing gives away the key. Set the same static
+  // passkey straight in the SoftDevice instead, and leave lesc at Bluefruit's default (1 on the
+  // nRF52840, which has the CryptoCell for it). The SoftDevice keeps the pointer: static buffer
+  static char passkey[BLE_GAP_PASSKEY_LEN + 1];
+  memcpy(passkey, charpin, sizeof(passkey));
+  passkey[BLE_GAP_PASSKEY_LEN] = 0;
+  ble_opt_t opt;
+  memset(&opt, 0, sizeof(opt));
+  opt.gap_opt.passkey.p_passkey = (const uint8_t*)passkey;
+  _passkey_set_err = (strlen(charpin) == BLE_GAP_PASSKEY_LEN) ? sd_ble_opt_set(BLE_GAP_OPT_PASSKEY, &opt) : 0xFFFF;
   Bluefruit.Security.setMITM(true);
-  Bluefruit.Security.setPIN(charpin);
-  Bluefruit.Security.setIOCaps(true, false, false);
+  Bluefruit.Security.setIOCaps(true, false, false);   // display only: the phone types the passkey
   Bluefruit.Security.setPairPasskeyCallback(onPairingPasskey);
   Bluefruit.Security.setPairCompleteCallback(onPairingComplete);
 
@@ -226,6 +252,26 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
 
   Bluefruit.Advertising.restartOnDisconnect(true);
 
+}
+
+bool SerialBLEInterface::takePairingReport(char* out, size_t len) {
+  if (!_pr_pending) return false;
+  _pr_pending = false;
+  static const char* const io_names[] = { "display", "display+yes/no", "keyboard", "no I/O", "keyboard+display" };
+  const char* io = _pr_peer_seen && _pr_peer_io < 5 ? io_names[_pr_peer_io] : "?";
+  if (_pr_status == BLE_GAP_SEC_STATUS_SUCCESS) {
+    snprintf(out, len, "Paired: %s, %s (level %u, %s). Phone asked lesc=%u mitm=%u io=%s. Passkey opt err=0x%X",
+             _pr_lesc ? "Secure Connections" : "Legacy",
+             _pr_lv >= 3 ? "passkey" : "Just Works, no passkey",
+             _pr_lv, _pr_bonded ? "bonded" : "not bonded",
+             _pr_peer_lesc, _pr_peer_mitm, io, (unsigned)_passkey_set_err);
+  } else {
+    snprintf(out, len, "Pairing failed: status 0x%02X (%s). Phone asked lesc=%u mitm=%u io=%s",
+             _pr_status, (_pr_status == BLE_GAP_SEC_STATUS_PASSKEY_ENTRY_FAILED || _pr_status == BLE_GAP_SEC_STATUS_CONFIRM_VALUE) ? "wrong passkey" : "see ble_gap.h",
+             _pr_peer_lesc, _pr_peer_mitm, io);
+  }
+  _pr_peer_seen = false;
+  return true;
 }
 
 void SerialBLEInterface::clearBuffers() {

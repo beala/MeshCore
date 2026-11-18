@@ -304,6 +304,17 @@ void setup() {
 
 void loop() {
   the_mesh.loop();
+#if defined(NRF52_PLATFORM) && defined(BLE_PIN_CODE)
+  {   // bench test of Secure Connections: say how each pairing went
+    char report[200];
+    if (bluetooth_interface.takePairingReport(report, sizeof(report))) {
+#ifndef ENABLE_USB_INTERFACE
+      Serial.println(report);
+#endif
+      the_mesh.postConsoleNote(report);
+    }
+  }
+#endif
   interface_manager.loop();
   sensors.loop();
 #ifdef DISPLAY_CLASS

@@ -16,6 +16,13 @@ class SerialBLEInterface : public BaseSerialInterface {
   unsigned long _last_health_check;
   unsigned long _last_retry_attempt;
 
+  // bench test of Secure Connections: the last pairing's result, set from the Bluetooth task
+  uint32_t _passkey_set_err = 0;
+  volatile bool _pr_pending = false;
+  bool _pr_peer_seen = false;
+  uint8_t _pr_status = 0, _pr_lesc = 0, _pr_bonded = 0, _pr_lv = 0;
+  uint8_t _pr_peer_lesc = 0, _pr_peer_mitm = 0, _pr_peer_io = 0;
+
   struct Frame {
     uint8_t len;
     uint8_t buf[MAX_FRAME_SIZE];
@@ -75,6 +82,8 @@ public:
   void begin(const char* prefix, char* name, uint32_t pin_code);
 
   void disconnect();
+  // bench test: a line about the last pairing, once each, or false if none since the last call
+  bool takePairingReport(char* out, size_t len);
   void enable() override;
   void disable() override;
   bool isEnabled() const override { return _isEnabled; }

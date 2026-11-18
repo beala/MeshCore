@@ -526,6 +526,8 @@ private:
   int fillBattAndStorage(uint8_t* out);
   void handleSideFrame(uint8_t* frame, size_t len);
 public:
+  void postConsoleNote(const char* text) { consoleNote(text); }   // bench test: pairing report
+
   // Packets that failed their CRC check, read as far as they go and shown in one more receive-only
   // channel after Aircraft's (MyMeshDamaged.cpp, docs/damaged_packets.md)
   struct DamagedMsg {
