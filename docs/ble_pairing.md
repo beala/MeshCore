@@ -58,7 +58,8 @@ bench test first** (see Testing).
 Secure Connections "Just Works" on boards without a screen, protected by the pairing window.
 All characteristics then drop from `SECMODE_ENC_WITH_MITM` to `SECMODE_ENC_NO_MITM`, since Just
 Works can't give MITM protection. The physical press takes over that job: an attacker would
-have to pair during the 60 s you opened, while you're pairing your own device.
+have to pair during the 60 s you opened, while you're pairing your own device. Just Works has no
+passkey to swap, so this fallback depends entirely on the second enforcement in section 2.
 
 ### 2. The pairing window
 
@@ -73,6 +74,17 @@ have to pair during the 60 s you opened, while you're pairing your own device.
   - on boards without one: the PIN set with `set pin` (or 123456 if none is set).
 - The window closes after one successful bond, after 60 s, or when the button is pressed five
   times again.
+- **Second enforcement: disconnect.** The passkey swap only works when a passkey is used. Two
+  paths have none: the Just Works fallback, and a central that declares no input or output
+  (the SoftDevice may then fall back to Just Works despite our `mitm = 1`, and save an
+  unauthenticated bond under an address the peer supplies, possibly overwriting the phone's).
+  So when `BLE_GAP_EVT_SEC_PARAMS_REQUEST` arrives outside the window, disconnect at once.
+  Bluefruit has already replied by then: it answers inside its own handler
+  (`BLESecurity.cpp:307`) before the app's event callback runs (`bluefruit.cpp:795` vs `:939`).
+  The disconnect still lands before the remaining pairing round trips, so no bond should be
+  saved. **Bench-test first.** If it doesn't hold, patch the forked framework (already pinned
+  at `meshcore-dev/Adafruit_nRF52_Arduino`) so the reply asks the app first and answers
+  `BLE_GAP_SEC_STATUS_PAIRING_NOT_SUPP` when the window is closed.
 - **Every pairing request counts as new**, including from an address that already has a bond.
   Bluefruit lets a pairing overwrite an existing bond, so a bonded address is no exemption.
   Reconnects using an existing bond (`BLE_GAP_EVT_SEC_INFO_REQUEST`) need no window.
@@ -82,9 +94,12 @@ have to pair during the 60 s you opened, while you're pairing your own device.
 Why tap first rather than approve a pending request: a request that waits for a press can be
 kept pending by an attacker, and then any habitual press approves it.
 
-**Button.** `ui-orig/Button.cpp` counts up to four clicks (`:154`). Add a fifth
-(`onQuintuplePress`), with the same 500 ms gap. `ui-new` and `ui-tiny` use `MomentaryButton`,
-which needs the same. Five presses is free in all three UIs.
+**Button.** Five presses isn't a gesture yet, and today it triggers something else:
+`ui-orig/Button.cpp:154` treats 4 or more clicks as a quad press (GPS toggle), and
+`src/helpers/ui/MomentaryButton.cpp:134-137` (used by `ui-new` and `ui-tiny`) treats 4 or more as
+a triple click. Add a five-click event to both (`onQuintuplePress` /
+`BUTTON_EVENT_QUINTUPLE_CLICK`), with the same click gap, and make 4 mean exactly 4. Nothing is
+bound to five clicks in any UI, so it's free once added.
 
 **Boards without a user button** (no `PIN_USER_BTN`): the window opens for 60 s after power-on.
 Power-cycling is the physical step.
@@ -103,19 +118,26 @@ before it can pair. While the window is open, it's held instead:
   client at a time.
 - If it doesn't secure within 60 s, it's disconnected.
 - Outside the window, a second central is dropped as now.
+- A second device that is already bonded reconnects with its bond, without pairing. It's
+  dropped, window or not, so two of your own devices don't take the link from each other. To
+  switch, disconnect the first.
 
 `Bluefruit.begin(2, 0)` already allows two links.
 
 ### 4. Presence for dangerous commands
 
 Five presses also open a **presence window** of 60 s. Without it, these are refused over
-Bluetooth (they still work over USB):
+Bluetooth, and still work over USB. That needs plumbing: `MultiSerialInterface::checkRecvFrame`
+returns a frame without saying which interface it came from, so it has to report the source.
+The commands:
 
 - `CMD_EXPORT_PRIVATE_KEY` and `CMD_IMPORT_PRIVATE_KEY`
 - `clone send` and `clone receive`
 - `set pin`
-- the DFU service: register it with a write handler that refuses entry into the bootloader
-  unless the presence window is open. (Once in the bootloader's DFU mode, the update itself is
+- the DFU service: refuse entry into the bootloader unless the presence window is open.
+  *Unverified how:* `BLEDfu`'s control point uses a static authorize callback inside
+  `BLEDfu.cpp` (`:88`). A subclass can reach `_chr_control` (protected) and install its own
+  callback, but would have to reimplement that one; otherwise patch the fork. (Once in the bootloader's DFU mode, the update itself is
   not authenticated. That's outside this design; gating the entry is what we control.)
 
 The same rules apply on the fluxcore side channel, which runs the full CLI
@@ -154,6 +176,7 @@ longer shows "random" for a radio using 123456.
 | Holding the only connection slot | Times out after 60 s |
 | Stolen bond: read messages, use the radio | Still possible until bonds are cleared |
 | Stolen bond: take the key, clone, flash firmware | Needs presence at the radio |
+| Someone with the PIN pairing during a window you opened | Not addressed (short window; check the console note) |
 | Fake radio fooling the phone | Not addressed (phone and app side) |
 | Someone holding the radio | Not addressed |
 
@@ -167,11 +190,14 @@ longer shows "random" for a radio using 123456.
 1. **Secure Connections.** Pair with Android's Bluetooth HCI snoop log on. In Wireshark, the
    radio's Pairing Response must show `Secure Connections: True`. If it doesn't, take the
    fallback in section 1.
-2. Pairing outside the window fails, and no bond file is written.
+2. Pairing outside the window fails, and no bond file is written. Repeat with a central that
+   declares no input/output (e.g. nRF Connect with "no I/O" bonding, or a scripted central):
+   it must also fail with no bond written.
 3. Pairing inside the window works; the window closes after it.
 4. A bonded phone reconnects with no press. The fluxcore web app on that phone connects with no
    press.
 5. Pairing from a bonded address outside the window fails, and the existing bond still works.
+   Repeat with a no-I/O central using the bonded address.
 6. A second device during the window pairs and takes over; outside the window it's dropped.
 7. Key export, `clone send`, `set pin` and DFU entry are refused without presence and work with
    it.
