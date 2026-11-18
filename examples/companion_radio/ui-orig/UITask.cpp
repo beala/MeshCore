@@ -84,6 +84,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _userButton->onDoublePress([this]() { handleButtonDoublePress(); });
   _userButton->onTriplePress([this]() { handleButtonTriplePress(); });
   _userButton->onQuadruplePress([this]() { handleButtonQuadruplePress(); });
+  _userButton->onQuintuplePress([this]() { handleButtonQuintuplePress(); });
   _userButton->onLongPress([this]() { handleButtonLongPress(); });
   _userButton->onAnyPress([this]() { handleButtonAnyPress(); });
 #endif
@@ -98,6 +99,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _userButtonAnalog->onDoublePress([this]() { handleButtonDoublePress(); });
   _userButtonAnalog->onTriplePress([this]() { handleButtonTriplePress(); });
   _userButtonAnalog->onQuadruplePress([this]() { handleButtonQuadruplePress(); });
+  _userButtonAnalog->onQuintuplePress([this]() { handleButtonQuintuplePress(); });
   _userButtonAnalog->onLongPress([this]() { handleButtonLongPress(); });
   _userButtonAnalog->onAnyPress([this]() { handleButtonAnyPress(); });
 #endif
@@ -358,6 +360,27 @@ void UITask::userLedHandler() {
   }
   if (held) return;
 
+  // the Bluetooth pairing window: a quick blink while it's open, even with 'set led off'
+  static bool pairing_led = false;
+  if (isPairingWindowOpen()) {
+    bool on = (millis() / 150) % 2;
+  #ifdef STATUS_LED_RGB
+    if (on) statusLedWrite(0, 0, 120); else statusLedWrite(0, 0, 0);
+  #else
+    digitalWrite(PIN_STATUS_LED, on ? LED_STATE_ON : !LED_STATE_ON);
+  #endif
+    pairing_led = true;
+    return;
+  }
+  if (pairing_led) {   // just closed: leave it dark, whatever comes next
+    pairing_led = false;
+  #ifdef STATUS_LED_RGB
+    statusLedWrite(0, 0, 0);
+  #else
+    digitalWrite(PIN_STATUS_LED, !LED_STATE_ON);
+  #endif
+  }
+
   static bool led_was_off = false;
   if (_node_prefs->led_off) {   // turned off with 'set led off'
     if (!led_was_off) {
@@ -528,7 +551,17 @@ void UITask::loop() {
 #endif
 #ifdef PIN_BUZZER
   {
-    bool quiet = _node_prefs->buzzer_quiet && !finding;   // 'find me' beeps even if the buzzer is off
+    // the pairing window opening (rising) or closing (falling) is heard even with the buzzer off
+    static bool pairing_was_open = false;
+    bool pairing_open = isPairingWindowOpen();
+    if (pairing_open != pairing_was_open) {
+      pairing_was_open = pairing_open;
+      _pair_tune_until = millis() + 1500;
+      buzzer.quiet(false);
+      buzzer.play(pairing_open ? "PairOpen:d=16,o=6,b=200:c,e,g,c7" : "PairShut:d=16,o=6,b=200:c7,g,e,c");
+    }
+    bool chirp = (long)(millis() - _pair_tune_until) < 0;
+    bool quiet = _node_prefs->buzzer_quiet && !finding && !chirp;   // 'find me' beeps even if the buzzer is off
     if (was_finding && !finding) buzzer.stop();
     if (buzzer.isQuiet() != quiet) buzzer.quiet(quiet);
     if (finding && !buzzer.isPlaying()) buzzer.play(FIND_ME_TUNE);
@@ -681,6 +714,15 @@ void UITask::handleButtonQuadruplePress() {
       }
     }
   }
+  _need_refresh = true;
+}
+
+void UITask::handleButtonQuintuplePress() {
+  MESH_DEBUG_PRINTLN("UITask: quintuple press triggered");
+  // Bluetooth pairing window: open for a new device to pair, or closed again (docs/ble_pairing.md).
+  // The LED and the buzzer say which (userLedHandler, loop)
+  bool open = togglePairingWindow();
+  sprintf(_alert, open ? "Pairing open 60s" : "Pairing closed");
   _need_refresh = true;
 }
 

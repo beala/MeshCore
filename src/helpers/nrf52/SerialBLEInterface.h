@@ -16,12 +16,23 @@ class SerialBLEInterface : public BaseSerialInterface {
   unsigned long _last_health_check;
   unsigned long _last_retry_attempt;
 
-  // bench test of Secure Connections: the last pairing's result, set from the Bluetooth task
-  uint32_t _passkey_set_err = 0;
+  // The pairing window (docs/ble_pairing.md). Closed: no passkey is set, so the SoftDevice makes up a
+  // random one per attempt and shows it nowhere, and a pairing request is answered with a disconnect.
+  // Written in the main loop, read in the Bluetooth task.
+  volatile bool _pw_open = false;
+  unsigned long _pw_until = 0;
+  volatile bool _pw_bonded = false;     // a pairing succeeded while open: close it (main loop)
+  uint32_t _passkey_set_err = 0;        // the last sd_ble_opt_set(BLE_GAP_OPT_PASSKEY) result
+  bool setPasskey(bool on);
+
+  // What happened to pairing, for the Radio console and serial. Set from the Bluetooth task
   volatile bool _pr_pending = false;
   bool _pr_peer_seen = false;
   uint8_t _pr_status = 0, _pr_lesc = 0, _pr_bonded = 0, _pr_lv = 0;
   uint8_t _pr_peer_lesc = 0, _pr_peer_mitm = 0, _pr_peer_io = 0;
+  volatile uint16_t _pr_refused = 0;    // pairing requests refused with the window closed
+  uint16_t _pr_refused_told = 0;
+  volatile uint8_t _pr_window = 0;      // 1 opened, 2 closed (timeout or press), 3 closed after a bond
 
   struct Frame {
     uint8_t len;
@@ -83,7 +94,14 @@ public:
 
   void disconnect();
   // bench test: a line about the last pairing, once each, or false if none since the last call
-  bool takePairingReport(char* out, size_t len);
+  // isConsole: set when the line is for the Radio console; false means serial only
+  bool takePairingReport(char* out, size_t len, bool* isConsole);
+
+  void loop() override;
+  bool hasPairingWindow() const override { return true; }
+  void openPairingWindow(uint32_t ms) override;
+  void closePairingWindow() override;
+  bool isPairingWindowOpen() const override { return _pw_open; }
   void enable() override;
   void disable() override;
   bool isEnabled() const override { return _isEnabled; }

@@ -52,6 +52,16 @@ public:
   void enableBluetooth() { _interfaceManager->enableBluetooth(); }
   void disableBluetooth() { _interfaceManager->disableBluetooth(); }
 
+  // five presses: open the Bluetooth pairing window, or close it if it's open. Returns whether it's
+  // open now; false too where pairing has no window (it's open all the time there)
+  bool togglePairingWindow() {
+    if (!_interfaceManager->hasPairingWindow()) return false;
+    if (_interfaceManager->isPairingWindowOpen()) _interfaceManager->closePairingWindow();
+    else _interfaceManager->openPairingWindow(PAIRING_WINDOW_MS);
+    return _interfaceManager->isPairingWindowOpen();
+  }
+  bool isPairingWindowOpen() const { return _interfaceManager->isPairingWindowOpen(); }
+
   bool startFindMe(uint32_t secs) override {
 #ifdef HAS_FIND_ME
     _find_start = millis();

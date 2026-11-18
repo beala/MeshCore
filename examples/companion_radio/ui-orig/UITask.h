@@ -56,6 +56,8 @@ class UITask : public AbstractUITask {
   void handleButtonDoublePress();
   void handleButtonTriplePress();
   void handleButtonQuadruplePress();
+  void handleButtonQuintuplePress();
+  unsigned long _pair_tune_until = 0;   // the pairing window's beep plays even with the buzzer off
   void handleButtonLongPress();
 
  

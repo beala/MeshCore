@@ -7,6 +7,7 @@
 #define BUTTON_EVENT_LONG_PRESS  2
 #define BUTTON_EVENT_DOUBLE_CLICK 3
 #define BUTTON_EVENT_TRIPLE_CLICK 4
+#define BUTTON_EVENT_QUINTUPLE_CLICK 5   // five or more: the Bluetooth pairing window
 
 class MomentaryButton {
   int8_t _pin;

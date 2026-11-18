@@ -221,6 +221,11 @@ void setup() {
 #if defined(BLE_PIN_CODE)
   bluetooth_interface.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
   interface_manager.addInterface(InterfaceType::Bluetooth, &bluetooth_interface);
+  #if !(defined(DISPLAY_CLASS) && (defined(PIN_USER_BTN) || defined(PIN_USER_BTN_ANA)))
+  // no button to open the pairing window with five presses: it's open for a while after power-on,
+  // so power-cycling is the step at the radio
+  bluetooth_interface.openPairingWindow(PAIRING_WINDOW_MS);
+  #endif
 #endif
 
 // add wifi interface
@@ -305,13 +310,14 @@ void setup() {
 void loop() {
   the_mesh.loop();
 #if defined(NRF52_PLATFORM) && defined(BLE_PIN_CODE)
-  {   // bench test of Secure Connections: say how each pairing went
+  {   // what Bluetooth pairing did: new bonds and failed attempts to the Radio console, all of it to serial
     char report[200];
-    if (bluetooth_interface.takePairingReport(report, sizeof(report))) {
+    bool console;
+    if (bluetooth_interface.takePairingReport(report, sizeof(report), &console)) {
 #ifndef ENABLE_USB_INTERFACE
       Serial.println(report);
 #endif
-      the_mesh.postConsoleNote(report);
+      if (console) the_mesh.postConsoleNote(report);
     }
   }
 #endif

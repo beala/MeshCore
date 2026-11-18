@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #define MAX_FRAME_SIZE  176   // +4 for transport codes (region scoping)
+#define PAIRING_WINDOW_MS  60000UL   // how long the Bluetooth pairing window stays open
 
 class BaseSerialInterface {
 protected:
@@ -24,6 +25,13 @@ public:
   // its own frames in and out, so neither app sees the other's. Bluetooth only; others have none.
   virtual size_t checkRecvSideFrame(uint8_t dest[]) { (void)dest; return 0; }
   virtual size_t writeSideFrame(const uint8_t src[], size_t len) { (void)src; (void)len; return 0; }
+
+  // The pairing window (docs/ble_pairing.md): a new Bluetooth bond only while it's open, opened at the
+  // radio. Only nRF52 gates pairing so far; elsewhere these do nothing and pairing works as before.
+  virtual bool hasPairingWindow() const { return false; }
+  virtual void openPairingWindow(uint32_t ms) { (void)ms; }
+  virtual void closePairingWindow() { }
+  virtual bool isPairingWindowOpen() const { return false; }
 };
 
 // The fluxcore service: frames in (written to RX) and out (notified on TX), as on the UART service

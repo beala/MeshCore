@@ -81,6 +81,29 @@ public:
     }
   }
 
+  bool hasPairingWindow() const override {
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.type == InterfaceType::Bluetooth && iface.instance->hasPairingWindow()) return true;
+    }
+    return false;
+  }
+  void openPairingWindow(uint32_t ms) override {
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.type == InterfaceType::Bluetooth) iface.instance->openPairingWindow(ms);
+    }
+  }
+  void closePairingWindow() override {
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.type == InterfaceType::Bluetooth) iface.instance->closePairingWindow();
+    }
+  }
+  bool isPairingWindowOpen() const override {
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.type == InterfaceType::Bluetooth && iface.instance->isPairingWindowOpen()) return true;
+    }
+    return false;
+  }
+
   bool isBluetoothEnabled() {
     for(auto iface : _interfaces){
       if(iface.instance && iface.type == InterfaceType::Bluetooth){

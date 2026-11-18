@@ -633,6 +633,8 @@ void UITask::loop() {
   ev = back_btn.check();
   if (ev == BUTTON_EVENT_TRIPLE_CLICK) {
     c = handleTripleClick(KEY_SELECT);
+  } else if (ev == BUTTON_EVENT_QUINTUPLE_CLICK) {
+    handleQuintupleClick();
   }
 #elif defined(PIN_USER_BTN)
   int ev = user_btn.check();
@@ -644,6 +646,8 @@ void UITask::loop() {
     c = handleDoubleClick(KEY_PREV);
   } else if (ev == BUTTON_EVENT_TRIPLE_CLICK) {
     c = handleTripleClick(KEY_SELECT);
+  } else if (ev == BUTTON_EVENT_QUINTUPLE_CLICK) {
+    handleQuintupleClick();
   }
 #endif
 #if defined(PIN_USER_BTN_ANA)
@@ -657,6 +661,8 @@ void UITask::loop() {
       c = handleDoubleClick(KEY_PREV);
     } else if (ev == BUTTON_EVENT_TRIPLE_CLICK) {
       c = handleTripleClick(KEY_SELECT);
+    } else if (ev == BUTTON_EVENT_QUINTUPLE_CLICK) {
+      handleQuintupleClick();
     }
     _analogue_pin_read_millis = millis();
   }
@@ -822,6 +828,18 @@ char UITask::handleDoubleClick(char c) {
   MESH_DEBUG_PRINTLN("UITask: double-click triggered");
   checkDisplayOn(c);
   return c;
+}
+
+void UITask::handleQuintupleClick() {
+  // Bluetooth pairing window: open for a new device to pair, or closed again (docs/ble_pairing.md)
+  if (!_interfaceManager->hasPairingWindow()) return;
+  char msg[40];
+  if (togglePairingWindow()) {
+    sprintf(msg, "Pairing open, Pin:%lu", (unsigned long)the_mesh.getBLEPin());
+    showAlert(msg, (int)PAIRING_WINDOW_MS);
+  } else {
+    showAlert("Pairing closed", 1500);
+  }
 }
 
 char UITask::handleTripleClick(char c) {
