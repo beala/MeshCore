@@ -41,6 +41,9 @@
 // RX drain buffer size for overflow protection
 #define BLE_RX_DRAIN_BUF_SIZE      32
 
+#define BLE_LED_BLINK_INTERVAL_MS  500    // BLE_LED_PAIRING_BLINK: 500ms on, 500ms off
+#define BLE_LED_WINDOW_BLINK_MS    150    // while the pairing window is open: the status LED's rate
+
 static SerialBLEInterface* instance = nullptr;
 
 // the PIN, while the pairing window is open. The SoftDevice keeps the pointer, so it lives here
@@ -181,10 +184,14 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
   char charpin[20];
   snprintf(charpin, sizeof(charpin), "%lu", (unsigned long)pin_code);
   
-  #ifdef DISABLE_BLE_LED  // use variant platformio.ini build_flags macro: -D DISABLE_BLE_LED
+  #if defined(DISABLE_BLE_LED) || defined(BLE_LED_PAIRING_BLINK)  // use variant platformio.ini build_flags macro: -D DISABLE_BLE_LED
     Bluefruit.autoConnLed(false);  // false removes the automatic control of the LED by the Bluefruit library
   #else
     Bluefruit.autoConnLed(true);  // true leaves the default automatic control of the LED by the Bluefruit library
+  #endif
+  #ifdef BLE_LED_PAIRING_BLINK
+    pinMode(LED_BLUE, OUTPUT);
+    setLedLit(false);   // loop() blinks it while no phone is connected
   #endif
   
   Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
@@ -336,6 +343,7 @@ void SerialBLEInterface::loop() {
   } else if (_pw_open && (long)(millis() - _pw_until) >= 0) {
     closePairingWindow();
   }
+  updateLed();
 }
 
 bool SerialBLEInterface::takePairingReport(char* out, size_t len, bool* isConsole) {
@@ -425,6 +433,43 @@ bool SerialBLEInterface::isAdvertising() const {
   ble_gap_addr_t adv_addr;
   uint32_t err_code = sd_ble_gap_adv_addr_get(0, &adv_addr);
   return (err_code == NRF_SUCCESS);
+}
+
+void SerialBLEInterface::setLedLit(bool lit) {
+#ifdef BLE_LED_PAIRING_BLINK
+  _led_lit = lit;
+  digitalWrite(LED_BLUE, lit ? LED_STATE_ON : (1 - LED_STATE_ON));
+#else
+  (void)lit;
+#endif
+}
+
+void SerialBLEInterface::setLedEnabled(bool enabled) {
+  _led_enabled = enabled;   // loop() turns the LED off if it's lit
+}
+
+void SerialBLEInterface::updateLed() {
+#ifdef BLE_LED_PAIRING_BLINK
+  unsigned long now = millis();
+  if (_pw_open) {
+    // the pairing window: a fast blink even with 'set led off', as on the status LED (docs/ble_pairing.md).
+    // Boards with this LED have no status LED to show the window otherwise
+    bool lit = (now / BLE_LED_WINDOW_BLINK_MS) % 2;
+    if (lit != _led_lit) setLedLit(lit);
+    return;
+  }
+  // Advertising carries on while a phone is connected (see onConnect), so blink on "no phone
+  // connected", not on "advertising". Bonded phones can reconnect then; a new one needs the window
+  bool blink = _led_enabled && _isEnabled && _conn_handle == BLE_CONN_HANDLE_INVALID;
+  if (blink) {
+    if (now - _last_led_toggle >= BLE_LED_BLINK_INTERVAL_MS) {
+      _last_led_toggle = now;
+      setLedLit(!_led_lit);
+    }
+  } else if (_led_lit) {
+    setLedLit(false);
+  }
+#endif
 }
 
 void SerialBLEInterface::enable() {
