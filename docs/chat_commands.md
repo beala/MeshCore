@@ -27,6 +27,7 @@ Send `/help` in any chat to see what works there.
 | `/help` | List these commands |
 | `/crypto` | Show the encryption used on this channel |
 | `/crypto legacy`, `/crypto v2`, `/crypto v2only` | Change it |
+| `/fill <n>` | Only after `set dbg on` in the Radio console: n test messages in this channel when the app next disconnects, for timing a sync ([ble_sync.md](ble_sync.md)). `/fill 0` cancels |
 
 ## Details
 
