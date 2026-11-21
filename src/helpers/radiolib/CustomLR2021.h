@@ -359,9 +359,6 @@ private:
     // threshDb: detection threshold above the noise measured at the start (0 = 10 dB).
     // gain: fixed receiver gain step 1-13 (0 = automatic). fskRead/fskStop/fskRearm work the same.
     int16_t adsbStart(float freqMHz, float rxbwKHz, uint8_t threshDb = 0, uint8_t gain = 0, int8_t threshDbm = 0);
-    // Pulses (eg. radar interrogations at 1030 MHz): every pulse above the threshold ends a 1-byte
-    // packet, so each RxDone marks one; the caller just counts them. fskRearm/fskStop as above.
-    int16_t pulseStart(float freqMHz, float rxbwKHz, uint8_t threshDb = 0, uint8_t gain = 0, int8_t threshDbm = 0);
     // Raw on-off keyed chips (eg. utility meters at 32768 chip/s): the detector pattern (first chip in
     // the LSB, 2-16 chips), then the sync word (1-4 bytes, sent MSB first), then pktLen bytes of chips
     // as they came (no Manchester, CRC or whitening: the caller reads them). fskRead/fskStop as above.

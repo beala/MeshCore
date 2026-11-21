@@ -689,8 +689,6 @@ public:
         if ((int32_t)(_fsk_hold_until - now) > 0) return;
         int16_t st = _fsk_cfg.modem == MODEM_ADSB
           ? r->adsbStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain, _fsk_cfg.thresh_dbm)
-          : _fsk_cfg.modem == MODEM_PULSE
-          ? r->pulseStart(_fsk_cfg.freq, _fsk_cfg.rxbw_khz, _fsk_cfg.thresh_db, _fsk_cfg.gain, _fsk_cfg.thresh_dbm)
           : _fsk_cfg.modem == MODEM_OOK
           ? r->ookRawStart(_fsk_cfg.freq, (uint32_t)(_fsk_cfg.kbps * 1000.0f + 0.5f), _fsk_cfg.rxbw_khz, _fsk_cfg.ook_pattern,
                            _fsk_cfg.ook_pattern_bits, _fsk_cfg.sync, _fsk_cfg.sync_len, (uint8_t) _fsk_cfg.pkt_len,
@@ -740,14 +738,7 @@ public:
           if ((int32_t)(now - _fsk_end) >= 0) endFskListen();
           return;
         }
-        if (_fsk_cfg.modem == MODEM_PULSE) {   // only when: no need to read the chip's byte
-          uint32_t t = millis();
-          memcpy(p.data, &t, 4);
-          p.len = 4;
-          rs = RADIOLIB_ERR_NONE;
-        } else {
-          rs = r->fskRead(p.data, p.len, &rssi);
-        }
+        rs = r->fskRead(p.data, p.len, &rssi);
         if (rs == RADIOLIB_ERR_CRC_MISMATCH) _fsk_bad++;
         if (rs == RADIOLIB_ERR_NONE) {
           p.rssi = (int16_t)rssi;

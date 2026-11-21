@@ -2824,7 +2824,6 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (handleMeterCommand(command, reply)) return true;
   if (handleDamagedCommand(command, reply)) return true;
   if (handleFreqCommand(command, reply)) return true;
-  if (handleRadarCommand(command, reply)) return true;
 
   // hook for variant-specific CLI processing
   if (board.handleCommand(command, sender_timestamp, reply)) {
@@ -3684,14 +3683,10 @@ void MyMesh::loop() {
     BaseChatMesh::loop();
     findLoop();
     meshtasticLoop();
-    if (_radar_active) {   // the radar listen has the radio to itself
-      radarLoop();
-    } else {
-      weatherLoop();
-      aircraftLoop();
-      metarLoop();
-      meterLoop();
-    }
+    weatherLoop();
+    aircraftLoop();
+    metarLoop();
+    meterLoop();
     damagedLoop();
   }
 

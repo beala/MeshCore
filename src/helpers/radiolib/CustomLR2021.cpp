@@ -404,12 +404,6 @@ int16_t CustomLR2021::adsbStart(float fMHz, float rxbwKHz, uint8_t threshDb, uin
   return ookStart(fMHz, 2000000UL, rxbwKHz, 0x0285, 16, 11, 3, RADIOLIB_LR2021_OOK_MANCHESTER_ON_INV, threshDb, gain, threshDbm);
 }
 
-int16_t CustomLR2021::pulseStart(float fMHz, float rxbwKHz, uint8_t threshDb, uint8_t gain, int8_t threshDbm) {
-  // 1 µs chips; any pulse above the threshold followed by a quiet chip ("10", first chip in the LSB)
-  // ends a 1-byte packet: one RxDone per pulse, nothing decoded
-  return ookStart(fMHz, 1000000UL, rxbwKHz, 0x0001, 2, 1, 0, RADIOLIB_LR2021_OOK_MANCHESTER_OFF, threshDb, gain, threshDbm);
-}
-
 int16_t CustomLR2021::ookRawStart(float fMHz, uint32_t bps, float rxbwKHz, uint16_t pattern, uint8_t patBits,
                                   const uint8_t* sync, uint8_t syncLen, uint8_t pktLen, uint8_t threshDb, uint8_t gain,
                                   int8_t threshDbm, uint8_t patRepeats) {

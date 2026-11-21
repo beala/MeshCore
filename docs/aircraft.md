@@ -121,7 +121,7 @@ skipped (`get radio.fsk`: "skipped for mesh traffic"). The same holds with `air 
 can't be heard between those waits, but what you send still goes out and its repeats come back.
 
 Aircraft is one listen at a time with Meshtastic and weather: `air on` turns those off (the reply
-says so). `radar`, copying a radio and `find range` pause it until they finish.
+says so). Copying a radio and `find range` pause it until they finish.
 
 ### A RadioLib detail that matters
 

@@ -67,7 +67,7 @@ none for half a hop (at least 1.5 s), as other copies follow. A packet heard nev
 already running. The time a listen misses isn't held against the sensor.
 
 Weather is one listen at a time with Meshtastic and aircraft: `wx on` turns those off (the reply
-says so). `radar`, copying a radio and `find range` pause it until they finish.
+says so). Copying a radio and `find range` pause it until they finish.
 
 On the chip, a listen is a switch of packet type from LoRa to GFSK with raw commands. Its
 frequency is set after the modulation parameters: RadioLib's DC-DC workaround in

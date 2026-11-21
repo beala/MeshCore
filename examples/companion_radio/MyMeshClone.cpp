@@ -203,7 +203,6 @@ bool MyMesh::handleCloneTransferCommand(const char* command, char* reply) {
   }
   if (!recv && !send) return false;
   if (_xfer_on) { strcpy(reply, "A copy is already running ('clone stop' ends it)."); return true; }
-  if (_radar_active) { strcpy(reply, "Error: the radar listen is running ('radar stop')."); return true; }
   if (_radio->linkModes() == 0) { strcpy(reply, "Error: this radio can't copy (it needs an LR2021 or SX1262)"); return true; }
   // the CPace scalars and the code come from the DRBG; nothing is collected at boot when the key is
   // just loaded, so add the hardware RNG now (as 'get entropy' does)

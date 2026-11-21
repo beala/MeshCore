@@ -1,7 +1,7 @@
 // One listen at a time. Meshtastic (the on-chip scanner), weather, aircraft and airport weather (short FSK/OOK
 // listens away from the mesh) each cost the mesh some of its receive time; together they cost too
-// much, and they got in each other's way. So turning one on turns the others off, and 'radar' and
-// copying a radio, which need the radio to themselves, pause whichever is on until they finish.
+// much, and they got in each other's way. So turning one on turns the others off, and copying a radio
+// and find ranging, which need the radio to themselves, pause whichever is on until they finish.
 
 #include "MyMesh.h"
 
@@ -54,7 +54,7 @@ void MyMesh::drainFsk() {
 bool MyMesh::listensBusy(char* reply) const {
   if (!_listens_paused) return false;
   strcpy(reply, _xfer_on ? "Error: busy copying this radio; try again when it's done"
-                         : "Error: busy listening for radar; try again when it's done ('radar stop')");
+                         : "Error: busy measuring range; try again in a moment");
   return true;
 }
 
