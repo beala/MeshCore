@@ -20,7 +20,7 @@
 #define CMD_SET_ADVERT_NAME           8
 #define CMD_ADD_UPDATE_CONTACT        9
 #define CMD_SYNC_NEXT_MESSAGE         10
-#define SYNC_NOTE_MIN                 10   // BLE_DEBUG_LOGGING: report syncs of at least this many
+#define SYNC_NOTE_MIN                 10   // set dbg on: report syncs of at least this many
 #define CMD_SET_RADIO_PARAMS          11
 #define CMD_SET_RADIO_TX_POWER        12
 #define CMD_RESET_PATH                13
@@ -648,8 +648,10 @@ void MyMesh::handleSlashCommand(const ChatRef& from, char* cmd, char* reply) {
       strcpy(reply, "Commands here run on your radio, nothing is sent:\n"
                     "/crypto: this channel's encryption\n"
                     "/crypto legacy|v2|v2only: change it\n"
-                    "/fill <n>: n test messages here when the app disconnects\n"
                     "//text: send text starting with /");
+      if (_dbg) strcat(reply, "\n/fill <n>: n test messages here when the app disconnects");
+    } else if (strcmp(cmd, "fill") == 0 && !_dbg) {
+      strcpy(reply, "Error: /fill is a test command: send \"set dbg on\" in the Radio console first");
     } else if (strcmp(cmd, "fill") == 0) {   // a backlog for timing a message sync (bench test)
       bool digits = *arg != 0;
       for (const char* d = arg; *d; d++) if (*d < '0' || *d > '9') digits = false;
@@ -1956,7 +1958,6 @@ void MyMesh::handleCmdFrame(size_t len) {
     }
   } else if (cmd_frame[0] == CMD_SYNC_NEXT_MESSAGE) {
     int out_len;
-#if BLE_DEBUG_LOGGING
     // where each round trip goes: the radio, from the request arriving to the reply going out,
     // and the phone and link, from that reply going out to the next request arriving
     unsigned long sync_now = millis(), sync_rx = _serial->lastRecvMillis();
@@ -1968,24 +1969,18 @@ void MyMesh::handleCmdFrame(size_t len) {
       _sync_phone_ms += sync_rx - _sync_last_reply;
     }
     _sync_radio_ms += sync_now - sync_rx;
-#endif
     if ((out_len = getFromOfflineQueue(out_frame)) > 0) {
       _serial->writeFrame(out_frame, out_len);
-#if BLE_DEBUG_LOGGING
       _sync_last_reply = millis();
-#endif
       if (_listener) _listener->onQueueSizeChanged(offline_queue_len);
-#if BLE_DEBUG_LOGGING
       _sync_count++;
-#endif
     } else {
       out_frame[0] = RESP_CODE_NO_MORE_MESSAGES;
       _serial->writeFrame(out_frame, 1);
-#if BLE_DEBUG_LOGGING
-      // bench test: how long the app took to pull the queue, to serial and the Radio console. Only
-      // a backlog (/fill): a message coming in now and then is synced on its own, and the note is a
-      // message too, so the app syncs again for it
-      if (_sync_count >= SYNC_NOTE_MIN) {
+      // set dbg on: how long the app took to pull the queue, to the Radio console. Only a backlog
+      // (/fill): a message coming in now and then is synced on its own, and the note is a message
+      // too, so the app syncs again for it
+      if (_dbg && _sync_count >= SYNC_NOTE_MIN) {
         unsigned long ms = millis() - _sync_started;
         char link[64];
         _serial->describeLink(link, sizeof(link));
@@ -1993,11 +1988,9 @@ void MyMesh::handleCmdFrame(size_t len) {
         snprintf(note, sizeof(note), "SYNC: %u messages in %lu ms (%lu ms each: radio %lu, phone+link %lu). Link: %s",
                  (unsigned)_sync_count, ms, ms / _sync_count, _sync_radio_ms / (_sync_count + 1),
                  _sync_phone_ms / _sync_count, link);
-        Serial.println(note);
         consoleNote(note);
       }
       _sync_count = 0;
-#endif
     }
   } else if (cmd_frame[0] == CMD_SET_RADIO_PARAMS) {
     int i = 1;
@@ -3064,6 +3057,22 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     return true;
   }
 #endif
+
+  // test aids: the SYNC timing note in the Radio console, and /fill in a channel. Off at power-on
+  if (strcmp(command, "get dbg") == 0) {
+    sprintf(reply, "> %s", _dbg ? "on" : "off");
+    return true;
+  }
+  if (memcmp(command, "set dbg ", 8) == 0) {
+    if (strcmp(&command[8], "on") == 0 || strcmp(&command[8], "off") == 0) {
+      _dbg = strcmp(&command[8], "on") == 0;
+      if (!_dbg) _fill_count = 0;
+      strcpy(reply, _dbg ? "OK - debug on until power-off: SYNC notes here, /fill in a channel" : "OK - debug off");
+    } else {
+      strcpy(reply, "Error: use set dbg on|off");
+    }
+    return true;
+  }
 
 #ifdef PIN_BUZZER
   if (strcmp(command, "get buzzer") == 0) {
