@@ -1968,9 +1968,18 @@ void MyMesh::handleCmdFrame(size_t len) {
       out_frame[0] = RESP_CODE_NO_MORE_MESSAGES;
       _serial->writeFrame(out_frame, 1);
 #if BLE_DEBUG_LOGGING
-      if (_sync_count > 0) {   // bench test: how long the app took to pull the queue
+      // bench test: how long the app took to pull the queue, to serial and the Radio console. The
+      // note is a message too, so the app syncs again for it: a sync of just that one isn't reported
+      if (_sync_count > 0 && (_sync_count > 1 || !_sync_noted)) {
         unsigned long ms = millis() - _sync_started;
-        Serial.printf("SYNC: %u messages in %lu ms (%lu ms each)\n", (unsigned)_sync_count, ms, ms / _sync_count);
+        char note[80];
+        snprintf(note, sizeof(note), "SYNC: %u messages in %lu ms (%lu ms each)",
+                 (unsigned)_sync_count, ms, ms / _sync_count);
+        Serial.println(note);
+        consoleNote(note);
+        _sync_noted = true;
+      } else if (_sync_count > 0) {
+        _sync_noted = false;
       }
       _sync_count = 0;
 #endif

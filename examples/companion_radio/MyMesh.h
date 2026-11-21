@@ -358,6 +358,7 @@ private:
 #if BLE_DEBUG_LOGGING
   uint16_t _sync_count = 0;          // messages handed out in the sync now running (bench timing)
   unsigned long _sync_started = 0;
+  bool _sync_noted = false;          // the last sync posted a note to the Radio console
 #endif
 
   struct AckTableEntry {
