@@ -353,6 +353,8 @@ private:
   };
   int offline_queue_len;
   Frame offline_queue[OFFLINE_QUEUE_SIZE];
+  uint16_t _fill_count = 0;          // /fill: test messages to add once the app disconnects
+  uint8_t _fill_channel = 0;
 #if BLE_DEBUG_LOGGING
   uint16_t _sync_count = 0;          // messages handed out in the sync now running (bench timing)
   unsigned long _sync_started = 0;

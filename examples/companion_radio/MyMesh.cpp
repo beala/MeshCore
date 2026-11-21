@@ -647,7 +647,25 @@ void MyMesh::handleSlashCommand(const ChatRef& from, char* cmd, char* reply) {
       strcpy(reply, "Commands here run on your radio, nothing is sent:\n"
                     "/crypto: this channel's encryption\n"
                     "/crypto legacy|v2|v2only: change it\n"
+                    "/fill <n>: n test messages here when the app disconnects\n"
                     "//text: send text starting with /");
+    } else if (strcmp(cmd, "fill") == 0) {   // a backlog for timing a message sync (bench test)
+      bool digits = *arg != 0;
+      for (const char* d = arg; *d; d++) if (*d < '0' || *d > '9') digits = false;
+      int n = digits ? atoi(arg) : -1;
+      if (*arg == 0 && _fill_count > 0) {
+        sprintf(reply, "> %u test messages wait for the app to disconnect", (unsigned)_fill_count);
+      } else if (n == 0) {
+        _fill_count = 0;
+        strcpy(reply, "OK - no test messages");
+      } else if (n < 0 || n > OFFLINE_QUEUE_SIZE) {
+        sprintf(reply, "Error: use /fill 1 to %d, or /fill 0 to cancel", OFFLINE_QUEUE_SIZE);
+      } else {
+        _fill_count = n;
+        _fill_channel = from.channel_idx;
+        sprintf(reply, "OK - %d test messages go into %s when the app disconnects. Close the app or "
+                       "turn off Bluetooth, then reconnect", n, ch.name);
+      }
     } else if (strcmp(cmd, "crypto") == 0 && *arg == 0) {
       sprintf(reply, "> %s: %s", ch.name, CryptoPolicyTable::name(getCryptoPolicy(ch.channel.secret)));
     } else if (strcmp(cmd, "crypto") == 0) {
@@ -3659,6 +3677,20 @@ void MyMesh::loop() {
     // display + long-press), so serve config commands on the otherwise unused USB serial
     checkCLIRescueCmd();
 #endif
+  }
+
+  // /fill: the test messages, once the app is gone, so they wait in the queue for the next sync
+  if (_fill_count > 0 && !_serial->isConnected()) {
+    uint32_t now = getRTCClock()->getCurrentTime();
+    for (unsigned i = 1; i <= _fill_count; i++) {
+      char msg[120];
+      int len = snprintf(msg, sizeof(msg), "Test: message %u of %u, the quick brown fox jumps over the lazy dog",
+                         i, (unsigned)_fill_count);
+      // in the past and in order: getCurrentTimeUnique() would push later real messages into the future
+      pushChannelText(_fill_channel, now - (_fill_count - i), 0, 0xFF, msg, len);
+    }
+    if (_listener) _listener->onQueueSizeChanged(offline_queue_len);
+    _fill_count = 0;
   }
 
   // is there are pending dirty contacts write needed? (not while a copy may replace them)
