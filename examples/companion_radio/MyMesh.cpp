@@ -1956,10 +1956,23 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_SYNC_NEXT_MESSAGE) {
     int out_len;
 #if BLE_DEBUG_LOGGING
-    if (_sync_count == 0) _sync_started = millis();
+    // where each round trip goes: the radio, from the request arriving to the reply going out,
+    // and the phone and link, from that reply going out to the next request arriving
+    unsigned long sync_now = millis(), sync_rx = _serial->lastRecvMillis();
+    if (sync_rx == 0 || (long)(sync_now - sync_rx) < 0) sync_rx = sync_now;
+    if (_sync_count == 0) {
+      _sync_started = sync_rx;
+      _sync_radio_ms = _sync_phone_ms = 0;
+    } else {
+      _sync_phone_ms += sync_rx - _sync_last_reply;
+    }
+    _sync_radio_ms += sync_now - sync_rx;
 #endif
     if ((out_len = getFromOfflineQueue(out_frame)) > 0) {
       _serial->writeFrame(out_frame, out_len);
+#if BLE_DEBUG_LOGGING
+      _sync_last_reply = millis();
+#endif
       if (_listener) _listener->onQueueSizeChanged(offline_queue_len);
 #if BLE_DEBUG_LOGGING
       _sync_count++;
@@ -1972,9 +1985,11 @@ void MyMesh::handleCmdFrame(size_t len) {
       // note is a message too, so the app syncs again for it: a sync of just that one isn't reported
       if (_sync_count > 0 && (_sync_count > 1 || !_sync_noted)) {
         unsigned long ms = millis() - _sync_started;
-        char note[80];
-        snprintf(note, sizeof(note), "SYNC: %u messages in %lu ms (%lu ms each)",
-                 (unsigned)_sync_count, ms, ms / _sync_count);
+        char note[160];
+        snprintf(note, sizeof(note), "SYNC: %u messages in %lu ms (%lu ms each: radio %lu, phone+link %lu). "
+                 "Interval %u ms",
+                 (unsigned)_sync_count, ms, ms / _sync_count, _sync_radio_ms / (_sync_count + 1),
+                 _sync_phone_ms / _sync_count, (unsigned)_serial->connIntervalMs());
         Serial.println(note);
         consoleNote(note);
         _sync_noted = true;

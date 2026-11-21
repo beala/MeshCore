@@ -36,6 +36,8 @@ static char ble_passkey[BLE_GAP_PASSKEY_LEN + 1];
 void SerialBLEInterface::onConnect(uint16_t connection_handle) {
   BLE_DEBUG_PRINTLN("SerialBLEInterface: connected handle=0x%04X", connection_handle);
   if (instance) {
+    BLEConnection* conn = Bluefruit.Connection(connection_handle);
+    instance->_conn_interval_x125 = conn ? conn->getConnectionInterval() : 0;   // until an update
     if (instance->_conn_handle != BLE_CONN_HANDLE_INVALID && instance->_conn_handle != connection_handle) {
       // a second phone or computer: one at a time. (Apps on the same phone share its one link and
       // never get here.) Advertising starts again when it's gone.
@@ -147,7 +149,7 @@ void SerialBLEInterface::onBLEEvent(ble_evt_t* evt) {
   
   if (evt->header.evt_id == BLE_GAP_EVT_CONN_PARAM_UPDATE) {   // what the phone actually agreed to
     const ble_gap_conn_params_t* cp = &evt->evt.gap_evt.params.conn_param_update.conn_params;
-    (void)cp;   // only read by the debug line
+    instance->_conn_interval_x125 = cp->max_conn_interval;   // min == max once granted
     BLE_DEBUG_PRINTLN("conn params now: interval %u-%u (x1.25ms), latency=%u, timeout=%ums",
                      cp->min_conn_interval, cp->max_conn_interval, cp->slave_latency, cp->conn_sup_timeout * 10);
   }
@@ -561,6 +563,7 @@ void SerialBLEInterface::onBleUartRX(uint16_t conn_handle) {
     int read_len = avail;
     instance->recv_queue[instance->recv_queue_len].len = read_len;
     instance->bleuart.readBytes(instance->recv_queue[instance->recv_queue_len].buf, read_len);
+    instance->_last_rx_ms = millis();
     BLE_DEBUG_PRINTLN("rx: sz=%u, hdr=%u", (unsigned)read_len, (unsigned)instance->recv_queue[instance->recv_queue_len].buf[0]);
     instance->recv_queue_len++;
   }

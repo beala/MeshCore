@@ -15,6 +15,8 @@ class SerialBLEInterface : public BaseSerialInterface {
   uint16_t _conn_handle;
   unsigned long _last_health_check;
   unsigned long _last_retry_attempt;
+  volatile unsigned long _last_rx_ms = 0;   // set in the Bluetooth task when a frame comes in
+  volatile uint16_t _conn_interval_x125 = 0;   // the connection interval granted, 1.25 ms units
 
   // The pairing window (docs/ble_pairing.md). Closed: no passkey is set, so the SoftDevice makes up a
   // random one per attempt and shows it nowhere, and a pairing request is answered with a disconnect.
@@ -108,6 +110,8 @@ public:
   bool isConnected() const override;
   bool isWriteBusy() const override;
   bool hasPendingWrite() const override;
+  unsigned long lastRecvMillis() const override { return _last_rx_ms; }
+  uint16_t connIntervalMs() const override { return _conn_interval_x125 * 5 / 4; }
   size_t writeFrame(const uint8_t src[], size_t len) override;
   size_t checkRecvFrame(uint8_t dest[]) override;
   size_t checkRecvSideFrame(uint8_t dest[]) override;
