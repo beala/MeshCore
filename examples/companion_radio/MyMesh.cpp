@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include "ChannelSlots.h"
 #include <helpers/ConsoleName.h>
 #include <AesSiv.h>
 #include <helpers/EntropyPool.h>
@@ -594,6 +595,76 @@ void MyMesh::postPart(const ChatRef& to, const char* text) {
     snprintf(msg, sizeof(msg), "\xE2\x9A\x99 Radio: %s", text);   // channel texts are "sender: text"
     pushChannelText(to.channel_idx, ts, 0, 0xFF, msg, strlen(msg));
   }
+}
+
+int MyMesh::remapChannelIdx(int idx, const uint8_t* remap, int old_base, int new_base) const {
+  return channel_slots::remapIdx(idx, remap, old_base, new_base);
+}
+
+// Moves the channels down into consecutive slots from 0, keeping their order, and puts the synthetic
+// slots right after them and one empty slot (ChannelSlots.h). Everything here that holds a slot
+// number follows: queued messages (a message for a deleted channel is dropped), /fill, and the
+// chats that command replies and finder results go to. Only called with no app connected (or at
+// boot), so no app is holding the old numbers.
+void MyMesh::compactChannels() {
+#ifdef MAX_GROUP_CHANNELS
+  bool used[MAX_GROUP_CHANNELS];
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    ChannelDetails ch;
+    used[i] = getChannel(i, ch) && ch.name[0] != 0;
+  }
+  uint8_t remap[MAX_GROUP_CHANNELS];
+  int n = channel_slots::plan(used, MAX_GROUP_CHANNELS, remap);
+  int old_base = _ch_slots;
+  int new_base = channel_slots::reportedSlots(n, MAX_GROUP_CHANNELS);
+
+  bool moved = false;
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (used[i] && remap[i] != i) moved = true;
+  }
+  if (moved) {
+    // remap[i] <= i, so moving in order never overwrites a channel still to move
+    for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+      if (!used[i] || remap[i] == i) continue;
+      ChannelDetails ch;
+      getChannel(i, ch);
+      setChannel(remap[i], ch);
+    }
+    ChannelDetails empty;
+    memset(&empty, 0, sizeof(empty));
+    for (int i = n; i < MAX_GROUP_CHANNELS; i++) setChannel(i, empty);
+    saveChannels();
+  }
+  if (!moved && old_base == new_base) return;
+
+  // queued messages: the slot number is byte 1 (v1 frames) or 4 (v3 and datagram frames)
+  int k = 0;
+  for (int q = 0; q < offline_queue_len; q++) {
+    Frame& f = offline_queue[q];
+    if (f.isChannelMsg()) {
+      int at = f.buf[0] == RESP_CODE_CHANNEL_MSG_RECV ? 1 : 4;
+      int idx = at < f.len ? remapChannelIdx(f.buf[at], remap, old_base, new_base) : -1;
+      if (idx < 0) continue;   // its channel was deleted: the app couldn't show it
+      f.buf[at] = (uint8_t) idx;
+    }
+    if (k != q) offline_queue[k] = f;
+    k++;
+  }
+  if (k != offline_queue_len) {
+    offline_queue_len = k;
+    if (_listener) _listener->onQueueSizeChanged(offline_queue_len);
+  }
+
+  int fill = remapChannelIdx(_fill_channel, remap, old_base, new_base);
+  if (fill < 0) _fill_count = 0; else _fill_channel = (uint8_t) fill;
+  ChatRef* chats[] = { &_console_from, &_find_chat };
+  for (ChatRef* c : chats) {
+    if (c->kind != CHAT_CHANNEL) continue;
+    int idx = remapChannelIdx(c->channel_idx, remap, old_base, new_base);
+    if (idx < 0) c->kind = CHAT_NONE; else c->channel_idx = (uint8_t) idx;
+  }
+  _ch_slots = (uint8_t) new_base;
+#endif
 }
 
 // Shows a text in a channel as if received there; it stays on this radio and phone.
@@ -1392,6 +1463,11 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   _cli_rescue = false;
   cli_command[0] = 0;
   offline_queue_len = 0;
+#ifdef MAX_GROUP_CHANNELS
+  _ch_slots = MAX_GROUP_CHANNELS;   // until compactChannels() at boot
+#else
+  _ch_slots = 0;
+#endif
   app_target_ver = 0;
   clearPendingReqs();
   next_ack_idx = 0;
@@ -1524,6 +1600,7 @@ void MyMesh::begin() {
   bootstrapRTCfromContacts();
   addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure public channel
   _store->loadChannels(this);
+  compactChannels();   // older firmware left gaps where channels were deleted
   _store->loadCryptoPolicies(crypto_policies, _crypto_seq);
   if (_prefs.crypto_seq > _crypto_seq) {
     // prefs say a newer policy file was saved than the one we could load: it was lost or rolled back.
@@ -1723,7 +1800,8 @@ void MyMesh::handleCmdFrame(size_t len) {
                                                       : "Not sent: the Meshtastic channel is receive-only");
     } else {
       ChannelDetails channel;
-      bool success = getChannel(channel_idx, channel);
+      // never send on an empty slot: its key is all zeros, which anyone can read
+      bool success = isRegularChannelSlot(channel_idx) && getChannel(channel_idx, channel) && channel.name[0] != 0;
       int tlen = len - i;
       if (success) tlen = takeSlashCommand((char*) text, tlen);
       if (tlen < 0) {   // a '/' command for this channel: run it here, don't send it
@@ -1766,8 +1844,8 @@ void MyMesh::handleCmdFrame(size_t len) {
     int payload_len = (len > (size_t)i) ? (int)(len - i) : 0;
 
     ChannelDetails channel;
-    if (!getChannel(channel_idx, channel)) {
-      writeErrFrame(ERR_CODE_NOT_FOUND); // bad channel_idx
+    if (!isRegularChannelSlot(channel_idx) || !getChannel(channel_idx, channel) || channel.name[0] == 0) {
+      writeErrFrame(ERR_CODE_NOT_FOUND); // bad channel_idx, or an empty slot (all-zero key)
     } else if (data_type == DATA_TYPE_RESERVED) {
       writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     } else if (payload_len > MAX_GROUP_DATA_LENGTH) {
@@ -2347,7 +2425,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else if (found) {
       memset(&channel, 0, sizeof(channel));   // a synthetic slot whose feature is off: empty
     } else {
-      found = getChannel(channel_idx, channel);
+      found = isRegularChannelSlot(channel_idx) && getChannel(channel_idx, channel);
     }
     if (found) {
       int i = 0;
@@ -2373,8 +2451,9 @@ void MyMesh::handleCmdFrame(size_t len) {
     StrHelper::strncpy(channel.name, (char *)&cmd_frame[2], 32);
     memset(channel.channel.secret, 0, sizeof(channel.channel.secret));
     memcpy(channel.channel.secret, &cmd_frame[2 + 32], 16); // NOTE: only 128-bit supported
-    if (setChannel(channel_idx, channel)) {
+    if (isRegularChannelSlot(channel_idx) && setChannel(channel_idx, channel)) {
       saveChannels();
+      _ch_compact_due = true;   // slots close up and the empty one moves once the app has gone
       writeOKFrame();
     } else {
       writeErrFrame(ERR_CODE_NOT_FOUND); // bad channel_idx
@@ -3548,7 +3627,10 @@ int MyMesh::fillDeviceInfo(uint8_t* out_frame) {
   out_frame[i++] = RESP_CODE_DEVICE_INFO;
   out_frame[i++] = FIRMWARE_VER_CODE;
   out_frame[i++] = MAX_CONTACTS / 2;   // v3+
-  out_frame[i++] = MAX_GROUP_CHANNELS + virtualChannelCount(); // v3+; then the fixed synthetic slots (Meshtastic, Weather, Aircraft, Damaged, Airport weather, Meters)
+  // v3+: the regular channels and one empty slot (not every MAX_GROUP_CHANNELS slot: the app fetches
+  // each one on every connect), then the synthetic slots (Meshtastic, Weather, Aircraft, Damaged,
+  // Airport weather, Meters)
+  out_frame[i++] = vchBase() + virtualChannelCount();
   memcpy(&out_frame[i], &_prefs.ble_pin, 4);
   i += 4;
   memset(&out_frame[i], 0, 12);
@@ -3710,6 +3792,13 @@ void MyMesh::loop() {
     // display + long-press), so serve config commands on the otherwise unused USB serial
     checkCLIRescueCmd();
 #endif
+  }
+
+  // channels changed while the app was connected: close up the slots now it's gone, before it next
+  // reads them
+  if (_ch_compact_due && !_serial->isConnected()) {
+    _ch_compact_due = false;
+    compactChannels();
   }
 
   // /fill: the test messages, once the app is gone, so they wait in the queue for the next sync

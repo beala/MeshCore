@@ -266,6 +266,9 @@ Bytes 34-49: Secret (16 bytes)
 - Valid range is `0` to `max_channels - 1`. Read `max_channels` from byte 3 of
   the `PACKET_DEVICE_INFO` response; do not assume 8. Builds ship with
   `MAX_GROUP_CHANNELS` set to 1, 8 or 40 depending on the board.
+- This firmware reports only the slots in use, one empty slot, and the built-in
+  channels after them, and closes up gaps while no app is connected, so slot
+  numbers can change between connections (see `ble_sync.md`, "Channel slots").
 - Index 0: pre-populated by the firmware with the built-in "Public" channel.
   It can be overwritten like any other slot.
 - An out-of-range index is rejected with `PACKET_ERROR` / `ERR_CODE_NOT_FOUND`.

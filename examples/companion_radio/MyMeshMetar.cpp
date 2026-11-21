@@ -35,7 +35,7 @@ static mesh::Radio::FskListen fisbListen(float freq) {
 
 bool MyMesh::isMetarChannel(int idx) const {
 #ifdef MAX_GROUP_CHANNELS
-  return _metar_active && idx == MAX_GROUP_CHANNELS + VCH_METAR;
+  return _metar_active && idx == vchBase() + VCH_METAR;
 #else
   (void)idx;
   return false;
@@ -146,7 +146,7 @@ void MyMesh::metarReport(const char* text, int len) {
   if (!seen) return;
   if (is_taf && !_prefs.metar.taf) return;
 #ifdef MAX_GROUP_CHANNELS
-  int ch = MAX_GROUP_CHANNELS + VCH_METAR;
+  int ch = vchBase() + VCH_METAR;
   if (_prefs.metar.airports[0] && !metarWanted(where)) return;   // empty: every airport
   uint32_t h = hashWords(kind, where, when);
   uint32_t& last = is_taf ? seen->taf : seen->metar;

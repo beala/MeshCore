@@ -39,7 +39,7 @@ static mesh::Radio::FskListen meterListen(uint8_t kind, float freq) {
 
 bool MyMesh::isMeterChannel(int idx) const {
 #ifdef MAX_GROUP_CHANNELS
-  return _meter_active && idx == MAX_GROUP_CHANNELS + VCH_METERS;
+  return _meter_active && idx == vchBase() + VCH_METERS;
 #else
   (void)idx;
   return false;
@@ -137,7 +137,7 @@ void MyMesh::meterPost(MeterSeen& m, const meters::Reading& r) {
   char total[16];
   withCommas(total, sizeof(total), r.total);
   char post[MAX_FRAME_SIZE];
-  int ch = MAX_GROUP_CHANNELS + VCH_METERS;
+  int ch = vchBase() + VCH_METERS;
   bool leak_changed = r.kind == meters::KIND_R900 && m.posted_at && (r.leak_now != m.leak_now || r.backflow != m.backflow);
   uint32_t every = (uint32_t)(_prefs.meter.every ? _prefs.meter.every : 60) * 60000UL;
   bool due = !m.posted_at || (int32_t)(now - m.posted_at - every) >= 0;

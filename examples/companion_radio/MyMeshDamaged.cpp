@@ -17,7 +17,7 @@
 
 bool MyMesh::isDamagedChannel(int idx) const {
 #ifdef MAX_GROUP_CHANNELS
-  return _prefs.dmg.en && idx == MAX_GROUP_CHANNELS + VCH_DAMAGED;
+  return _prefs.dmg.en && idx == vchBase() + VCH_DAMAGED;
 #else
   (void)idx;
   return false;
@@ -198,7 +198,7 @@ void MyMesh::damagedPostUnread(const uint8_t* raw, int len, int why, float snr) 
   int k = snprintf(text, MAX_FRAME_SIZE - 11, "%s: [%s, %+.0fdB] %s", from,
                    why == DMG_TOO_DAMAGED && !damaged::sizeFits(l) ? "unknown" : typeName(l.type), snr, detail);
   if (k < 0) return;
-  pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, getRTCClock()->getCurrentTimeUnique(), (int8_t)(snr * 4), 0,
+  pushChannelText(vchBase() + VCH_DAMAGED, getRTCClock()->getCurrentTimeUnique(), (int8_t)(snr * 4), 0,
                   text, strlen(text));
 }
 
@@ -354,7 +354,7 @@ void MyMesh::damagedPost(DamagedMsg& m) {
   }
   uint32_t ts = damaged::timestampOf(m.c.r);
   if (ts == 0) ts = getRTCClock()->getCurrentTimeUnique();
-  pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, ts, m.snr_x4, 0, text, strlen(text));
+  pushChannelText(vchBase() + VCH_DAMAGED, ts, m.snr_x4, 0, text, strlen(text));
   _dmg_shown++;
   if (m.c.fixed) _dmg_fixed++;
   if (m.copies > 1) _dmg_joined++;

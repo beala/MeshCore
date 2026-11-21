@@ -455,9 +455,9 @@ private:
   bool handleWeatherCommand(const char* command, char* reply);
   bool isWeatherChannel(int idx) const;
   void getWeatherChannel(ChannelDetails& ch);
-  // The synthetic channels have fixed slots after the regular ones, whichever are on, so a client
-  // never sees one move: Meshtastic, then Weather, then Aircraft. A slot whose feature is off reads
-  // as an empty channel.
+  // The synthetic channels have slots in a fixed order after the regular ones (and the one empty
+  // slot), whichever are on: Meshtastic, then Weather, then Aircraft, ... A slot whose feature is off
+  // reads as an empty channel. They start at vchBase(), which moves only while no app is connected.
   enum { VCH_MESHTASTIC = 0, VCH_WEATHER = 1, VCH_AIRCRAFT = 2, VCH_DAMAGED = 3, VCH_METAR = 4, VCH_METERS = 5 };
   // One listen at a time: Meshtastic, weather and aircraft each take the radio away from the mesh
   // in their own way, so turning one on turns the others off. 'radar' and copying a radio pause
@@ -473,6 +473,15 @@ private:
     return _meter_active ? 6 : _metar_active ? 5 : _prefs.dmg.en ? 4 : _air_active ? 3 : _wx_active ? 2 : _mt_active ? 1 : 0;
   }
   bool isVirtualChannelSlot(int idx) const;
+  // Regular channels sit in consecutive slots from 0; the app is told about them plus one empty slot
+  // (ChannelSlots.h), and the synthetic slots come right after. Changes only in compactChannels(),
+  // which runs at boot and when no app is connected, so a connected app never sees slots move.
+  int vchBase() const { return _ch_slots; }
+  bool isRegularChannelSlot(int idx) const { return idx >= 0 && idx < _ch_slots; }
+  void compactChannels();
+  int remapChannelIdx(int idx, const uint8_t* remap, int old_base, int new_base) const;
+  uint8_t _ch_slots;             // regular slots reported to the app (vchBase())
+  bool _ch_compact_due = false;  // a channel changed: compact once the app is gone
 
   // Aircraft heard on 978 MHz (UAT), shown as one more receive-only channel after Weather's
   // (MyMeshAircraft.cpp, docs/aircraft.md)

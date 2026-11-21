@@ -56,7 +56,7 @@ static mesh::Radio::FskListen uatListen(float freq) {
 
 bool MyMesh::isVirtualChannelSlot(int idx) const {
 #ifdef MAX_GROUP_CHANNELS
-  return idx >= MAX_GROUP_CHANNELS && idx < MAX_GROUP_CHANNELS + virtualChannelCount();
+  return idx >= vchBase() && idx < vchBase() + virtualChannelCount();
 #else
   (void)idx;
   return false;
@@ -65,7 +65,7 @@ bool MyMesh::isVirtualChannelSlot(int idx) const {
 
 bool MyMesh::isAircraftChannel(int idx) const {
 #ifdef MAX_GROUP_CHANNELS
-  return _air_active && idx == MAX_GROUP_CHANNELS + VCH_AIRCRAFT;
+  return _air_active && idx == vchBase() + VCH_AIRCRAFT;
 #else
   (void)idx;
   return false;
@@ -225,7 +225,7 @@ void MyMesh::postAircraftDigest(uint32_t now) {
   }
   if (others) snprintf(&text[m], sizeof(text) - m, " (+%d higher or farther)", others);
 #ifdef MAX_GROUP_CHANNELS
-  int ch = MAX_GROUP_CHANNELS + VCH_AIRCRAFT;
+  int ch = vchBase() + VCH_AIRCRAFT;
   pushChannelText(ch, getRTCClock()->getCurrentTimeUnique(), 0, 0, text, strlen(text));
 #endif
   _air_shown++;
@@ -377,7 +377,7 @@ void MyMesh::aircraftLoop() {
       char text[MAX_FRAME_SIZE];
       describePlane(p, text, sizeof(text));
 #ifdef MAX_GROUP_CHANNELS
-      int idx = MAX_GROUP_CHANNELS + VCH_AIRCRAFT;
+      int idx = vchBase() + VCH_AIRCRAFT;
       pushChannelText(idx, getRTCClock()->getCurrentTimeUnique(), 0, 0, text, strlen(text));
 #endif
       _air_shown++;

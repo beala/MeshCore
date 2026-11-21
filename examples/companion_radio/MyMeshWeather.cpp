@@ -17,7 +17,7 @@
 
 bool MyMesh::isWeatherChannel(int idx) const {
 #ifdef MAX_GROUP_CHANNELS
-  return _wx_active && idx == MAX_GROUP_CHANNELS + VCH_WEATHER;
+  return _wx_active && idx == vchBase() + VCH_WEATHER;
 #else
   (void)idx;
   return false;
@@ -138,7 +138,7 @@ bool MyMesh::weatherShown(const wxsensor::Reading& r) const {
 
 void MyMesh::showWeather(const char* text, int8_t snr_x4) {
 #ifdef MAX_GROUP_CHANNELS
-  int idx = MAX_GROUP_CHANNELS + VCH_WEATHER;
+  int idx = vchBase() + VCH_WEATHER;
   pushChannelText(idx, getRTCClock()->getCurrentTimeUnique(), snr_x4, 0, text, strlen(text));
   _wx_shown++;
 #endif

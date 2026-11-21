@@ -35,9 +35,28 @@ connection events per message. Going much below that needs the app to ask for mo
 The switch back to idle was seen working: a message that came in after a quiet spell was synced at 30 ms, latency
 4, and the next one at 15 ms, latency 0.
 
-Not done: the ESP32 and RP2040 Bluetooth interfaces (the ESP32 one spaces writes at least 60 ms apart), and
-fetching channels and contacts, which are the same one-at-a-time round trips (every connect asks for all 40 channel
-slots and the built-in channels).
+Not done: the ESP32 and RP2040 Bluetooth interfaces (the ESP32 one spaces writes at least 60 ms apart).
+Contacts already come as one stream (one request, the radio sends them all).
+
+## Channel slots
+
+Channels are fetched one slot per round trip, for every slot the device info reply reports, on every connect.
+That used to be all `MAX_GROUP_CHANNELS` slots (40) plus the built-in channels, used or not. Now the radio keeps
+its channels in consecutive slots from 0 and reports only those, one empty slot after them (where the app adds a
+new channel), and then the built-in channels (Meshtastic, Weather, Aircraft, Damaged, Airport weather, Meters).
+With 5 channels and all built-ins on that's 12 round trips instead of 46.
+
+- **Slots close up only while no app is connected**: at boot, and when the app disconnects after it changed a
+  channel. A connected app's view stays right: a channel it deletes leaves an empty slot until it disconnects.
+- **What moves**: deleting a channel moves the ones after it down one slot, and the built-in channels sit after
+  the last regular one, so they move when a channel is added or deleted. Messages waiting for the app, `/fill`,
+  and where command replies and finder results go follow the move; a waiting message for a deleted channel is
+  dropped. An app that keys its own history by slot number may show old messages under the wrong channel after a
+  move.
+- **One add per connection**: after the app adds a channel into the empty slot there isn't another until it
+  reconnects.
+- Sending on an empty slot is refused (`ERR_CODE_NOT_FOUND`): its key is all zeros, which anyone can read.
+- The slot logic is in `examples/companion_radio/ChannelSlots.h`, tested in `test/test_channel_slots`.
 
 ## Measuring it
 
