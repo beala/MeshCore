@@ -36,8 +36,6 @@ static char ble_passkey[BLE_GAP_PASSKEY_LEN + 1];
 void SerialBLEInterface::onConnect(uint16_t connection_handle) {
   BLE_DEBUG_PRINTLN("SerialBLEInterface: connected handle=0x%04X", connection_handle);
   if (instance) {
-    BLEConnection* conn = Bluefruit.Connection(connection_handle);
-    instance->_conn_interval_x125 = conn ? conn->getConnectionInterval() : 0;   // until an update
     if (instance->_conn_handle != BLE_CONN_HANDLE_INVALID && instance->_conn_handle != connection_handle) {
       // a second phone or computer: one at a time. (Apps on the same phone share its one link and
       // never get here.) Advertising starts again when it's gone.
@@ -149,7 +147,7 @@ void SerialBLEInterface::onBLEEvent(ble_evt_t* evt) {
   
   if (evt->header.evt_id == BLE_GAP_EVT_CONN_PARAM_UPDATE) {   // what the phone actually agreed to
     const ble_gap_conn_params_t* cp = &evt->evt.gap_evt.params.conn_param_update.conn_params;
-    instance->_conn_interval_x125 = cp->max_conn_interval;   // min == max once granted
+    (void)cp;   // only read by the debug line
     BLE_DEBUG_PRINTLN("conn params now: interval %u-%u (x1.25ms), latency=%u, timeout=%ums",
                      cp->min_conn_interval, cp->max_conn_interval, cp->slave_latency, cp->conn_sup_timeout * 10);
   }
@@ -575,6 +573,17 @@ bool SerialBLEInterface::isConnected() const {
 
 bool SerialBLEInterface::isWriteBusy() const {
   return send_queue_len >= (FRAME_QUEUE_SIZE * 2 / 3);
+}
+
+void SerialBLEInterface::describeLink(char* out, size_t len) const {
+  BLEConnection* conn = _conn_handle == BLE_CONN_HANDLE_INVALID ? NULL : Bluefruit.Connection(_conn_handle);
+  if (conn == NULL) {
+    snprintf(out, len, "not connected");
+    return;
+  }
+  unsigned x125 = conn->getConnectionInterval();   // 1.25 ms units, as now (Bluefruit tracks updates)
+  snprintf(out, len, "interval %u.%02u ms, latency %u, MTU %u", x125 * 5 / 4, (x125 * 125) % 100,
+           (unsigned)conn->getSlaveLatency(), (unsigned)conn->getMtu());
 }
 
 bool SerialBLEInterface::hasPendingWrite() const {

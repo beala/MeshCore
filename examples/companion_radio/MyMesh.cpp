@@ -1985,11 +1985,12 @@ void MyMesh::handleCmdFrame(size_t len) {
       // note is a message too, so the app syncs again for it: a sync of just that one isn't reported
       if (_sync_count > 0 && (_sync_count > 1 || !_sync_noted)) {
         unsigned long ms = millis() - _sync_started;
-        char note[160];
-        snprintf(note, sizeof(note), "SYNC: %u messages in %lu ms (%lu ms each: radio %lu, phone+link %lu). "
-                 "Interval %u ms",
+        char link[64];
+        _serial->describeLink(link, sizeof(link));
+        char note[200];
+        snprintf(note, sizeof(note), "SYNC: %u messages in %lu ms (%lu ms each: radio %lu, phone+link %lu). Link: %s",
                  (unsigned)_sync_count, ms, ms / _sync_count, _sync_radio_ms / (_sync_count + 1),
-                 _sync_phone_ms / _sync_count, (unsigned)_serial->connIntervalMs());
+                 _sync_phone_ms / _sync_count, link);
         Serial.println(note);
         consoleNote(note);
         _sync_noted = true;

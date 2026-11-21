@@ -22,10 +22,10 @@ public:
   virtual size_t checkRecvFrame(uint8_t dest[]) = 0;
   // frames written but not yet handed to the transport: the main loop shouldn't sleep on them
   virtual bool hasPendingWrite() const { return false; }
-  // bench timing of a message sync: when the last frame came in (millis), and the connection
-  // interval the phone granted (ms). 0 where unknown
+  // bench timing of a message sync: when the last frame came in (millis, 0 where unknown), and the
+  // link as it is now ("interval 30 ms, latency 0, MTU 247"; empty where unknown)
   virtual unsigned long lastRecvMillis() const { return 0; }
-  virtual uint16_t connIntervalMs() const { return 0; }
+  virtual void describeLink(char* out, size_t len) const { if (len) out[0] = 0; }
 
   // A second channel on the same connection, for an app next to the MeshCore app (the fluxcore app):
   // its own frames in and out, so neither app sees the other's. Bluetooth only; others have none.
