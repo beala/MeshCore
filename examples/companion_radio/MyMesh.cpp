@@ -20,6 +20,7 @@
 #define CMD_SET_ADVERT_NAME           8
 #define CMD_ADD_UPDATE_CONTACT        9
 #define CMD_SYNC_NEXT_MESSAGE         10
+#define SYNC_NOTE_MIN                 10   // BLE_DEBUG_LOGGING: report syncs of at least this many
 #define CMD_SET_RADIO_PARAMS          11
 #define CMD_SET_RADIO_TX_POWER        12
 #define CMD_RESET_PATH                13
@@ -1981,9 +1982,10 @@ void MyMesh::handleCmdFrame(size_t len) {
       out_frame[0] = RESP_CODE_NO_MORE_MESSAGES;
       _serial->writeFrame(out_frame, 1);
 #if BLE_DEBUG_LOGGING
-      // bench test: how long the app took to pull the queue, to serial and the Radio console. The
-      // note is a message too, so the app syncs again for it: a sync of just that one isn't reported
-      if (_sync_count > 0 && (_sync_count > 1 || !_sync_noted)) {
+      // bench test: how long the app took to pull the queue, to serial and the Radio console. Only
+      // a backlog (/fill): a message coming in now and then is synced on its own, and the note is a
+      // message too, so the app syncs again for it
+      if (_sync_count >= SYNC_NOTE_MIN) {
         unsigned long ms = millis() - _sync_started;
         char link[64];
         _serial->describeLink(link, sizeof(link));
@@ -1993,9 +1995,6 @@ void MyMesh::handleCmdFrame(size_t len) {
                  _sync_phone_ms / _sync_count, link);
         Serial.println(note);
         consoleNote(note);
-        _sync_noted = true;
-      } else if (_sync_count > 0) {
-        _sync_noted = false;
       }
       _sync_count = 0;
 #endif

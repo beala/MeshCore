@@ -359,7 +359,6 @@ private:
   uint16_t _sync_count = 0;          // messages handed out in the sync now running (bench timing)
   unsigned long _sync_started = 0;
   unsigned long _sync_last_reply = 0, _sync_radio_ms = 0, _sync_phone_ms = 0;
-  bool _sync_noted = false;          // the last sync posted a note to the Radio console
 #endif
 
   struct AckTableEntry {
