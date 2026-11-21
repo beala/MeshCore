@@ -9,16 +9,29 @@
 #define BLE_RETRY_THROTTLE_MS      250    // Throttle retries to 250ms when queue buildup detected
 
 // Connection parameters (units: interval=1.25ms, timeout=10ms)
+// Idle: what the radio asks for while the app is quiet. Slave latency lets the radio skip
+// connection events it has nothing to send in, which saves power but holds each write from the app
+// until the radio next listens: up to (latency + 1) intervals, ~150 ms at 4
 #define BLE_MIN_CONN_INTERVAL      12     // 15ms
 #define BLE_MAX_CONN_INTERVAL      24     // 30ms
-// Slave latency lets the radio skip connection events it has nothing to send in, which saves a
-// little power but holds each write from the app until the radio next listens: up to (latency + 1)
-// intervals, ~150 ms at 4. A message sync is one write and one reply per message, so that wait
-// comes once per message. 0: the radio listens every interval. -D BLE_SLAVE_LATENCY=4 for the old
 #ifndef BLE_SLAVE_LATENCY
-#define BLE_SLAVE_LATENCY          0
+#define BLE_SLAVE_LATENCY          4
 #endif
 #define BLE_CONN_SUP_TIMEOUT       200    // 2000ms
+
+// Fast: while the app is busy (a message sync is one write and one reply per message, so each
+// round trip is a few connection events). Asked for at connect and when the app writes after a quiet
+// spell; back to idle after BLE_IDLE_AFTER_MS with nothing from the app. A phone may grant something
+// else (iOS has its own rules): the SYNC note shows what it gave. -D BLE_FAST_MODE=0: idle only
+#ifndef BLE_FAST_MODE
+#define BLE_FAST_MODE              1
+#endif
+#define BLE_FAST_CONN_INTERVAL     12     // 15ms, as both min and max
+#define BLE_FAST_SLAVE_LATENCY     0
+#ifndef BLE_IDLE_AFTER_MS
+#define BLE_IDLE_AFTER_MS          15000
+#endif
+#define BLE_PARAM_RETRY_MS         1000   // the SoftDevice was busy with another procedure: try again
 
 // Advertising parameters
 #define BLE_ADV_INTERVAL_MIN       32     // 20ms (units: 0.625ms)
@@ -69,25 +82,13 @@ void SerialBLEInterface::onSecured(uint16_t connection_handle) {
     if (instance->isValidConnection(connection_handle, true)) {
       instance->_isDeviceConnected = true;
       
-      // Connection interval units: 1.25ms, supervision timeout units: 10ms
       // Apple: "The product will not read or use the parameters in the Peripheral Preferred Connection Parameters characteristic."
-      // So we explicitly set it here to make Android & Apple match
-      ble_gap_conn_params_t conn_params;
-      conn_params.min_conn_interval = BLE_MIN_CONN_INTERVAL;
-      conn_params.max_conn_interval = BLE_MAX_CONN_INTERVAL;
-      conn_params.slave_latency = BLE_SLAVE_LATENCY;
-      conn_params.conn_sup_timeout = BLE_CONN_SUP_TIMEOUT;
-      
-      uint32_t err_code = sd_ble_gap_conn_param_update(connection_handle, &conn_params);
-      if (err_code == NRF_SUCCESS) {
-        BLE_DEBUG_PRINTLN("Connection parameter update requested: %u-%ums interval, latency=%u, %ums timeout",
-                         conn_params.min_conn_interval * 5 / 4,  // convert to ms (1.25ms units)
-                         conn_params.max_conn_interval * 5 / 4,
-                         conn_params.slave_latency,
-                         conn_params.conn_sup_timeout * 10);  // convert to ms (10ms units)
-      } else {
-        BLE_DEBUG_PRINTLN("Failed to request connection parameter update: %lu", err_code);
-      }
+      // So we explicitly ask here to make Android & Apple match. Fast first: the app fetches its
+      // contacts, channels and messages right after connecting. loop() sends the request
+      instance->_last_activity = millis();
+      instance->_fast_wanted = BLE_FAST_MODE;
+      instance->_params_sent = 2;   // neither: send whichever is wanted
+      instance->_params_retry_at = 0;
     } else {
       BLE_DEBUG_PRINTLN("onSecured: ignoring stale/duplicate callback");
     }
@@ -299,7 +300,36 @@ void SerialBLEInterface::closePairingWindow() {
   _pr_window = 2;
 }
 
+bool SerialBLEInterface::requestParams(bool fast) {
+  ble_gap_conn_params_t p;
+  p.min_conn_interval = fast ? BLE_FAST_CONN_INTERVAL : BLE_MIN_CONN_INTERVAL;
+  p.max_conn_interval = fast ? BLE_FAST_CONN_INTERVAL : BLE_MAX_CONN_INTERVAL;
+  p.slave_latency = fast ? BLE_FAST_SLAVE_LATENCY : BLE_SLAVE_LATENCY;
+  p.conn_sup_timeout = BLE_CONN_SUP_TIMEOUT;
+  uint32_t err = sd_ble_gap_conn_param_update(_conn_handle, &p);
+  BLE_DEBUG_PRINTLN("%s params requested: %u-%u (x1.25ms), latency=%u: err=%lu", fast ? "fast" : "idle",
+                    p.min_conn_interval, p.max_conn_interval, p.slave_latency, (unsigned long)err);
+  return err == NRF_SUCCESS;
+}
+
 void SerialBLEInterface::loop() {
+  // fast while the app is busy, idle after a quiet spell
+  if (isConnected()) {
+    unsigned long now = millis();
+    if (BLE_FAST_MODE) {
+      bool busy = (long)(now - _last_activity) < BLE_IDLE_AFTER_MS;
+      if (busy != _fast_wanted) _fast_wanted = busy;
+    }
+    if (_params_sent != (uint8_t)_fast_wanted && (_params_retry_at == 0 || (long)(now - _params_retry_at) >= 0)) {
+      if (requestParams(_fast_wanted)) {
+        _params_sent = _fast_wanted;
+        _params_retry_at = 0;
+      } else {
+        _params_retry_at = now + BLE_PARAM_RETRY_MS;
+      }
+    }
+  }
+
   if (_pw_open && _pw_bonded) {
     closePairingWindow();
     _pr_window = 3;
@@ -562,6 +592,7 @@ void SerialBLEInterface::onBleUartRX(uint16_t conn_handle) {
     instance->recv_queue[instance->recv_queue_len].len = read_len;
     instance->bleuart.readBytes(instance->recv_queue[instance->recv_queue_len].buf, read_len);
     instance->_last_rx_ms = millis();
+    instance->_last_activity = instance->_last_rx_ms;
     BLE_DEBUG_PRINTLN("rx: sz=%u, hdr=%u", (unsigned)read_len, (unsigned)instance->recv_queue[instance->recv_queue_len].buf[0]);
     instance->recv_queue_len++;
   }
@@ -582,8 +613,8 @@ void SerialBLEInterface::describeLink(char* out, size_t len) const {
     return;
   }
   unsigned x125 = conn->getConnectionInterval();   // 1.25 ms units, as now (Bluefruit tracks updates)
-  snprintf(out, len, "interval %u.%02u ms, latency %u, MTU %u", x125 * 5 / 4, (x125 * 125) % 100,
-           (unsigned)conn->getSlaveLatency(), (unsigned)conn->getMtu());
+  snprintf(out, len, "interval %u.%02u ms, latency %u, MTU %u (%s)", x125 * 5 / 4, (x125 * 125) % 100,
+           (unsigned)conn->getSlaveLatency(), (unsigned)conn->getMtu(), _params_sent == 1 ? "fast asked" : "idle asked");
 }
 
 bool SerialBLEInterface::hasPendingWrite() const {

@@ -16,6 +16,12 @@ class SerialBLEInterface : public BaseSerialInterface {
   unsigned long _last_health_check;
   unsigned long _last_retry_attempt;
   volatile unsigned long _last_rx_ms = 0;   // set in the Bluetooth task when a frame comes in
+  // fast while busy (SerialBLEInterface.cpp, BLE_FAST_MODE)
+  volatile unsigned long _last_activity = 0;   // the app's last write
+  volatile bool _fast_wanted = false;
+  uint8_t _params_sent = 2;                    // 0 idle, 1 fast, 2 neither yet (this connection)
+  unsigned long _params_retry_at = 0;
+  bool requestParams(bool fast);
 
   // The pairing window (docs/ble_pairing.md). Closed: no passkey is set, so the SoftDevice makes up a
   // random one per attempt and shows it nowhere, and a pairing request is answered with a disconnect.

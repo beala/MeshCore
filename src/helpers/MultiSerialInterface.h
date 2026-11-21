@@ -220,6 +220,39 @@ public:
     return 0;
   }
 
+  bool hasPendingWrite() const override {
+    if(!_enabled){
+      return false;
+    }
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.instance->isEnabled() && iface.instance->hasPendingWrite()) return true;
+    }
+    return false;
+  }
+
+  // the latest frame in from any of them
+  unsigned long lastRecvMillis() const override {
+    unsigned long latest = 0;
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.instance->isEnabled()){
+        unsigned long t = iface.instance->lastRecvMillis();
+        if(t != 0 && (latest == 0 || (long)(t - latest) > 0)) latest = t;
+      }
+    }
+    return latest;
+  }
+
+  // the connected one's link (Bluetooth is the only one that describes it)
+  void describeLink(char* out, size_t len) const override {
+    if(len) out[0] = 0;
+    for(auto iface : _interfaces){
+      if(iface.instance && iface.instance->isEnabled() && iface.instance->isConnected()){
+        iface.instance->describeLink(out, len);
+        if(len && out[0]) return;
+      }
+    }
+  }
+
   // the second channel (BaseSerialInterface::checkRecvSideFrame): only Bluetooth has one, and
   // the others' do nothing, so ask and answer them all
   size_t checkRecvSideFrame(uint8_t dest[]) override {
