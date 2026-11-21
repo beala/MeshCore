@@ -39,6 +39,31 @@ Not done: the ESP32 and RP2040 Bluetooth interfaces (the ESP32 one spaces writes
 fetching channels and contacts, which are the same one-at-a-time round trips (every connect asks for all 40 channel
 slots and the built-in channels).
 
+## Fewer round trips: the FluxCore extensions
+
+Going below about four connection events per message needs the app to ask for more than one at a time.
+FluxCore adds three commands for that (the frames are in `docs/companion_protocol.md`, section 9):
+
+- **A probe** (`CMD_GET_EXTENSIONS`, 0xF0) the app sends once per connection. Mainline answers it with
+  its usual unknown-command error, so an app that uses the extensions still works with mainline, at the
+  cost of one round trip per connect.
+- **Streamed channels** (`CMD_STREAM_CHANNELS`, 0xF1): every slot for one request, sent as fast as the
+  link drains, like contacts. The app sends the generation it has cached; if nothing has changed, the
+  reply is just a start and an end frame.
+- **Batch message sync** (`CMD_SYNC_BATCH`, 0xF3): up to 255 queued messages for one request. They stay
+  queued until the app confirms them in its next request, so a link that drops mid-sync loses nothing.
+  With `CMD_SYNC_NEXT_MESSAGE` a message leaves the queue when it's sent, and one in flight when the link
+  drops is lost. The SYNC note covers batch syncs too ("batches").
+
+The batch bookkeeping is in `examples/companion_radio/SyncBatch.h`, tested in `test/test_sync_batch`.
+Not bench-tested yet: the gains are estimates until someone measures them with `/fill` and the SYNC note.
+
+**Merged writes.** MeshCore One's channel code says the nRF52 can merge back-to-back writes and answer only
+the first. That was true of builds before upstream commit 73ab0d88 (Dec 2025), which read the UART FIFO
+from the main loop. Since then each write is taken from the FIFO in its own receive callback, so writes
+stay separate unless the 12-frame receive queue is full. A `BLE_DEBUG_LOGGING` build prints `rx: sz=` for
+each write and would show a merge.
+
 ## Measuring it
 
 `set dbg on` in the Radio console (off again with `set dbg off`, and at power-on) turns on two test aids:

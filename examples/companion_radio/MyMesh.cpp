@@ -72,6 +72,12 @@
 #define CMD_SEND_RAW_PACKET           65
 #define CMD_RUN_CLI_COMMAND           66  // v14+
 
+// FluxCore extensions (docs/ble_sync.md). Only answered after CMD_GET_EXTENSIONS with the magic,
+// so an app that doesn't know them never sees them; mainline answers ERR_CODE_UNSUPPORTED_CMD
+#define CMD_GET_EXTENSIONS            0xF0  // magic "FLX1", app's extension version
+#define CMD_STREAM_CHANNELS           0xF1  // the channel generation the app has (0 = none)
+#define CMD_SYNC_BATCH                0xF3  // most messages to send, how many of the last batch the app has
+
 // Stats sub-types for CMD_GET_STATS
 #define STATS_TYPE_CORE               0
 #define STATS_TYPE_RADIO              1
@@ -107,6 +113,15 @@
 #define RESP_CODE_CHANNEL_DATA_RECV   27
 #define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
 #define RESP_CODE_CLI_REPLY           29  // v14+, a reply to CMD_RUN_CLI_COMMAND
+#define RESP_CODE_EXTENSIONS          0xF0  // a reply to CMD_GET_EXTENSIONS
+#define RESP_CODE_CHANNELS_START      0xF1  // first reply to CMD_STREAM_CHANNELS: generation, slot count
+#define RESP_CODE_END_OF_CHANNELS     0xF2  // last reply to CMD_STREAM_CHANNELS: slots sent
+#define RESP_CODE_BATCH_END           0xF4  // last reply to CMD_SYNC_BATCH: sent, still queued
+
+#define FLX_MAGIC                     "FLX1"
+#define FLX_VERSION                   1
+#define FLX_FEATURE_STREAM_CHANNELS   (1u << 0)
+#define FLX_FEATURE_BATCH_SYNC        (1u << 1)
 
 #define MAX_CHANNEL_DATA_LENGTH       (MAX_FRAME_SIZE - 9)
 
@@ -241,6 +256,7 @@ void MyMesh::addToOfflineQueue(const uint8_t frame[], int len) {
           offline_queue[i] = offline_queue[i + 1];
         }
         MESH_DEBUG_PRINTLN("INFO: removed oldest channel message from queue.");
+        _batch.onRemoved(pos);   // one the app has but hasn't confirmed: it can't confirm it now
         offline_queue[offline_queue_len - 1].len = len;
         memcpy(offline_queue[offline_queue_len - 1].buf, frame, len);
         return;
@@ -267,6 +283,139 @@ int MyMesh::getFromOfflineQueue(uint8_t frame[]) {
     return len;
   }
   return 0; // queue is empty
+}
+
+// The CHANNEL_INFO frame for a slot, as CMD_GET_CHANNEL sends it: the built-in (synthetic)
+// slots after MAX_GROUP_CHANNELS, then the regular ones. False for a slot that doesn't exist.
+bool MyMesh::fillChannelInfoFrame(uint8_t channel_idx, uint8_t frame[], int& len) {
+  ChannelDetails channel;
+  bool found = isVirtualChannelSlot(channel_idx);
+  if (isMeshtasticChannel(channel_idx)) {
+    getMeshtasticChannel(channel);
+  } else if (isWeatherChannel(channel_idx)) {
+    getWeatherChannel(channel);
+  } else if (isDamagedChannel(channel_idx)) {
+    getDamagedChannel(channel);
+  } else if (isMetarChannel(channel_idx)) {
+    memset(&channel, 0, sizeof(channel));
+    strcpy(channel.name, "Airport weather");
+    uint8_t h[32];
+    const char* tag = "airport weather channel";
+    mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
+    memcpy(channel.channel.secret, h, 16);
+  } else if (isMeterChannel(channel_idx)) {
+    memset(&channel, 0, sizeof(channel));
+    strcpy(channel.name, "Meters");
+    uint8_t h[32];
+    const char* tag = "meters channel";
+    mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
+    memcpy(channel.channel.secret, h, 16);
+  } else if (isAircraftChannel(channel_idx)) {
+    memset(&channel, 0, sizeof(channel));
+    strcpy(channel.name, "Aircraft");
+    uint8_t h[32];
+    const char* tag = "aircraft channel";
+    mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
+    memcpy(channel.channel.secret, h, 16);
+  } else if (found) {
+    memset(&channel, 0, sizeof(channel));   // a synthetic slot whose feature is off: empty
+  } else {
+    found = getChannel(channel_idx, channel);
+  }
+  if (!found) return false;
+  int i = 0;
+  frame[i++] = RESP_CODE_CHANNEL_INFO;
+  frame[i++] = channel_idx;
+  memset(&frame[i], 0, 32);
+  StrHelper::strncpy((char *)&frame[i], channel.name, 32);
+  i += 32;
+  memcpy(&frame[i], channel.channel.secret, 16);
+  i += 16; // NOTE: only 128-bit supported
+  len = i;
+  return true;
+}
+
+void MyMesh::removeFromOfflineQueue(int n) {
+  if (n <= 0) return;
+  if (n > offline_queue_len) n = offline_queue_len;
+  for (int i = n; i < offline_queue_len; i++) offline_queue[i - n] = offline_queue[i];
+  offline_queue_len -= n;
+}
+
+// FNV-1a over every slot's CHANNEL_INFO frame: any change to what CMD_GET_CHANNEL would return
+// (a channel set from the app or the CLI, a built-in channel turned on or off, a restore) changes
+// it, with nothing to keep in step. The same channels give the same value after a reboot too.
+uint32_t MyMesh::channelGeneration() {
+  uint32_t h = 2166136261u;
+  uint8_t frame[MAX_FRAME_SIZE];
+  uint8_t n = channelSlotCount();
+  for (int idx = 0; idx < n; idx++) {
+    int len = 0;
+    if (!fillChannelInfoFrame(idx, frame, len)) {
+      frame[0] = 0xFF;   // a slot that isn't there
+      frame[1] = idx;
+      len = 2;
+    }
+    for (int i = 0; i < len; i++) {
+      h ^= frame[i];
+      h *= 16777619u;
+    }
+  }
+  return h == 0 ? 1 : h;   // 0 is the app's "nothing cached"
+}
+
+void MyMesh::resetExtensionState() {
+  _flx_on = false;
+  _ch_streaming = false;
+  _batch.cancel();   // unconfirmed messages stay queued for next time
+}
+
+// From the main loop, one frame per pass while the link has room, the way contacts are streamed
+void MyMesh::checkExtensionStreams() {
+  if (_ch_streaming) {
+    if (_ch_stream_next < _ch_stream_total) {
+      int len;
+      if (fillChannelInfoFrame(_ch_stream_next, out_frame, len)) {
+        if (_serial->writeFrame(out_frame, len) == 0) return;   // not taken: again next pass
+        _ch_stream_sent++;
+      }
+      _ch_stream_next++;
+    } else {
+      out_frame[0] = RESP_CODE_END_OF_CHANNELS;
+      out_frame[1] = _ch_stream_sent;
+      if (_serial->writeFrame(out_frame, 2) == 0) return;
+      _ch_streaming = false;
+    }
+    return;
+  }
+  if (_batch.sending) {
+    int idx = _batch.next(offline_queue_len);
+    if (idx >= 0) {
+      if (_serial->writeFrame(offline_queue[idx].buf, offline_queue[idx].len) == 0) return;
+      _batch.markSent();
+      _sync_count++;
+      _sync_last_reply = millis();
+    } else {
+      uint16_t queued = offline_queue_len - _batch.sent;
+      out_frame[0] = RESP_CODE_BATCH_END;
+      out_frame[1] = (uint8_t)_batch.sent;
+      memcpy(&out_frame[2], &queued, 2);
+      if (_serial->writeFrame(out_frame, 4) == 0) return;
+      _batch.sending = false;
+      if (_batch.sent == 0 && queued == 0) {   // the app has all of it
+        if (_dbg && _sync_count >= SYNC_NOTE_MIN) {
+          unsigned long ms = millis() - _sync_started;
+          char link[64];
+          _serial->describeLink(link, sizeof(link));
+          char note[200];
+          snprintf(note, sizeof(note), "SYNC: %u messages in %lu ms (%lu ms each, batches). Link: %s",
+                   (unsigned)_sync_count, ms, ms / _sync_count, link);
+          consoleNote(note);
+        }
+        _sync_count = 0;
+      }
+    }
+  }
 }
 
 float MyMesh::getAirtimeBudgetFactor() const {
@@ -1609,6 +1758,8 @@ void MyMesh::handleCmdFrame(size_t len) {
     MESH_DEBUG_PRINTLN("App %s connected", app_name);
 
     _iter_started = false; // stop any left-over ContactsIterator
+    _ch_streaming = false;   // and any left-over channel stream or batch (messages stay queued)
+    _batch.cancel();
     int i = fillSelfInfo(out_frame);
     _serial->writeFrame(out_frame, i);
   } else if (cmd_frame[0] == CMD_RUN_CLI_COMMAND && len >= 3) { // V14+
@@ -1957,6 +2108,7 @@ void MyMesh::handleCmdFrame(size_t len) {
       writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     }
   } else if (cmd_frame[0] == CMD_SYNC_NEXT_MESSAGE) {
+    _batch.cancel();   // back to one at a time: a batch's unconfirmed messages are still queued
     int out_len;
     // where each round trip goes: the radio, from the request arriving to the reply going out,
     // and the phone and link, from that reply going out to the next request arriving
@@ -2314,50 +2466,8 @@ void MyMesh::handleCmdFrame(size_t len) {
     stopConnection(pub_key);
     writeOKFrame();
   } else if (cmd_frame[0] == CMD_GET_CHANNEL && len >= 2) {
-    uint8_t channel_idx = cmd_frame[1];
-    ChannelDetails channel;
-    bool found = isVirtualChannelSlot(channel_idx);
-    if (isMeshtasticChannel(channel_idx)) {
-      getMeshtasticChannel(channel);
-    } else if (isWeatherChannel(channel_idx)) {
-      getWeatherChannel(channel);
-    } else if (isDamagedChannel(channel_idx)) {
-      getDamagedChannel(channel);
-    } else if (isMetarChannel(channel_idx)) {
-      memset(&channel, 0, sizeof(channel));
-      strcpy(channel.name, "Airport weather");
-      uint8_t h[32];
-      const char* tag = "airport weather channel";
-      mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
-      memcpy(channel.channel.secret, h, 16);
-    } else if (isMeterChannel(channel_idx)) {
-      memset(&channel, 0, sizeof(channel));
-      strcpy(channel.name, "Meters");
-      uint8_t h[32];
-      const char* tag = "meters channel";
-      mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
-      memcpy(channel.channel.secret, h, 16);
-    } else if (isAircraftChannel(channel_idx)) {
-      memset(&channel, 0, sizeof(channel));
-      strcpy(channel.name, "Aircraft");
-      uint8_t h[32];
-      const char* tag = "aircraft channel";
-      mesh::Utils::sha256(h, sizeof(h), (const uint8_t*) tag, strlen(tag));
-      memcpy(channel.channel.secret, h, 16);
-    } else if (found) {
-      memset(&channel, 0, sizeof(channel));   // a synthetic slot whose feature is off: empty
-    } else {
-      found = getChannel(channel_idx, channel);
-    }
-    if (found) {
-      int i = 0;
-      out_frame[i++] = RESP_CODE_CHANNEL_INFO;
-      out_frame[i++] = channel_idx;
-      memset(&out_frame[i], 0, 32);
-      StrHelper::strncpy((char *)&out_frame[i], channel.name, 32);
-      i += 32;
-      memcpy(&out_frame[i], channel.channel.secret, 16);
-      i += 16; // NOTE: only 128-bit supported
+    int i;
+    if (fillChannelInfoFrame(cmd_frame[1], out_frame, i)) {
       _serial->writeFrame(out_frame, i);
     } else {
       writeErrFrame(ERR_CODE_NOT_FOUND);
@@ -2658,6 +2768,43 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame(ERR_CODE_TABLE_FULL);
     }
+  } else if (cmd_frame[0] == CMD_GET_EXTENSIONS && len >= 6 && memcmp(&cmd_frame[1], FLX_MAGIC, 4) == 0) {
+    // the probe: without the magic it's an unknown command, as on mainline
+    _flx_on = true;
+    uint32_t features = FLX_FEATURE_STREAM_CHANNELS | FLX_FEATURE_BATCH_SYNC;
+    int i = 0;
+    out_frame[i++] = RESP_CODE_EXTENSIONS;
+    memcpy(&out_frame[i], FLX_MAGIC, 4);
+    i += 4;
+    out_frame[i++] = cmd_frame[5] < FLX_VERSION ? cmd_frame[5] : FLX_VERSION;
+    memcpy(&out_frame[i], &features, 4);
+    i += 4;
+    out_frame[i++] = OFFLINE_QUEUE_SIZE > 255 ? 255 : OFFLINE_QUEUE_SIZE;   // largest batch
+    _serial->writeFrame(out_frame, i);
+  } else if (cmd_frame[0] == CMD_STREAM_CHANNELS && len >= 5 && _flx_on) {
+    uint32_t cached;
+    memcpy(&cached, &cmd_frame[1], 4);
+    uint32_t gen = channelGeneration();
+    bool same = cached != 0 && cached == gen;   // nothing changed: no slots, just the start and end
+    _ch_stream_total = same ? 0 : channelSlotCount();
+    _ch_stream_next = 0;
+    _ch_stream_sent = 0;
+    out_frame[0] = RESP_CODE_CHANNELS_START;
+    memcpy(&out_frame[1], &gen, 4);
+    out_frame[5] = _ch_stream_total;
+    _serial->writeFrame(out_frame, 6);
+    _ch_streaming = true;   // the slots and the end frame go from the main loop
+  } else if (cmd_frame[0] == CMD_SYNC_BATCH && len >= 3 && _flx_on) {
+    // confirm what the app has of the last batch, then send the next one from the front of the
+    // queue without removing it: it goes only once the app confirms it in its next request
+    int n = _batch.confirm(cmd_frame[2]);
+    removeFromOfflineQueue(n);
+    if (n > 0 && _listener) _listener->onQueueSizeChanged(offline_queue_len);
+    if (_sync_count == 0) {
+      unsigned long rx = _serial->lastRecvMillis();
+      _sync_started = rx != 0 ? rx : millis();
+    }
+    _batch.start(cmd_frame[1]);   // the messages and the end frame go from the main loop
   } else {
     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
     MESH_DEBUG_PRINTLN("ERROR: unknown command: %02X", cmd_frame[0]);
@@ -3648,6 +3795,8 @@ void MyMesh::checkSerialInterface() {
   size_t len = _serial->checkRecvFrame(cmd_frame);
   if (len > 0) {
     handleCmdFrame(len);
+  } else if ((_ch_streaming || _batch.sending) && !_serial->isWriteBusy()) {
+    checkExtensionStreams();
   } else if (_iter_started              // check if our ContactsIterator is 'running'
              && !_serial->isWriteBusy() // don't spam the Serial Interface too quickly!
   ) {
@@ -3705,6 +3854,10 @@ void MyMesh::loop() {
     // display + long-press), so serve config commands on the otherwise unused USB serial
     checkCLIRescueCmd();
 #endif
+  }
+
+  if ((_flx_on || _ch_streaming || _batch.sent || _batch.sending) && !_serial->isConnected()) {
+    resetExtensionState();   // the app went away: unconfirmed messages go again on the next connect
   }
 
   // /fill: the test messages, once the app is gone, so they wait in the queue for the next sync

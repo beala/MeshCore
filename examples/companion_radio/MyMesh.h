@@ -24,6 +24,7 @@
 
 #include "DataStore.h"
 #include "NodePrefs.h"
+#include "SyncBatch.h"
 
 #include <RTClib.h>
 #include <helpers/ArduinoHelpers.h>
@@ -250,6 +251,14 @@ private:
   void updateContactFromFrame(ContactInfo &contact, uint32_t& last_mod, const uint8_t *frame, int len);
   void addToOfflineQueue(const uint8_t frame[], int len);
   int getFromOfflineQueue(uint8_t frame[]);
+  void removeFromOfflineQueue(int n);   // the first n
+
+  // FluxCore extensions (docs/ble_sync.md)
+  bool fillChannelInfoFrame(uint8_t channel_idx, uint8_t frame[], int& len);   // CHANNEL_INFO, as CMD_GET_CHANNEL sends it
+  uint8_t channelSlotCount() const { return MAX_GROUP_CHANNELS + virtualChannelCount(); }
+  uint32_t channelGeneration();   // changes whenever any slot's CHANNEL_INFO does, never 0
+  void checkExtensionStreams();   // the next streamed channel or batched message, from the main loop
+  void resetExtensionState();     // the app went away
   int getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) override { 
     return _store->getBlobByKey(key, key_len, dest_buf);
   }
@@ -356,6 +365,10 @@ private:
   uint16_t _fill_count = 0;          // /fill: test messages to add once the app disconnects
   uint8_t _fill_channel = 0;
   bool _dbg = false;                 // set dbg on: test aids (SYNC notes, /fill)
+  bool _flx_on = false;              // the app probed for the extensions on this connection
+  bool _ch_streaming = false;        // CMD_STREAM_CHANNELS: slots going out from the main loop
+  uint8_t _ch_stream_next = 0, _ch_stream_total = 0, _ch_stream_sent = 0;
+  SyncBatch _batch;                  // CMD_SYNC_BATCH: sent and not yet confirmed
   uint16_t _sync_count = 0;          // messages handed out in the sync now running (timing)
   unsigned long _sync_started = 0;
   unsigned long _sync_last_reply = 0, _sync_radio_ms = 0, _sync_phone_ms = 0;

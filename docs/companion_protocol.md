@@ -482,6 +482,59 @@ Byte 0: 0x14
 
 ---
 
+### 9. FluxCore extensions: probe, streamed channels, batch message sync
+
+FluxCore only, not in mainline MeshCore. An app sends the probe once per connection, after
+Device Query. Mainline answers it as it answers any command it doesn't know: `RESP_CODE_ERR` (1) with
+`ERR_CODE_UNSUPPORTED_CMD` (1). An error, a timeout (allow about 1 s) or a reply without the magic all
+mean mainline, and the app keeps to the commands above. The other two commands are answered only after a
+probe on the same connection; before it they get `ERR_CODE_UNSUPPORTED_CMD` too. Numbers are little-endian.
+
+**Probe** `CMD_GET_EXTENSIONS` (0xF0)
+
+| Byte | Request | Reply `RESP_CODE_EXTENSIONS` (0xF0) |
+|---|---|---|
+| 0 | 0xF0 | 0xF0 |
+| 1-4 | magic `FLX1` | magic `FLX1`, echoed |
+| 5 | highest extension version the app knows (1) | the version both speak (the lower of the two) |
+| 6-9 | | feature bits: bit 0 streamed channels, bit 1 batch message sync |
+| 10 | | largest batch the radio sends (`OFFLINE_QUEUE_SIZE`, at most 255) |
+
+**Streamed channels** `CMD_STREAM_CHANNELS` (0xF1), bytes 1-4: the channel generation the app has
+cached (0 = none). One request returns every slot, the way contacts are streamed:
+
+| Frame | Code | Bytes after the code |
+|---|---|---|
+| Start | `RESP_CODE_CHANNELS_START` (0xF1) | generation (4), slot count (1): 0 when the app's generation matched |
+| Each slot | `RESP_CODE_CHANNEL_INFO` (18) | as for Get Channel Info, built-in slots included |
+| End | `RESP_CODE_END_OF_CHANNELS` (0xF2) | slots sent (1) |
+
+The generation is a hash of every slot's `CHANNEL_INFO` frame, so anything that changes what Get Channel
+Info returns changes it: a channel set from the app or the CLI, or a built-in channel turned on or off.
+It is never 0, and the same channels give the same generation after a reboot.
+
+**Batch message sync** `CMD_SYNC_BATCH` (0xF3), byte 1: the most messages to send (0 = only
+confirm), byte 2: how many of the previous batch the app now has.
+
+The radio removes that many from the front of its queue (never more than it sent), then sends up to
+byte 1 messages from the front **without removing them**, in the same frames Get Message sends (16, 17,
+27, ...), then `RESP_CODE_BATCH_END` (0xF4): sent (1), still queued after those (2). The app stores
+them and confirms them in its next request. It is done when a batch comes back with 0 sent, which also
+confirms the one before:
+
+```
+SYNC_BATCH max=16 ack=0   -> 16 messages, BATCH_END sent=16 queued=4
+SYNC_BATCH max=16 ack=16  -> 4 messages,  BATCH_END sent=4 queued=0
+SYNC_BATCH max=16 ack=4   -> BATCH_END sent=0 queued=0
+```
+
+A link that drops mid-batch leaves the unconfirmed messages at the front of the queue, and they come
+again next time: the app may get duplicates but none are lost. `CMD_SYNC_NEXT_MESSAGE`, `CMD_APP_START`
+or a disconnect forgets the batch the same way. If the queue fills up and the radio drops a channel
+message the app hasn't confirmed, it lowers its sent count to match.
+
+---
+
 ## Channel Management
 
 ### Channel Types
