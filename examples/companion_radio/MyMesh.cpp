@@ -1937,12 +1937,25 @@ void MyMesh::handleCmdFrame(size_t len) {
     }
   } else if (cmd_frame[0] == CMD_SYNC_NEXT_MESSAGE) {
     int out_len;
+#if BLE_DEBUG_LOGGING
+    if (_sync_count == 0) _sync_started = millis();
+#endif
     if ((out_len = getFromOfflineQueue(out_frame)) > 0) {
       _serial->writeFrame(out_frame, out_len);
       if (_listener) _listener->onQueueSizeChanged(offline_queue_len);
+#if BLE_DEBUG_LOGGING
+      _sync_count++;
+#endif
     } else {
       out_frame[0] = RESP_CODE_NO_MORE_MESSAGES;
       _serial->writeFrame(out_frame, 1);
+#if BLE_DEBUG_LOGGING
+      if (_sync_count > 0) {   // bench test: how long the app took to pull the queue
+        unsigned long ms = millis() - _sync_started;
+        Serial.printf("SYNC: %u messages in %lu ms (%lu ms each)\n", (unsigned)_sync_count, ms, ms / _sync_count);
+      }
+      _sync_count = 0;
+#endif
     }
   } else if (cmd_frame[0] == CMD_SET_RADIO_PARAMS) {
     int i = 1;
@@ -3672,5 +3685,5 @@ bool MyMesh::advert() {
 
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {
-  return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0;
+  return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0 || (_serial && _serial->hasPendingWrite());
 }

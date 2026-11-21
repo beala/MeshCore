@@ -20,6 +20,8 @@ public:
   virtual bool isWriteBusy() const = 0;
   virtual size_t writeFrame(const uint8_t src[], size_t len) = 0;
   virtual size_t checkRecvFrame(uint8_t dest[]) = 0;
+  // frames written but not yet handed to the transport: the main loop shouldn't sleep on them
+  virtual bool hasPendingWrite() const { return false; }
 
   // A second channel on the same connection, for an app next to the MeshCore app (the fluxcore app):
   // its own frames in and out, so neither app sees the other's. Bluetooth only; others have none.

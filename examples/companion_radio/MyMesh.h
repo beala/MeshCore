@@ -353,6 +353,10 @@ private:
   };
   int offline_queue_len;
   Frame offline_queue[OFFLINE_QUEUE_SIZE];
+#if BLE_DEBUG_LOGGING
+  uint16_t _sync_count = 0;          // messages handed out in the sync now running (bench timing)
+  unsigned long _sync_started = 0;
+#endif
 
   struct AckTableEntry {
     unsigned long msg_sent;

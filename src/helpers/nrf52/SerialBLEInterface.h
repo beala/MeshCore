@@ -107,6 +107,7 @@ public:
   bool isEnabled() const override { return _isEnabled; }
   bool isConnected() const override;
   bool isWriteBusy() const override;
+  bool hasPendingWrite() const override;
   size_t writeFrame(const uint8_t src[], size_t len) override;
   size_t checkRecvFrame(uint8_t dest[]) override;
   size_t checkRecvSideFrame(uint8_t dest[]) override;
@@ -115,8 +116,9 @@ public:
 
 #if BLE_DEBUG_LOGGING && ARDUINO
   #include <Arduino.h>
-  #define BLE_DEBUG_PRINT(F, ...) Serial.printf("BLE: " F, ##__VA_ARGS__)
-  #define BLE_DEBUG_PRINTLN(F, ...) Serial.printf("BLE: " F "\n", ##__VA_ARGS__)
+  // each line starts with millis(), for timing a message sync (request in, reply out)
+  #define BLE_DEBUG_PRINT(F, ...) Serial.printf("BLE %lu: " F, (unsigned long)millis(), ##__VA_ARGS__)
+  #define BLE_DEBUG_PRINTLN(F, ...) Serial.printf("BLE %lu: " F "\n", (unsigned long)millis(), ##__VA_ARGS__)
 #else
   #define BLE_DEBUG_PRINT(...) {}
   #define BLE_DEBUG_PRINTLN(...) {}

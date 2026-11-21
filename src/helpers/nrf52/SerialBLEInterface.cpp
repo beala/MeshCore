@@ -11,7 +11,13 @@
 // Connection parameters (units: interval=1.25ms, timeout=10ms)
 #define BLE_MIN_CONN_INTERVAL      12     // 15ms
 #define BLE_MAX_CONN_INTERVAL      24     // 30ms
-#define BLE_SLAVE_LATENCY          4
+// Slave latency lets the radio skip connection events it has nothing to send in, which saves a
+// little power but holds each write from the app until the radio next listens: up to (latency + 1)
+// intervals, ~150 ms at 4. A message sync is one write and one reply per message, so that wait
+// comes once per message. 0: the radio listens every interval. -D BLE_SLAVE_LATENCY=4 for the old
+#ifndef BLE_SLAVE_LATENCY
+#define BLE_SLAVE_LATENCY          0
+#endif
 #define BLE_CONN_SUP_TIMEOUT       200    // 2000ms
 
 // Advertising parameters
@@ -139,6 +145,13 @@ void SerialBLEInterface::onBLEEvent(ble_evt_t* evt) {
     if (a->auth_status == BLE_GAP_SEC_STATUS_SUCCESS && instance->_pw_open) instance->_pw_bonded = true;   // one bond per window
   }
   
+  if (evt->header.evt_id == BLE_GAP_EVT_CONN_PARAM_UPDATE) {   // what the phone actually agreed to
+    const ble_gap_conn_params_t* cp = &evt->evt.gap_evt.params.conn_param_update.conn_params;
+    (void)cp;   // only read by the debug line
+    BLE_DEBUG_PRINTLN("conn params now: interval %u-%u (x1.25ms), latency=%u, timeout=%ums",
+                     cp->min_conn_interval, cp->max_conn_interval, cp->slave_latency, cp->conn_sup_timeout * 10);
+  }
+
   if (evt->header.evt_id == BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST) {
     uint16_t conn_handle = evt->evt.gap_evt.conn_handle;
     if (instance->isValidConnection(conn_handle)) {
@@ -419,6 +432,23 @@ size_t SerialBLEInterface::writeFrame(const uint8_t src[], size_t len) {
 
   bool connected = isConnected();
   if (connected && len > 0) {
+    // Nothing ahead of it: send it now rather than on the next pass of the main loop, which may
+    // first sleep until something else wakes it (a sync reply would wait out the loop for nothing)
+    if (send_queue_len == 0 &&
+        !(_last_retry_attempt > 0 && (millis() - _last_retry_attempt) < BLE_RETRY_THROTTLE_MS)) {
+      size_t written = bleuart.write(src, len);
+      if (written == len) {
+        BLE_DEBUG_PRINTLN("writeBytes: sz=%u, hdr=%u (direct)", (unsigned)len, (unsigned)src[0]);
+        _last_retry_attempt = 0;
+        return len;
+      } else if (written > 0) {
+        BLE_DEBUG_PRINTLN("writeBytes: partial write, sent=%u of %u, dropping corrupted frame", (unsigned)written, (unsigned)len);
+        _last_retry_attempt = 0;
+        return 0;
+      }
+      _last_retry_attempt = millis();   // the stack's buffers are full: queue it, retry after the throttle
+    }
+
     if (send_queue_len >= FRAME_QUEUE_SIZE) {
       BLE_DEBUG_PRINTLN("writeFrame(), send_queue is full!");
       return 0;
@@ -531,6 +561,7 @@ void SerialBLEInterface::onBleUartRX(uint16_t conn_handle) {
     int read_len = avail;
     instance->recv_queue[instance->recv_queue_len].len = read_len;
     instance->bleuart.readBytes(instance->recv_queue[instance->recv_queue_len].buf, read_len);
+    BLE_DEBUG_PRINTLN("rx: sz=%u, hdr=%u", (unsigned)read_len, (unsigned)instance->recv_queue[instance->recv_queue_len].buf[0]);
     instance->recv_queue_len++;
   }
 }
@@ -541,6 +572,14 @@ bool SerialBLEInterface::isConnected() const {
 
 bool SerialBLEInterface::isWriteBusy() const {
   return send_queue_len >= (FRAME_QUEUE_SIZE * 2 / 3);
+}
+
+bool SerialBLEInterface::hasPendingWrite() const {
+  if (!isConnected()) return false;
+  if (side_send_len > 0) return true;
+  if (send_queue_len == 0) return false;
+  // waiting out the retry throttle: nothing to do until it ends, so sleeping is fine
+  return !(_last_retry_attempt > 0 && (millis() - _last_retry_attempt) < BLE_RETRY_THROTTLE_MS);
 }
 
 // ---------- the fluxcore service
