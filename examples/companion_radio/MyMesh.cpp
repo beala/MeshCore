@@ -3898,5 +3898,7 @@ bool MyMesh::advert() {
 
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {
-  return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0 || (_serial && _serial->hasPendingWrite());
+  // a stream to the app (contacts, channels, a message batch) goes one frame per pass: no sleeping between
+  return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0 || (_serial && _serial->hasPendingWrite()) ||
+         _iter_started || _ch_streaming || _batch.sending;
 }

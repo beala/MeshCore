@@ -59,10 +59,10 @@ The batch bookkeeping is in `examples/companion_radio/SyncBatch.h`, tested in `t
 Not bench-tested yet: the gains are estimates until someone measures them with `/fill` and the SYNC note.
 
 **Merged writes.** MeshCore One's channel code says the nRF52 can merge back-to-back writes and answer only
-the first. That was true of builds before upstream commit 73ab0d88 (Dec 2025), which read the UART FIFO
-from the main loop. Since then each write is taken from the FIFO in its own receive callback, so writes
-stay separate unless the 12-frame receive queue is full. A `BLE_DEBUG_LOGGING` build prints `rx: sz=` for
-each write and would show a merge.
+the first. Reading the code, that was true of builds before upstream commit 73ab0d88 (Dec 2025), which
+read the UART FIFO from the main loop. Since then each write should be taken from the FIFO in its own
+receive callback, so writes stay separate unless the 12-frame receive queue is full. Not checked on a
+radio: a `BLE_DEBUG_LOGGING` build prints `rx: sz=` for each write and would show a merge.
 
 ## Measuring it
 
