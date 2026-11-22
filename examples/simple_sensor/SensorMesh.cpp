@@ -488,19 +488,21 @@ void SensorMesh::handleCommand(ClientInfo* from, uint32_t sender_timestamp, char
     reply[0] = 0;
   } else if (memcmp(command, "io ", 2) == 0) { // io {value}: write, io: read 
     if (command[2] == ' ') { // it's a write
+      char op = command[3];   // r, s or t: reset, set or toggle the given bits; otherwise a value
+      bool masked = op == 'r' || op == 's' || op == 't';
       unsigned int val;   // matches %x on every platform; uint32_t is long on ARM
+      // without a hex value sscanf leaves val unset, and writing that to the pins would set them at random
+      if (sscanf(&command[masked ? 4 : 3], "%x", &val) != 1) {
+        strcpy(reply, "Err - bad params");
+        return;
+      }
       uint32_t g = board.getGpio();
-      if (command[3] == 'r') { // reset bits
-        sscanf(&command[4], "%x", &val);
-        val = g & ~val;    
-      } else if (command[3] == 's') { // set bits
-        sscanf(&command[4], "%x", &val);
-        val |= g;    
-      } else if (command[3] == 't') { // toggle bits
-        sscanf(&command[4], "%x", &val);
-        val ^= g;    
-      } else { // set value
-        sscanf(&command[3], "%x", &val);
+      if (op == 'r') {
+        val = g & ~val;
+      } else if (op == 's') {
+        val |= g;
+      } else if (op == 't') {
+        val ^= g;
       }
       board.setGpio(val);
     }
