@@ -177,12 +177,17 @@ static RAK12035_SoilMoisture RAK12035;
 #endif
 
 #ifdef RAK_WISBLOCK_GPS
-static uint32_t gpsResetPin = 0;
 static bool i2cGPSFlag = false;
 static bool serialGPSFlag = false;
+static bool gpsUsingPowerSave = false;  // true = powerSaveMode; false = powerOff duty cycle
+static uint32_t gpsLastSleepMs = 0;
 #ifndef TELEM_RAK12500_ADDRESS
 #define TELEM_RAK12500_ADDRESS   0x42     //RAK12500 Ublox GPS via i2c
 #endif
+// How long the GPS sleeps per powerOff cycle when GPS is disabled and the module does
+// not support UBX-CFG-RXM powerSaveMode (protocol >= 27). After each interval the
+// module self-wakes; the loop() re-sleeps it until GPS is re-enabled.
+constexpr uint32_t GPS_POWEROFF_DURATION_MS = 3600000UL;  // 1 hour
 #include <SparkFun_u-blox_GNSS_Arduino_Library.h>
 static SFE_UBLOX_GNSS ublox_GNSS;
 
@@ -662,14 +667,6 @@ static const size_t SENSOR_TABLE_SIZE = (sizeof(SENSOR_TABLE) / sizeof(SENSOR_TA
 // ============================================================
 
 bool EnvironmentSensorManager::begin() {
-  #if ENV_INCLUDE_GPS
-  #ifdef RAK_WISBLOCK_GPS
-  rakGPSInit();
-  #else
-  initBasicGPS();
-  #endif
-  #endif
-
   #if ENV_PIN_SDA && ENV_PIN_SCL
     #ifdef NRF52_PLATFORM
   Wire1.setPins(ENV_PIN_SDA, ENV_PIN_SCL);
@@ -679,6 +676,16 @@ bool EnvironmentSensorManager::begin() {
   Wire1.begin(ENV_PIN_SDA, ENV_PIN_SCL, 100000);
     #endif
   MESH_DEBUG_PRINTLN("Second I2C initialized on pins SDA: %d SCL: %d", ENV_PIN_SDA, ENV_PIN_SCL);
+  #endif
+
+  // On RAK WisBlock boards, WB_IO2 is the 3V3_S switched-rail enable shared by all IO
+  // and sensor slots. Drive it HIGH and wait for the rail to stabilise before scanning,
+  // so sensors are powered and addressable. The old gpsIsAwake() LOW->HIGH pulse used to
+  // provide this settle time as a side effect; it has to be explicit now.
+  #ifdef RAK_WISBLOCK_GPS
+  pinMode(WB_IO2, OUTPUT);
+  digitalWrite(WB_IO2, HIGH);
+  delay(500);
   #endif
 
   // Scan the I2C bus before touching any sensor library.
@@ -710,6 +717,16 @@ bool EnvironmentSensorManager::begin() {
       _active_sensors[_active_sensor_count++] = { def.query, sub };
     }
   }
+
+  // GPS init runs after sensors are detected and initialized so that any pin activity
+  // during the GPS probe cannot disrupt the I2C scan or sensor startup.
+  #if ENV_INCLUDE_GPS
+  #ifdef RAK_WISBLOCK_GPS
+  rakGPSInit();
+  #else
+  initBasicGPS();
+  #endif
+  #endif
 
   return true;
 }
@@ -831,6 +848,8 @@ bool EnvironmentSensorManager::setSettingValue(const char* name, const char* val
 #if ENV_INCLUDE_GPS
 void EnvironmentSensorManager::initBasicGPS() {
 
+  if (gps_detected) return;
+
   Serial1.setPins(PIN_GPS_TX, PIN_GPS_RX);
 
   #ifdef GPS_BAUD_RATE
@@ -879,6 +898,8 @@ void EnvironmentSensorManager::initBasicGPS() {
 #ifdef RAK_WISBLOCK_GPS
 void EnvironmentSensorManager::rakGPSInit(){
 
+  if (gps_detected) return;
+
   Serial1.setPins(PIN_GPS_TX, PIN_GPS_RX);
 
   #ifdef GPS_BAUD_RATE
@@ -887,14 +908,16 @@ void EnvironmentSensorManager::rakGPSInit(){
   Serial1.begin(9600);
   #endif
 
-  //search for the correct IO standby pin depending on socket used
-  if(gpsIsAwake(WB_IO2)){
-  }
-  else if(gpsIsAwake(WB_IO4)){
-  }
-  else if(gpsIsAwake(WB_IO5)){
-  }
-  else{
+  // Probe each slot's enable pin. WB_IO2 (slot A) is also the 3V3_S rail enable, so
+  // gpsIsAwake() only ever drives it HIGH. IO4/IO5 are dedicated GPS_EN lines.
+  //
+  // The pin rotation always runs regardless of the I2C scan result. Users may configure
+  // their GPS module to a non-default address, which would not appear at 0x42 in the scan
+  // but will still respond correctly to ublox_GNSS.begin().
+  if (gpsIsAwake(WB_IO2)) {
+  } else if (gpsIsAwake(WB_IO4)) {
+  } else if (gpsIsAwake(WB_IO5)) {
+  } else {
     MESH_DEBUG_PRINTLN("No GPS found");
     gps_active = false;
     gps_detected = false;
@@ -918,11 +941,14 @@ bool EnvironmentSensorManager::gpsIsAwake(uint8_t ioPin){
   #endif
 
   #ifndef RAK_3401
-  //set initial waking state
-  pinMode(ioPin,OUTPUT);
-  digitalWrite(ioPin,LOW);
+  // Ensure the slot enable pin is HIGH. Do NOT pulse LOW first: on RAK19007 Socket A,
+  // WB_IO2 is also the 3V3_S switched-rail enable, so a LOW pulse would cut power to
+  // every other peripheral on the bus, including sensors begin() already initialized.
+  pinMode(ioPin, OUTPUT);
+  digitalWrite(ioPin, HIGH);
+  // The LOW pulse used to take this long. Keep the probe's timing: a serial GPS sends NMEA
+  // about once a second, and the Serial1 check below relies on it having sent something
   delay(500);
-  digitalWrite(ioPin,HIGH);
   #endif
 
   // give gps time to power up
@@ -941,7 +967,6 @@ bool EnvironmentSensorManager::gpsIsAwake(uint8_t ioPin){
     ublox_GNSS.enableGNSS(true, SFE_UBLOX_GNSS_ID_QZSS);
     ublox_GNSS.setMeasurementRate(1000);
     ublox_GNSS.saveConfigSelective(VAL_CFG_SUBSEC_IOPORT);
-    gpsResetPin = ioPin;
     i2cGPSFlag = true;
     gps_active = true;
     gps_detected = true;
@@ -950,20 +975,14 @@ bool EnvironmentSensorManager::gpsIsAwake(uint8_t ioPin){
     return true;
   } else if (Serial1.available()) {
     MESH_DEBUG_PRINTLN("Serial GPS init correctly and is turned on");
-#ifdef PIN_GPS_EN
-    if(PIN_GPS_EN){
-      gpsResetPin = PIN_GPS_EN;
-    }
-#endif
     serialGPSFlag = true;
     gps_active = true;
     gps_detected = true;
     return true;
   }
 
-  #ifndef RAK_3401
-  pinMode(ioPin, INPUT);
-  #endif
+  // Leave the pin HIGH on failure, do not set INPUT. WB_IO2 must stay HIGH to keep
+  // 3V3_S powered for any sensors already initialized on the bus.
   MESH_DEBUG_PRINTLN("GPS did not init with this IO pin... try the next");
   return false;
 }
@@ -972,11 +991,13 @@ bool EnvironmentSensorManager::gpsIsAwake(uint8_t ioPin){
 void EnvironmentSensorManager::start_gps() {
   gps_active = true;
   #ifdef RAK_WISBLOCK_GPS
-    #ifndef RAK_3401
-    pinMode(gpsResetPin, OUTPUT);
-    digitalWrite(gpsResetPin, HIGH);
-    #endif
-    return;
+  if (i2cGPSFlag && gpsUsingPowerSave) {
+    ublox_GNSS.powerSaveMode(false);
+  }
+  // For the powerOff path, any I2C query to the GPS address wakes the module, and the
+  // GPS loop issues one on its next update tick. Serial GPS just resumes polling.
+  // Neither path toggles WB_IO2 (3V3_S rail).
+  return;
   #endif
 
   _location->begin();
@@ -990,11 +1011,23 @@ void EnvironmentSensorManager::start_gps() {
 void EnvironmentSensorManager::stop_gps() {
   gps_active = false;
   #ifdef RAK_WISBLOCK_GPS
-    #ifndef RAK_3401 // rak3401 shouldn't turn off WB_IO2 as it powers the PA
-    pinMode(gpsResetPin, OUTPUT);
-    digitalWrite(gpsResetPin, LOW);
-    #endif
-    return;
+  if (i2cGPSFlag) {
+    // Use I2C power management, never toggle WB_IO2: it is the 3V3_S rail on every
+    // WisBlock base, and on RAK3401 it also powers the PA.
+    if (ublox_GNSS.powerSaveMode(true)) {
+      gpsUsingPowerSave = true;
+      MESH_DEBUG_PRINTLN("GPS entered power-save mode (UBX-CFG-RXM)");
+    } else {
+      // Protocol >= 27: powerSaveMode not supported. Use bounded powerOff instead.
+      // The module self-wakes after GPS_POWEROFF_DURATION_MS; loop() re-sleeps it.
+      gpsUsingPowerSave = false;
+      ublox_GNSS.powerOff(GPS_POWEROFF_DURATION_MS);
+      gpsLastSleepMs = millis();
+      MESH_DEBUG_PRINTLN("GPS powered off for %lu ms (UBX-RXM-PMREQ)", GPS_POWEROFF_DURATION_MS);
+    }
+  }
+  // Serial GPS: no I2C power management; polling simply stops while gps_active is false.
+  return;
   #endif
 
   _location->stop();
@@ -1013,6 +1046,16 @@ void EnvironmentSensorManager::loop() {
   if (gps_active) {
     _location->loop();
   }
+  #ifdef RAK_WISBLOCK_GPS
+  // For modules that don't support persistent powerSaveMode, re-issue powerOff each time
+  // the module self-wakes after its bounded sleep period, keeping it off while GPS is disabled.
+  if (gps_detected && !gps_active && i2cGPSFlag && !gpsUsingPowerSave) {
+    if ((uint32_t)(millis() - gpsLastSleepMs) >= GPS_POWEROFF_DURATION_MS) {
+      ublox_GNSS.powerOff(GPS_POWEROFF_DURATION_MS);
+      gpsLastSleepMs = millis();
+    }
+  }
+  #endif
   if ((long)(millis() - next_gps_update) > 0) {
 
     if(gps_active){
