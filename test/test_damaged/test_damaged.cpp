@@ -337,6 +337,19 @@ TEST(DamagedSender, IdHasEveryByteThePacketGives) {
   EXPECT_EQ(0, id.n);
 }
 
+TEST(DamagedSender, PathLenForTheAppsPathField) {
+  const uint8_t two[] = { TYPE_GRP_TXT << 2 | 1, 0x42, 0xA0, 0xA1, 0x7A, 0x3C, 0x11, 9, 9 };   // flood, 2 hops, 2-byte hashes
+  EXPECT_EQ(0x42, pathLen(two, sizeof(two)));
+  const uint8_t none[] = { TYPE_GRP_TXT << 2 | 1, 0, 0x11, 9, 9 };
+  EXPECT_EQ(0, pathLen(none, sizeof(none)));
+  const uint8_t transport[] = { TYPE_GRP_TXT << 2 | 0, 1, 2, 3, 4, 0x01, 0x7A, 0x11, 9, 9 };   // transport flood, 1 hop
+  EXPECT_EQ(1, pathLen(transport, sizeof(transport)));
+  const uint8_t direct[] = { TYPE_TXT_MSG << 2 | 2, 1, 0x77, 0x4C, 0x4E, 9, 9 };
+  EXPECT_EQ(0xFF, pathLen(direct, sizeof(direct)));
+  const uint8_t garbled[] = { 0xC5, 0 };
+  EXPECT_EQ(0xFF, pathLen(garbled, sizeof(garbled)));
+}
+
 TEST(DamagedSender, LastHopOrOriginator) {
   uint8_t s[32]; secretFor(16, s);
   auto p = channelPacket(s, "Bench: who sent this", NOW, 3);   // path a0 a1 a2

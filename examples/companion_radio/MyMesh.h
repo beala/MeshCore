@@ -533,6 +533,7 @@ public:
     uint8_t secret[PUB_KEY_SIZE];
     damaged::Copy c;             // the pieces, merged from copies
     int8_t snr_x4;
+    uint8_t path_len;            // the first copy's, for the app's path field (damaged::pathLen)
     uint8_t copies;
     bool whole_heard;            // an intact copy was heard too (shown only with 'set dmg.all on')
   };

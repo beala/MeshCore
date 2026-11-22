@@ -65,6 +65,11 @@ struct RadioId {
 static const int NAME_MIN_BYTES = 2;
 void senderId(const uint8_t* raw, int len, RadioId& out);
 
+// The packet's path length byte, for the app's path field as on an intact message: hop count in the
+// low 6 bits, hash size - 1 in the top 2. 0xFF (the app's "direct") for a direct-routed packet, or when
+// the header didn't come through and the path can't be told.
+uint8_t pathLen(const uint8_t* raw, int len);
+
 // One key's reading of a damaged packet.
 struct Result {
   uint8_t n;            // pieces from the start of the message to the end of the packet

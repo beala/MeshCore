@@ -137,6 +137,15 @@ void senderId(const uint8_t* raw, int len, RadioId& out) {
   out.n = (uint8_t) n;
 }
 
+uint8_t pathLen(const uint8_t* raw, int len) {
+  Layout l = parseHeader(raw, len);
+  if (l.payload_off == 0 || l.payload_len < 1) return 0xFF;
+  uint8_t route = raw[0] & PH_ROUTE_MASK;
+  if (route == ROUTE_TYPE_DIRECT || route == ROUTE_TYPE_TRANSPORT_DIRECT) return 0xFF;
+  int pl_at = route == ROUTE_TYPE_TRANSPORT_FLOOD ? 5 : 1;
+  return raw[pl_at];
+}
+
 int sender(const uint8_t* raw, int len) {
   RadioId id;
   senderId(raw, len, id);

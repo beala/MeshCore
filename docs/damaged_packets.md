@@ -9,9 +9,9 @@ dmg on
 ```
 
 ```
-Bob: [#Public, 1 of 5 lost] running late, be there ▒▒▒▒ minutes
-Alice: [#Public, fixed] anyone on the hill tonight?
-▒▒▒▒: [#Public, 2 of 4 lost] ▒▒▒▒ the trailhead at 6▒▒▒▒
+Bob: [Public, 1 of 5 lost] running late, be there ▒▒▒▒ minutes
+Alice: [#hiking, fixed] anyone on the hill tonight?
+▒▒▒▒: [Public, 2 of 4 lost] ▒▒▒▒ the trailhead at 6▒▒▒▒
 Carol: [direct, 2 of 6 lost] ▒▒▒▒the gate code is 4471, ▒▒▒▒
 ```
 
@@ -37,6 +37,10 @@ rest on and how they can go wrong are in [How it decides](#how-it-decides).
 
 Each post starts with a sender, because the app takes what's before the first `: ` as the name.
 
+The app's path field (hops) is filled from the packet's header, as for an intact message: the hop
+count of a flood packet, "direct" for a direct-routed one or when the header was hit. A post joined
+from several copies shows the first copy's path.
+
 - **A message that was read**: the sender is its author. For a channel message the author's name is
   part of the encrypted text (`Bob: ...`), so it's only known if that part came through; otherwise the
   sender shows as `▒▒▒▒`. For a direct message it's the contact whose key read it.
@@ -48,7 +52,7 @@ In the brackets:
 
 | Label | Meaning |
 |---|---|
-| `#Public`, `direct` | the channel, or a direct message to you |
+| `Public`, `#hiking`, `direct` | the channel by its name (only a hashtag channel's name starts with `#`), or a direct message to you |
 | `2 of 5 lost` | the message has 5 pieces of 16 bytes; 2 didn't read as text and show as ▒▒▒▒ |
 | `start lost`, `start and 2 more lost` | where the message starts wasn't found (see below), so how much is missing in front isn't known |
 | `unchecked` | every piece read as text, but the MAC doesn't match: the damage was in the header, the path or the MAC itself |

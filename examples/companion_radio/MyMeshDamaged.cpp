@@ -198,7 +198,8 @@ void MyMesh::damagedPostUnread(const uint8_t* raw, int len, int why, float snr) 
   int k = snprintf(text, MAX_FRAME_SIZE - 11, "%s: [%s, %+.0fdB] %s", from,
                    why == DMG_TOO_DAMAGED && !damaged::sizeFits(l) ? "unknown" : typeName(l.type), snr, detail);
   if (k < 0) return;
-  pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, getRTCClock()->getCurrentTimeUnique(), (int8_t)(snr * 4), 0,
+  pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, getRTCClock()->getCurrentTimeUnique(), (int8_t)(snr * 4),
+                  damaged::pathLen(raw, len),
                   text, strlen(text));
 }
 
@@ -320,7 +321,8 @@ void MyMesh::damagedPost(DamagedMsg& m) {
   if (m.copies > 1) strcat(state, m.c.fixed ? " from copies" : ", from copies");
   if (m.whole_heard) strcat(state, ", also heard whole");
   // The app takes what's before the first ": " as the sender's name, so the post starts with the name:
-  // "Bob: [#Public, 1 of 3 lost] text". For a channel the name is in the message itself: found only in
+  // "Bob: [Public, 1 of 3 lost] text" (a hashtag channel's name has its own #:
+  // "[#hiking, ...]"). For a channel the name is in the message itself: found only in
   // the text before the first lost piece, else "▒▒▒▒" (it was lost)
   static char body[MAX_FRAME_SIZE];
   damaged::showText(m.c.r, (damaged::Kind) m.kind, body, sizeof(body));
@@ -341,7 +343,7 @@ void MyMesh::damagedPost(DamagedMsg& m) {
   }
   // what fits in the app's frame after its 11-byte header, cut at a character boundary
   int cap = MAX_FRAME_SIZE - 11 + 1;
-  int k = m.kind == damaged::KIND_CHANNEL ? snprintf(text, cap, "%s: [#%s, %s] %s", sender, m.name, state, rest)
+  int k = m.kind == damaged::KIND_CHANNEL ? snprintf(text, cap, "%s: [%s, %s] %s", sender, m.name, state, rest)
                                           : snprintf(text, cap, "%s: [direct, %s] %s", sender, state, rest);
   if (k < 0) return;
   if (k >= cap) {   // cut short: drop a last character that lost its tail
@@ -354,7 +356,7 @@ void MyMesh::damagedPost(DamagedMsg& m) {
   }
   uint32_t ts = damaged::timestampOf(m.c.r);
   if (ts == 0) ts = getRTCClock()->getCurrentTimeUnique();
-  pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, ts, m.snr_x4, 0, text, strlen(text));
+  pushChannelText(MAX_GROUP_CHANNELS + VCH_DAMAGED, ts, m.snr_x4, m.path_len, text, strlen(text));
   _dmg_shown++;
   if (m.c.fixed) _dmg_fixed++;
   if (m.copies > 1) _dmg_joined++;
@@ -382,6 +384,7 @@ void MyMesh::damagedLoop() {
       in.at = millis() | 1;
       in.copies = 1;
       in.snr_x4 = (int8_t)(snr * 4);
+      in.path_len = damaged::pathLen(_dmg_raw, len);
       ev.n = in.c.r.n;
       ev.good = in.c.r.good | (in.c.r.first ? 0x8000 : 0) | (in.c.r.start_known ? 0x4000 : 0);
       if (damagedHadIntact(_dmg_raw, len, in.c.r)) {
