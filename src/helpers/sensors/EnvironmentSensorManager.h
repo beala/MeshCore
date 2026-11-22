@@ -20,7 +20,6 @@ protected:
   uint8_t      next_available_channel = TELEM_CHANNEL_SELF + 1;
 
   bool     gps_detected = false;
-  bool     gps_active = false;
   uint32_t gps_update_interval_sec = 1;
 
   KeyValueStore* _prefs = NULL;
@@ -31,10 +30,6 @@ protected:
   void start_gps();
   void stop_gps();
   void initBasicGPS();
-  #ifdef RAK_BOARD
-  void rakGPSInit();
-  bool gpsIsAwake(uint8_t ioPin);
-  #endif
   #endif
 
 public:

@@ -17,7 +17,7 @@ mkdir -p .pio/fuzz
 FLAGS="-std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize=shift-base -fno-sanitize-recover=all
   -I test/cli_mocks -I src -I $CRYPTO -I test/mocks -I lib/ed25519"
 
-CLI_SRC="src/helpers/CommonCLI.cpp src/helpers/CommonRadioPrefs.cpp src/helpers/RegionMap.cpp
+CLI_SRC="src/helpers/CommonCLI.cpp src/helpers/CommonRadioPrefs.cpp src/helpers/CommonGpsPrefs.cpp src/helpers/RegionMap.cpp
   src/helpers/ClientACL.cpp src/helpers/TransportKeyStore.cpp src/helpers/TxtDataHelpers.cpp
   src/helpers/AdvertDataHelpers.cpp src/helpers/ConfigSerializer.cpp src/helpers/DynamicConfigSerializer.cpp
   src/Identity.cpp src/Utils.cpp src/Packet.cpp

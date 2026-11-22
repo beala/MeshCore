@@ -9,7 +9,9 @@ class CustomLR2021 : public LR2021 {
   uint32_t _maxPayloadMillis = 3934;
   uint32_t _activityAt = 0;
   bool _headerSeen = false;
-  bool _rx_boosted = false;
+  // last applied gain level per RX path, mirroring RadioLib's gainModeLf/gainModeHf defaults
+  uint8_t _rx_gain_lf = RADIOLIB_LR2021_RX_BOOST_LF;
+  uint8_t _rx_gain_hf = RADIOLIB_LR2021_RX_BOOST_HF;
   bool _pram_pending = false;   // load the firmware patch on the next standby() (set before begin())
   int16_t _pram_status = RADIOLIB_ERR_UNKNOWN;
   uint16_t _pram_version = 0;   // patch type (high byte) and version (low byte) read back from the chip
@@ -425,13 +427,21 @@ private:
       return ((uint32_t)buff[2] << 24) | ((uint32_t)buff[3] << 16) | ((uint32_t)buff[4] << 8) | buff[5];
     }
 
+    bool isHighFreqPath() const { return freqMHz > RADIOLIB_LR2021_LF_CUTOFF_FREQ; }
+
     int16_t setRxBoostedGainMode(uint8_t level) {
-      int16_t state = LR2021::setRxBoostedGainMode(level);
-      if (state == RADIOLIB_ERR_NONE) _rx_boosted = level > 0;
-      return state;
+      uint8_t& applied = isHighFreqPath() ? _rx_gain_hf : _rx_gain_lf;
+      int16_t status = LR2021::setRxBoostedGainMode(level);
+      if (status == RADIOLIB_ERR_NONE) {
+        applied = level;
+      } else {
+        // RadioLib caches the level before sending it; restore it so the next startReceive keeps the old gain
+        LR2021::setRxBoostedGainMode(applied);
+      }
+      return status;
     }
 
-    bool getRxBoostedGainMode() const { return _rx_boosted; }
+    bool getRxBoostedGainMode() const { return (isHighFreqPath() ? _rx_gain_hf : _rx_gain_lf) != 0; }
 
     int16_t startReceive() override {
       if (_scan_loaded && _scan_extra_n > 0) return scanStart();

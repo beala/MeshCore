@@ -11,6 +11,7 @@ AbLabsNiceRFLR2021Board board;
 #ifdef DISPLAY_CLASS
   DISPLAY_CLASS display;
   MomentaryButton user_btn(PIN_USER_BTN, 1000, true, true);
+  UITask ui_task(&board, &display);
 
   #if defined(PIN_USER_BTN_ANA)
   MomentaryButton analog_btn(PIN_USER_BTN_ANA, 1000, 20);

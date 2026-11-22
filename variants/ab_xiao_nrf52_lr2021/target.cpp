@@ -11,6 +11,10 @@
 
 AbXiaoNrf52LR2021Board board;
 
+#ifdef DISPLAY_CLASS
+  UITask ui_task(&board, &display);
+#endif
+
 RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY, SPI);
 
 WRAPPER_CLASS radio_driver(radio, board);
