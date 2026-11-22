@@ -1019,7 +1019,10 @@ void SensorMesh::loop() {
   }
 
   uint32_t curr = getRTCClock()->getCurrentTime();
-  if (curr >= last_read_time + SENSOR_READ_INTERVAL_SECS) {
+  // Defer the read while a TX is in progress or just completed: the current spike
+  // sags battery voltage enough to falsely trigger low-battery alerts on weaker cells.
+  // The loop runs again in milliseconds, so the read is only deferred briefly.
+  if (curr >= last_read_time + SENSOR_READ_INTERVAL_SECS && board.isBattReadSafe(millis())) {
     telemetry.reset();
     telemetry.addVoltage(TELEM_CHANNEL_SELF, (float)board.getBattMilliVolts() / 1000.0f);
     // query other sensors -- target specific

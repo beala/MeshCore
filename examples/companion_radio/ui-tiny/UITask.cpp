@@ -778,7 +778,7 @@ void UITask::loop() {
 #endif
 
 #ifdef AUTO_SHUTDOWN_MILLIVOLTS
-  if (millis() > next_batt_chck) {
+  if (millis() > next_batt_chck && _board->isBattReadSafe(millis())) {  // not during or just after TX (voltage sag)
     _cached_batt_mv = getBattMilliVolts();
     if (_cached_batt_mv > 0 && _cached_batt_mv < AUTO_SHUTDOWN_MILLIVOLTS) {
       if(!board.isExternalPowered()) {

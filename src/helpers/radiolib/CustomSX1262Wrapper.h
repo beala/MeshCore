@@ -79,11 +79,13 @@ public:
   }
   bool linkSend(const uint8_t* bytes, int len) override {
     if (!_link_up || len < 6 || len > 255) return false;
+    _board->notifyTxStart();
     _board->onBeforeTransmit();   // eg. the Heltec V4's front end to transmit
     bool ok = ((CustomSX1262 *)_radio)->linkSend(bytes, (uint8_t)len) == RADIOLIB_ERR_NONE;
     logLink(ok ? 'T' : 'F', 0, bytes[2], len);
     clearIrqPending();            // that was TxDone; receive is armed again
     _board->onAfterTransmit();
+    _board->notifyTxComplete(millis());
     return ok;
   }
   int linkRecv(uint8_t* bytes, int sz, float* rssi) override {
