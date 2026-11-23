@@ -9,6 +9,7 @@
 #   .pio/fuzz/fuzz_wxsensor -max_len=400 -max_total_time=60 .pio/fuzz/corpus_wxsensor
 #   .pio/fuzz/fuzz_clone -max_len=2000 -max_total_time=60 .pio/fuzz/corpus_clone
 #   .pio/fuzz/fuzz_damaged -max_len=300 -max_total_time=60 .pio/fuzz/corpus_damaged
+#   .pio/fuzz/fuzz_geo -max_len=400 -max_total_time=60 .pio/fuzz/corpus_geo
 set -e
 cd "$(dirname "$0")/../.."
 CRYPTO=.pio/libdeps/native_cli/Crypto
@@ -79,6 +80,11 @@ clang++ $FLAGS test/fuzz/fuzz_damaged.cpp src/helpers/DamagedRx.cpp src/Utils.cp
   $CRYPTO/AES128.cpp $CRYPTO/AESCommon.cpp $CRYPTO/BlockCipher.cpp $CRYPTO/Crypto.cpp $CRYPTO/Hash.cpp \
   $CRYPTO/SHA256.cpp -o .pio/fuzz/fuzz_damaged
 echo "built .pio/fuzz/fuzz_damaged"
+
+# car geofence state machine and its CLI (header only)
+clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+  -I src test/fuzz/fuzz_geo.cpp -o .pio/fuzz/fuzz_geo
+echo "built .pio/fuzz/fuzz_geo"
 
 # Copying a radio: the clone transfer and CPace, with the real ChaCha20-Poly1305, SHA-2 and HKDF
 clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize=shift-base -fno-sanitize-recover=all \

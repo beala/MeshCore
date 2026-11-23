@@ -40,6 +40,28 @@ public:
   extern UITask ui_task;
 #endif
 
+#ifdef MOTION_WAKE_QMA6100P
+#include <helpers/sensors/QMA6100P.h>
+// Accelerometer motion wake (QMA6100P on INT1 = QMA_6100P_INT_PIN)
+struct MotionState {
+  bool ok = false;
+  uint8_t threshold = 4;        // ANY_MOT_TH, x 16 LSB of slope
+  uint8_t samples = 2;          // samples above the threshold
+  volatile uint32_t irqs = 0;   // INT1 rising edges
+  uint32_t events = 0;          // latched any-motion events read back
+  uint32_t last_ms = 0;
+  uint8_t last_st0 = 0;
+};
+extern QMA6100P motion;
+extern MotionState motion_state;
+bool motion_begin();       // powers the accelerometer and arms the any-motion interrupt
+void motion_end();         // powers it off
+uint32_t motion_events();  // count of motion events so far
+void button_begin();
+uint32_t button_presses(); // count of user button presses so far
+void gps_serial_end();     // close the GPS UART (GPS already off): starting the GPS reopens it
+#endif
+
 extern T1000eBoard board;
 extern WRAPPER_CLASS radio_driver;
 extern VolatileRTCClock rtc_clock;

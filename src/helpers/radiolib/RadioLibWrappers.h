@@ -31,6 +31,7 @@ protected:
   void idle();
   void startRecv();
   bool isIrqPending() const;   // the radio raised its IRQ pin and recvRaw() hasn't handled it yet
+  bool isIdleState() const;    // standby, nothing pending: not sending, not receiving
   void markIrqPending();       // as if the IRQ pin had been raised: the next recvRaw() reads the radio
   void clearIrqPending();      // the IRQ has been handled elsewhere
   float packetScoreInt(float snr, int sf, int packet_len);

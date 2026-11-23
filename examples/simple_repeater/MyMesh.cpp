@@ -1104,6 +1104,9 @@ void MyMesh::begin(FILESYSTEM *fs) {
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
+#if defined(GEOFENCE_WIFI)
+  geoBegin();
+#endif
 
   // establish default-scope
   {
@@ -1350,6 +1353,118 @@ void MyMesh::clearStats() {
   ((SimpleMeshTables *)getTables())->resetStats();
 }
 
+#if defined(USE_LR1110)
+// "wifi scan [ms_per_channel] [type b|g|*] [mode 1|2|4|5]": passive scan of 2.4 GHz channels 1-11
+// with the LR1110, listening ms_per_channel on each (beacons come every ~102 ms). Types (Semtech
+// lr11xx_wifi_types.h): b = 802.11b, g = 802.11g and n (mixed mode) together, * = b then g/n.
+// Modes: 1 beacons, 2 beacons and some packets, 4 full beacon (802.11b only), 5 up to the SSID
+// (LR1110 firmware 0x0306+), which names the networks. Over USB every result is printed; the
+// reply lists the strongest (MAC, RSSI, channel) as far as 160 characters allow.
+static CustomLR1110::WifiResult wifi_results[RADIOLIB_LR11X0_WIFI_MAX_NUM_RESULTS];   // static: ~1.4 KB
+
+// One Wi-Fi scan of channels 1-11, then LoRa put back as begin() does (the scan changes the
+// packet type), and back to sleep if the geofence has the radio asleep. fw_*: the LR1110 Wi-Fi
+// firmware, read while the radio is awake. Returns as CustomLR1110Wrapper::wifiScan().
+int MyMesh::wifiScanRestore(char type, uint8_t mode, uint16_t ms, CustomLR1110::WifiResult* out, int max,
+                            uint8_t* fw_major, uint8_t* fw_minor) {
+  const uint16_t CHANNELS_1_TO_11 = 0x07FF;
+  int n = radio_driver.wifiScan(type, mode, CHANNELS_1_TO_11, ms, out, max);
+  if (n == CustomLR1110Wrapper::WIFI_SCAN_BUSY) return n;
+  radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+  radio_driver.setTxPower(_prefs.tx_power_dbm);
+  radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+  if (fw_major && fw_minor && !radio_driver.getWifiFirmware(*fw_major, *fw_minor)) *fw_major = *fw_minor = 0;
+#if defined(GEOFENCE_WIFI)
+  if (_geo_asleep) radio_driver.sleepRadio();
+#endif
+  return n;
+}
+
+void MyMesh::handleWifiScan(uint32_t sender_timestamp, const char* args, char* reply) {
+  unsigned long ms = 120;
+  char* end;
+  while (*args == ' ') args++;
+  if (*args >= '0' && *args <= '9') {
+    ms = strtoul(args, &end, 10);
+    args = end;
+  }
+  char type = '*';
+  unsigned long mode = 5;
+  while (*args == ' ') args++;
+  if (*args == 'b' || *args == 'g' || *args == 'n' || *args == '*') {
+    type = *args++;
+    while (*args == ' ') args++;
+    if (*args >= '0' && *args <= '9') {
+      mode = strtoul(args, &end, 10);
+      args = end;
+    }
+  }
+  while (*args == ' ') args++;
+  // one pass blocks the loop for 11 x ms: keep it under ~2.3 s, past which USB output was lost
+  if (*args != 0 || ms < 20 || ms > 190 || mode < 1 || mode > 5 || mode == 3) {
+    strcpy(reply, "Err - wifi scan [ms 20-190] [b|g|*] [mode 1|2|4|5]");
+    return;
+  }
+
+  const unsigned long started = millis();
+  CustomLR1110::WifiResult* results = wifi_results;
+  uint8_t fw_major = 0, fw_minor = 0;
+  int n = wifiScanRestore(type, (uint8_t)mode, (uint16_t)ms, results, RADIOLIB_LR11X0_WIFI_MAX_NUM_RESULTS,
+                          &fw_major, &fw_minor);
+  const unsigned long took = millis() - started;
+  if (n == CustomLR1110Wrapper::WIFI_SCAN_BUSY) {
+    strcpy(reply, "Err - radio busy, try again");
+    return;
+  }
+  if (n < 0) {
+    sprintf(reply, "Err - scan failed (%d) wifi fw %u.%u", n, fw_major, fw_minor);
+    return;
+  }
+
+  // unique access points, strongest first
+  struct Ap { uint8_t mac[6]; int8_t rssi; uint8_t ch; };
+  Ap aps[RADIOLIB_LR11X0_WIFI_MAX_NUM_RESULTS];
+  int num_aps = 0;
+  for (int i = 0; i < n; i++) {
+    const CustomLR1110::WifiResult& r = results[i];
+    const int ch = r.channel;
+    if (sender_timestamp == 0) {   // local USB: everything
+      Serial.printf("wifi %02X:%02X:%02X:%02X:%02X:%02X %4d dBm%s ch%-2d %c '%s'\n",
+                    r.mac[0], r.mac[1], r.mac[2], r.mac[3], r.mac[4], r.mac[5], (int)r.rssi,
+                    r.rssi_valid ? "" : "?", ch, r.type, r.ssid);
+    }
+    int j = 0;
+    while (j < num_aps && memcmp(aps[j].mac, r.mac, 6) != 0) j++;
+    if (j == num_aps) {
+      memcpy(aps[num_aps].mac, r.mac, 6);
+      aps[num_aps].rssi = (int8_t)r.rssi;
+      aps[num_aps].ch = (uint8_t)ch;
+      num_aps++;
+    } else if ((int8_t)r.rssi > aps[j].rssi) {
+      aps[j].rssi = (int8_t)r.rssi;
+    }
+  }
+  for (int i = 1; i < num_aps; i++) {   // insertion sort by RSSI, strongest first
+    Ap a = aps[i];
+    int j = i - 1;
+    while (j >= 0 && aps[j].rssi < a.rssi) { aps[j + 1] = aps[j]; j--; }
+    aps[j + 1] = a;
+  }
+
+  int len = snprintf(reply, 160, "fw%u.%u pt%u/%d %d/%d %lums", fw_major, fw_minor,
+                     radio_driver._wifi_pkt_type, radio_driver._wifi_restore_err, num_aps, n, took);
+  for (int i = 0; i < num_aps; i++) {
+    char item[24];
+    int il = snprintf(item, sizeof(item), " %02X%02X%02X%02X%02X%02X %d c%u",
+                      aps[i].mac[0], aps[i].mac[1], aps[i].mac[2], aps[i].mac[3], aps[i].mac[4],
+                      aps[i].mac[5], aps[i].rssi, aps[i].ch);
+    if (len + il >= 160) break;
+    memcpy(reply + len, item, il + 1);
+    len += il;
+  }
+}
+#endif
+
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
   if (region_load_active) {
     if (StrHelper::isBlank(command)) {  // empty/blank line, signal to terminate 'load' operation
@@ -1442,6 +1557,40 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+#if defined(MOTION_WAKE_QMA6100P)
+  } else if (strcmp(command, "motion") == 0) {
+    if (!motion_state.ok) {
+      sprintf(reply, "Err - accelerometer: %s", motion.probeInfo());
+    } else {
+      char last[16] = "never";
+      if (motion_state.events > 0) snprintf(last, sizeof(last), "%lus ago", (unsigned long)((millis() - motion_state.last_ms) / 1000));
+      sprintf(reply, "> addr %02X th %u n %u irq %lu ev %lu last %s st %02X", motion.address(), motion_state.threshold,
+              motion_state.samples, (unsigned long)motion_state.irqs, (unsigned long)motion_state.events, last, motion_state.last_st0);
+    }
+  } else if (strcmp(command, "motion init") == 0) {
+    motion_begin();
+    sprintf(reply, "%s - %s", motion_state.ok ? "OK" : "Err", motion.probeInfo());
+  } else if (memcmp(command, "motion th ", 10) == 0 || memcmp(command, "motion n ", 9) == 0) {
+    const bool is_th = command[7] == 't';
+    char* end;
+    unsigned long v = strtoul(command + (is_th ? 10 : 9), &end, 10);
+    if (*end != 0 || (is_th ? (v < 1 || v > 255) : (v < 1 || v > 4))) {
+      strcpy(reply, is_th ? "Err - motion th 1-255" : "Err - motion n 1-4");
+    } else if (!(is_th ? motion.setThreshold((uint8_t)v) : motion.setSamples((uint8_t)v))) {
+      strcpy(reply, "Err - accelerometer write failed");
+    } else {
+      if (is_th) motion_state.threshold = (uint8_t)v; else motion_state.samples = (uint8_t)v;
+      strcpy(reply, "OK");
+    }
+#endif
+#if defined(GEOFENCE_WIFI)
+  } else if (handleGeoCommand(sender_timestamp, command, reply)) {
+    // done
+#endif
+#if defined(USE_LR1110)
+  } else if (memcmp(command, "wifi scan", 9) == 0 && (command[9] == 0 || command[9] == ' ')) {
+    handleWifiScan(sender_timestamp, command + 9, reply);
+#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
@@ -1450,6 +1599,16 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 void MyMesh::loop() {
 #ifdef WITH_BRIDGE
   bridge.loop();
+#endif
+
+#if defined(GEOFENCE_WIFI)
+  geoLoop();
+  if (_geo_asleep) {   // parked at home: no receive, no repeating, no adverts
+    uint32_t now = millis();
+    uptime_millis += now - last_millis;
+    last_millis = now;
+    return;
+  }
 #endif
 
   mesh::Mesh::loop();
@@ -1542,3 +1701,262 @@ bool MyMesh::hasPendingWork() const {
 #endif
   return _mgr->getOutboundTotal() > 0;
 }
+
+#if defined(GEOFENCE_WIFI)
+#define GEOFENCE_FILE "/geofence"
+
+void MyMesh::geoBegin() {
+  _geo_prefs.setDefaults();
+#if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
+  File f = _fs->open(GEOFENCE_FILE, FILE_O_READ);
+#else
+  File f = _fs->open(GEOFENCE_FILE, "r");
+#endif
+  if (f) {
+    GeoFencePrefs p;
+    if (f.read((uint8_t *)&p, sizeof(p)) == (int)sizeof(p) && p.isValid()) _geo_prefs = p;
+    f.close();
+  }
+  geoRestart();
+}
+
+void MyMesh::geoSave() {
+#if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
+  _fs->remove(GEOFENCE_FILE);
+  File f = _fs->open(GEOFENCE_FILE, FILE_O_WRITE);
+#elif defined(RP2040_PLATFORM)
+  File f = _fs->open(GEOFENCE_FILE, "w");
+#else
+  File f = _fs->open(GEOFENCE_FILE, "w", true);
+#endif
+  if (f) {
+    f.write((const uint8_t *)&_geo_prefs, sizeof(_geo_prefs));
+    f.close();
+  }
+}
+
+// After boot or "geo on/off": the accelerometer is powered only while the geofence is on
+void MyMesh::geoRestart() {
+  const uint32_t now = millis();
+  if (_geo_prefs.enabled && _geo_prefs.num_home > 0) {
+    if (!motion_state.ok) motion_begin();
+  } else {
+    motion_end();
+  }
+  _geo_motion_seen = motion_events();
+  _geo_btn_seen = button_presses();
+  _geo.begin(now);
+  _geo_sleep_wait = false;
+  if (_geo_asleep) geoSetAsleep(false);
+  geoLog('S');
+}
+
+void MyMesh::geoLog(char what, int8_t rssi, int16_t err) {
+  GeoLogEntry e;
+  e.err = err;
+  e.up_s = millis() / 1000;
+  e.what = what;
+  e.state = _geo.state();
+  e.rssi = rssi;
+  e.mv = board.getBattMilliVolts();
+  _geo_log.add(e);
+}
+
+// b pass first: every home AP seen on the bench beacons at 802.11b rates (120 ms per channel
+// saw home 25/25); a g/n pass only when b did not see home.
+GeoFence::ScanResult MyMesh::geoScan(int8_t& best_rssi) {
+  best_rssi = 0;
+  const char types[2] = { 'b', 'g' };
+  for (char type : types) {
+    int n = wifiScanRestore(type, 1, 120, wifi_results, RADIOLIB_LR11X0_WIFI_MAX_NUM_RESULTS);
+    if (n < 0) {   // busy (a packet in flight) or a radio error: retried
+      _geo_last_err = (int16_t)n;
+      return GeoFence::FAILED;
+    }
+    bool saw = false;
+    for (int i = 0; i < n; i++) {
+      if (_geo.isHome(wifi_results[i].mac)) {
+        if (!saw || wifi_results[i].rssi > best_rssi) best_rssi = wifi_results[i].rssi;
+        saw = true;
+      }
+    }
+    if (saw) return GeoFence::SAW_HOME;
+  }
+  return GeoFence::MISSED;
+}
+
+void MyMesh::geoSetAsleep(bool asleep) {
+  if (asleep) {
+    radio_driver.sleepRadio();
+    const char* gps = sensors.getSettingByKey("gps");
+    _geo_gps_was_on = gps && strcmp(gps, "1") == 0;
+    if (_geo_gps_was_on) sensors.setSettingValue("gps", "0");
+    // the GPS driver powers the GPS off but leaves its UART receiving (opened at boot): close it.
+    // Turning the GPS on opens it again.
+    gps_serial_end();
+    const uint32_t now = millis();
+    _geo_resleep_at = now + 5 * 60000UL;
+    _geo_battery_at = now + 30 * 60000UL;
+  } else {
+    radio_driver.wakeRadio();
+    radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+    radio_driver.setTxPower(_prefs.tx_power_dbm);
+    radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+    if (_geo_gps_was_on) sensors.setSettingValue("gps", "1");
+    _geo_gps_was_on = false;
+  }
+  _geo_asleep = asleep;
+  _geo_sleep_wait = false;
+}
+
+void MyMesh::geoLoop() {
+  const uint32_t now = millis();
+  const GeoFence::State before = _geo.state();
+
+  const uint32_t motion = motion_events();
+  if (motion != _geo_motion_seen) {
+    _geo_motion_seen = motion;
+    if (before != GeoFence::OFF) _geo.onMotion(now);
+  }
+  const uint32_t presses = button_presses();
+  if (presses != _geo_btn_seen) {
+    _geo_btn_seen = presses;
+    if (before != GeoFence::OFF) {
+      _geo.onButton(now);
+      geoLog('B');
+    }
+  }
+  if (_geo.scanDue(now)) {
+    int8_t best;
+    GeoFence::ScanResult r = geoScan(best);
+    _geo.onScan(millis(), r);
+    geoLog(r == GeoFence::SAW_HOME ? 'H' : r == GeoFence::MISSED ? 'M' : 'F', best,
+           r == GeoFence::FAILED ? _geo_last_err : 0);
+  }
+  if (_geo.state() != before) geoLog('S');
+
+  if (_geo_asleep && (int32_t)(now - _geo_resleep_at) >= 0) {
+    radio_driver.sleepRadio();   // harmless if asleep; back to sleep if a command woke it to standby
+    _geo_resleep_at = now + 5 * 60000UL;
+  }
+  if (_geo_asleep && (int32_t)(now - _geo_battery_at) >= 0) {
+    geoLog('P');
+    _geo_battery_at = now + 30 * 60000UL;
+  }
+
+  if (!_geo.radioOn(now)) {
+    if (!_geo_asleep) {
+      if (!_geo_sleep_wait) {
+        _geo_sleep_wait = true;
+        _geo_sleep_since = now;
+      }
+      // let queued packets go out first (30 s at most), and never stop a send halfway
+      if (radio_driver.isInRecvMode() && (!hasPendingWork() || now - _geo_sleep_since > 30000)) {
+        geoSetAsleep(true);
+      }
+    }
+  } else {
+    _geo_sleep_wait = false;
+    if (_geo_asleep) geoSetAsleep(false);
+  }
+}
+
+// geo commands that need the radio or the board; the rest are in helpers/GeoFence.h.
+//   geo home set [min dBm]   save the APs heard now (park at home first), default -75
+//   geo home add [min dBm]   the same, keeping the APs already saved
+//   geo scan                 one geofence scan now: does it see home?
+//   geo log                  recent scans and state changes (USB prints all)
+bool MyMesh::handleGeoCommand(uint32_t sender_timestamp, const char* command, char* reply) {
+  const uint32_t now = millis();
+  const bool home_add = strncmp(command, "geo home add", 12) == 0;
+  if ((home_add || strncmp(command, "geo home set", 12) == 0) && (command[12] == 0 || command[12] == ' ')) {
+    long min_rssi = -75;   // the 3 home APs: -47..-74 from the bench; neighbours -80 and weaker
+    if (command[12] == ' ') {
+      char* end;
+      min_rssi = strtol(command + 13, &end, 10);
+      if (*end != 0 || min_rssi < -100 || min_rssi > -20) {
+        strcpy(reply, "Err - geo home set|add [min dBm -100..-20]");
+        return true;
+      }
+    }
+    // one scan does not hear every AP (bench: 1 of 3 sometimes): merge three, best RSSI per BSSID
+    const int SCANS = 3, MAX_APS = 64;
+    GeoScanAp aps[MAX_APS];
+    int n = 0;
+    for (int s = 0; s < SCANS; s++) {
+      int got = wifiScanRestore(s == SCANS - 1 ? '*' : 'b', 1, 120, wifi_results, RADIOLIB_LR11X0_WIFI_MAX_NUM_RESULTS);
+      if (got < 0) {
+        sprintf(reply, "Err - scan %s, try again", got == CustomLR1110Wrapper::WIFI_SCAN_BUSY ? "busy" : "failed");
+        return true;
+      }
+      for (int i = 0; i < got; i++) {
+        int j = 0;
+        while (j < n && memcmp(aps[j].mac, wifi_results[i].mac, 6) != 0) j++;
+        if (j == n) {
+          if (n == MAX_APS) continue;
+          memcpy(aps[n].mac, wifi_results[i].mac, 6);
+          aps[n++].rssi = wifi_results[i].rssi;
+        } else if (wifi_results[i].rssi > aps[j].rssi) {
+          aps[j].rssi = wifi_results[i].rssi;
+        }
+      }
+    }
+    int saved = _geo.setHome(aps, n, (int8_t)min_rssi, home_add);
+    if (saved == 0) {
+      sprintf(reply, "Err - no %sAP at %ld dBm or better (%d heard)", home_add ? "new " : "", min_rssi, n);
+      return true;
+    }
+    geoSave();
+    if (_geo_prefs.enabled) geoRestart();
+    int len = snprintf(reply, 160, "OK - %d home APs:", saved);
+    for (int i = 0; i < _geo_prefs.num_home && len < 140; i++) {
+      const uint8_t* m = _geo_prefs.home[i];
+      len += snprintf(reply + len, 160 - len, " ??%02X%02X%02X%02X%02X", m[0], m[1], m[2], m[3], m[4]);
+    }
+    return true;
+  }
+  if (strcmp(command, "geo scan") == 0) {
+    if (_geo_prefs.num_home == 0) {
+      strcpy(reply, "Err - no home APs: geo home set");
+      return true;
+    }
+    const uint32_t t0 = millis();
+    int8_t best;
+    GeoFence::ScanResult r = geoScan(best);
+    if (r == GeoFence::SAW_HOME) sprintf(reply, "> home seen, best %d dBm, %lu ms", best, (unsigned long)(millis() - t0));
+    else if (r == GeoFence::MISSED) sprintf(reply, "> home not seen, %lu ms", (unsigned long)(millis() - t0));
+    else strcpy(reply, "Err - scan busy or failed, try again");
+    return true;
+  }
+  if (strcmp(command, "geo log") == 0) {
+    int len = snprintf(reply, 160, "> %lu:", (unsigned long)_geo_log.total());
+    for (int i = _geo_log.count() - 1; i >= 0; i--) {   // oldest first
+      const GeoLogEntry& e = _geo_log.get(i);
+      if (sender_timestamp == 0) {
+        Serial.printf("geo %6lus %c %-7s %4d dBm %4u mV", (unsigned long)e.up_s, e.what,
+                      GeoFence::stateName((GeoFence::State)e.state), (int)e.rssi, (unsigned)e.mv);
+        if (e.what == 'F') Serial.printf(" err %d", (int)e.err);
+        Serial.println();
+      }
+    }
+    for (int i = 0; i < _geo_log.count() && len < 140; i++) {   // reply: newest first, as many as fit
+      const GeoLogEntry& e = _geo_log.get(i);
+      len += snprintf(reply + len, 160 - len, " %lu%c%d/%u", (unsigned long)e.up_s, e.what,
+                      (int)(e.what == 'F' ? e.err : e.rssi), (unsigned)e.mv);
+    }
+    return true;
+  }
+
+  bool changed, restart;
+  const GeoFence::State before = _geo.state();
+  if (!::handleGeoCommand(_geo, _geo_prefs, command, now, reply, changed, restart)) return false;
+  if (changed) geoSave();
+  if (restart) geoRestart();
+  else if (_geo.state() != before) geoLog('S');   // geo force
+  if (strcmp(command, "geo") == 0 && _geo_prefs.enabled && !motion_state.ok) {
+    int len = strlen(reply);
+    snprintf(reply + len, 160 - len, ", no accelerometer");
+  }
+  return true;
+}
+#endif

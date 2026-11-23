@@ -37,6 +37,11 @@
 #include <helpers/RoutingPolicy.h>
 #include "RateLimiter.h"
 
+#if defined(GEOFENCE_WIFI)
+#include <helpers/GeoFence.h>
+#include <helpers/RecentHistory.h>
+#endif
+
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
 #endif
@@ -238,7 +243,47 @@ public:
   void clearStats() override;
 
   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
+#if defined(USE_LR1110)
+  void handleWifiScan(uint32_t sender_timestamp, const char* args, char* reply);
+  int wifiScanRestore(char type, uint8_t mode, uint16_t ms, CustomLR1110::WifiResult* out, int max,
+                      uint8_t* fw_major = NULL, uint8_t* fw_minor = NULL);
+#endif
   void loop();
+
+#if defined(GEOFENCE_WIFI)
+  // Car geofence (helpers/GeoFence.h): parked at home -> radio asleep, mesh loop stopped
+  bool isGeoAsleep() const { return _geo_asleep; }
+private:
+  struct GeoLogEntry {
+    uint32_t up_s;      // uptime
+    char what;          // H home seen, M missed, F scan failed, S state change, B button, P battery
+    uint8_t state;      // GeoFence::State after it
+    int8_t rssi;        // scans: best home AP (0 none)
+    uint16_t mv;        // battery
+    int16_t err;        // F: the scan's error (-1000 radio busy, else RadioLib's)
+  };
+  GeoFencePrefs _geo_prefs;
+  GeoFence _geo{_geo_prefs};
+  RecentHistory<GeoLogEntry, 48> _geo_log;
+  bool _geo_asleep = false;
+  bool _geo_sleep_wait = false;
+  bool _geo_gps_was_on = false;
+  uint32_t _geo_sleep_since = 0;
+  uint32_t _geo_motion_seen = 0;
+  uint32_t _geo_btn_seen = 0;
+  uint32_t _geo_resleep_at = 0;   // asleep: put the radio back to sleep now and then (a CLI command may wake it)
+  uint32_t _geo_battery_at = 0;   // asleep: battery into the log now and then
+  int16_t _geo_last_err = 0;
+  void geoBegin();
+  void geoSave();
+  void geoRestart();
+  void geoLoop();
+  void geoSetAsleep(bool asleep);
+  void geoLog(char what, int8_t rssi = 0, int16_t err = 0);
+  GeoFence::ScanResult geoScan(int8_t& best_rssi);
+  bool handleGeoCommand(uint32_t sender_timestamp, const char* command, char* reply);
+public:
+#endif
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
