@@ -18,6 +18,9 @@ public:
     analogReadResolution(12);
     delay(10);
     float volts = (analogRead(BATTERY_PIN) * ADC_MULTIPLIER * AREF_VOLTAGE) / 4096;
+   #ifdef PIN_BAT_ADC_EN
+    digitalWrite(PIN_BAT_ADC_EN, LOW);   // the divider drains the battery while on
+   #endif
 
     analogReference(AR_DEFAULT);  // put back to default
     analogReadResolution(10);

@@ -73,7 +73,7 @@ void initVariant()
   digitalWrite(PIN_FLASH_EN, HIGH);
 
   pinMode(PIN_BAT_ADC_EN, OUTPUT);
-  digitalWrite(PIN_BAT_ADC_EN, HIGH);
+  digitalWrite(PIN_BAT_ADC_EN, LOW);   // divider on only while the battery is read
 
   pinMode(PIN_RTC_EN, OUTPUT);
   digitalWrite(PIN_RTC_EN, LOW);
