@@ -35,6 +35,7 @@ env:
     MeshTracker_X1_companion_radio_ble
     RAK_WisMesh_Tag_companion_radio_ble
     t1000e_companion_radio_ble
+    t1000e_repeater
     AB_Xiao_nrf52_LR2021_companion_radio_ble
     ab_labs_wisblock_nicerf_LoRa2021F33-2G4_companion_radio_ble
     RAK_3401_repeater
