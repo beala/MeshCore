@@ -163,6 +163,14 @@ public:
     }
   }
 
+  void setLedEnabled(bool enabled) override {
+    for(auto iface : _interfaces){
+      if(iface.instance){
+        iface.instance->setLedEnabled(enabled);
+      }
+    }
+  }
+
   bool isWriteBusy() const override {
     // not busy when disabled
     if(!_enabled){

@@ -1581,6 +1581,7 @@ bool MyMesh::isValidClientRepeatFreq(uint32_t f) const {
 
 void MyMesh::startInterface(BaseSerialInterface &serial) {
   _serial = &serial;
+  serial.setLedEnabled(!_prefs.led_off);
   serial.enable();
 }
 
@@ -3100,7 +3101,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   }
 #endif
 
-#if defined(PIN_STATUS_LED) || defined(PIN_STATUS_LED_R) || defined(P_LORA_TX_LED)
+#if defined(PIN_STATUS_LED) || defined(PIN_STATUS_LED_R) || defined(P_LORA_TX_LED) || defined(BLE_LED_PAIRING_BLINK)
   if (strcmp(command, "get led") == 0) {
     sprintf(reply, "> %s", _prefs.led_off ? "off" : "on");
     return true;
@@ -3109,6 +3110,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     if (strcmp(&command[8], "on") == 0 || strcmp(&command[8], "off") == 0) {
       _prefs.led_off = strcmp(&command[8], "off") == 0;
       radio_driver.setTxLedEnabled(!_prefs.led_off);
+      if (_serial) _serial->setLedEnabled(!_prefs.led_off);
       savePrefs();
       strcpy(reply, "OK");
     } else {

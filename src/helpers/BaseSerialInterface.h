@@ -5,6 +5,16 @@
 #define MAX_FRAME_SIZE  176   // +4 for transport codes (region scoping)
 #define PAIRING_WINDOW_MS  60000UL   // how long the Bluetooth pairing window stays open
 
+// RAK nRF52 Bluetooth builds: the nRF52 SerialBLEInterface drives LED_BLUE itself, in place of the
+// Bluefruit default (lit the whole time a phone is connected): a fast blink while the pairing window
+// is open, a slow one while no phone is connected, off once one is. 'set led off' turns it off with
+// the other LEDs, except for the pairing window. Not where LED_BLUE is the status LED (WisMesh Tag),
+// which the UI drives. Defined here so the companion's 'set led' command knows the board has this LED.
+#if defined(NRF52_PLATFORM) && defined(BLE_PIN_CODE) && defined(RAK_BOARD) && !defined(DISABLE_BLE_LED) \
+    && defined(LED_BLUE) && !(defined(PIN_STATUS_LED) && PIN_STATUS_LED == LED_BLUE)
+  #define BLE_LED_PAIRING_BLINK
+#endif
+
 class BaseSerialInterface {
 protected:
   BaseSerialInterface() { }
@@ -16,6 +26,9 @@ public:
 
   virtual bool isConnected() const = 0;
   virtual void loop() {};
+
+  // 'set led on/off' for an LED the interface drives itself (BLE_LED_PAIRING_BLINK); others have none
+  virtual void setLedEnabled(bool enabled) { (void)enabled; }
 
   virtual bool isWriteBusy() const = 0;
   virtual size_t writeFrame(const uint8_t src[], size_t len) = 0;

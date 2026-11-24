@@ -22,6 +22,9 @@ class SerialBLEInterface : public BaseSerialInterface {
   uint8_t _params_sent = 2;                    // 0 idle, 1 fast, 2 neither yet (this connection)
   unsigned long _params_retry_at = 0;
   bool requestParams(bool fast);
+  bool _led_enabled;     // 'set led on/off' (BLE_LED_PAIRING_BLINK boards only)
+  bool _led_lit;
+  unsigned long _last_led_toggle;
 
   // The pairing window (docs/ble_pairing.md). Closed: no passkey is set, so the SoftDevice makes up a
   // random one per attempt and shows it nowhere, and a pairing request is answered with a disconnect.
@@ -69,6 +72,8 @@ class SerialBLEInterface : public BaseSerialInterface {
   void shiftRecvQueueLeft();
   bool isValidConnection(uint16_t handle, bool requireWaitingForSecurity = false) const;
   bool isAdvertising() const;
+  void setLedLit(bool lit);
+  void updateLed();
   static void onConnect(uint16_t connection_handle);
   static void onDisconnect(uint16_t connection_handle, uint8_t reason);
   static void onSecured(uint16_t connection_handle);
@@ -87,6 +92,9 @@ public:
     _conn_handle = BLE_CONN_HANDLE_INVALID;
     _last_health_check = 0;
     _last_retry_attempt = 0;
+    _led_enabled = true;
+    _led_lit = false;
+    _last_led_toggle = 0;
     send_queue_len = 0;
     recv_queue_len = 0;
   }
@@ -112,6 +120,7 @@ public:
   void enable() override;
   void disable() override;
   bool isEnabled() const override { return _isEnabled; }
+  void setLedEnabled(bool enabled) override;
   bool isConnected() const override;
   bool isWriteBusy() const override;
   bool hasPendingWrite() const override;
