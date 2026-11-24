@@ -173,16 +173,19 @@ static RAK12035_SoilMoisture RAK12035;
 #endif
 
 #if ENV_INCLUDE_RAK12047
-#ifndef TELEM_RAK12047_ADDRESS
+// Fixed: the Sensirion SGP40 driver always talks to 0x59.
 #define TELEM_RAK12047_ADDRESS  0x59
-#endif
+#include <SensirionCore.h>
 #include <SensirionI2CSgp40.h>
 #include <SensirionGasIndexAlgorithm.h>
 static SensirionI2CSgp40       sgp40;
 static GasIndexAlgorithmParams sgp40_voc_params;
+static TwoWire*                sgp40_wire      = nullptr;
 static int32_t                 sgp40_voc_index = 0;
 static bool                    sgp40_active    = false;
-static uint32_t                sgp40_last_ms   = 0;
+static bool                    sgp40_waiting   = false;  // measure sent, result not read yet
+static uint32_t                sgp40_next_ms   = 0;      // when the next measurement is due
+static uint32_t                sgp40_sent_ms   = 0;
 #endif
 
 // ============================================================
@@ -478,11 +481,39 @@ static void query_rak12035(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
 #endif
 
 #if ENV_INCLUDE_RAK12047
-static uint8_t init_rak12047(TwoWire* wire, uint8_t addr) {
+#define SGP40_RH_DEFAULT  0x8000   // 50 %RH (no humidity compensation)
+#define SGP40_T_DEFAULT   0x6666   // 25 degC
+#define SGP40_MEASURE_MS  30       // measure command to result ready
+
+// The measurement is split in two (send, then read SGP40_MEASURE_MS later)
+// so the main loop never waits for the sensor.
+static bool sgp40_start_measure() {
+  uint8_t buf[8];
+  SensirionI2CTxFrame tx = SensirionI2CTxFrame::createWithUInt16Command(0x260F, buf, sizeof(buf));
+  uint16_t err = tx.addUInt16(SGP40_RH_DEFAULT);
+  err |= tx.addUInt16(SGP40_T_DEFAULT);
+  if (err) return false;
+  return SensirionI2CCommunication::sendFrame(TELEM_RAK12047_ADDRESS, tx, *sgp40_wire) == 0;
+}
+
+static bool sgp40_read_result(uint16_t& sraw) {
+  uint8_t buf[3];
+  SensirionI2CRxFrame rx(buf, sizeof(buf));
+  if (SensirionI2CCommunication::receiveFrame(TELEM_RAK12047_ADDRESS, 3, rx, *sgp40_wire) != 0) return false;
+  return rx.getUInt16(sraw) == 0;
+}
+
+static uint8_t init_rak12047(TwoWire* wire, uint8_t) {
   sgp40.begin(*wire);
   uint16_t serial[3];
   if (sgp40.getSerialNumber(serial, 3) != 0) return 0;
+  // An SGP41 sits at the same address and answers the serial-number read,
+  // but not the SGP40 measure command: only claim a chip that measures.
+  uint16_t sraw;
+  if (sgp40.measureRawSignal(SGP40_RH_DEFAULT, SGP40_T_DEFAULT, sraw) != 0) return 0;
+  sgp40_wire = wire;
   GasIndexAlgorithm_init(&sgp40_voc_params, GasIndexAlgorithm_ALGORITHM_TYPE_VOC);
+  sgp40_next_ms = millis() + 1000;
   sgp40_active = true;
   return 1;
 }
@@ -881,12 +912,25 @@ void EnvironmentSensorManager::loop() {
   #endif  // ENV_INCLUDE_BME680_BSEC
 
   #if ENV_INCLUDE_RAK12047
-  if (sgp40_active && (millis() - sgp40_last_ms >= 1000)) {
-    uint16_t sraw;
-    if (sgp40.measureRawSignal(0x8000, 0x6666, sraw) == 0) {
-      GasIndexAlgorithm_process(&sgp40_voc_params, (int32_t)sraw, &sgp40_voc_index);
+  if (sgp40_active) {
+    uint32_t now = millis();
+    if (sgp40_waiting) {
+      if (now - sgp40_sent_ms >= SGP40_MEASURE_MS) {
+        uint16_t sraw;
+        if (sgp40_read_result(sraw)) {
+          GasIndexAlgorithm_process(&sgp40_voc_params, (int32_t)sraw, &sgp40_voc_index);
+        }
+        sgp40_waiting = false;
+      }
+    } else if ((int32_t)(now - sgp40_next_ms) >= 0) {
+      // Keep a steady 1 s rate: the index algorithm assumes 1 s between samples.
+      sgp40_next_ms += 1000;
+      if ((int32_t)(now - sgp40_next_ms) >= 0) sgp40_next_ms = now + 1000;  // fell behind: resync
+      if (sgp40_start_measure()) {
+        sgp40_sent_ms = now;
+        sgp40_waiting = true;
+      }
     }
-    sgp40_last_ms = millis();
   }
   #endif  // ENV_INCLUDE_RAK12047
 }
