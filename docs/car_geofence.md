@@ -4,13 +4,19 @@
 
 A T1000-E repeater can live in your car on its battery alone. While the car is parked at home it stops repeating and puts its radio and GPS to sleep, so the battery lasts. When you drive away it notices and starts repeating again.
 
-**How it knows it's home.** You save your home Wi-Fi once. The T1000-E's LR1110 chip can listen for Wi-Fi access points without joining them, and it doesn't need a password. When the car has been still for 3 minutes, it listens. If it hears your home Wi-Fi twice, a minute apart, it goes to sleep.
+**How it knows it's home.** You save your home Wi-Fi once. The T1000-E's LR1110 chip can listen for Wi-Fi access points without joining them, and it doesn't need a password. When the car has been still for 3 minutes, it listens once. If it hears your home Wi-Fi, it goes to sleep. If not, it tries once more a minute later, then every 15 minutes while the car stays put. While you're driving it doesn't scan at all.
 
-**How it knows it's leaving.** Its motion sensor wakes it when the car moves. It listens for home Wi-Fi every 30 seconds, and after two misses in a row it starts repeating again. If it still hears home (someone shut the car door), it goes back to sleep. As a backup, it also listens once an hour while asleep.
+**How it knows it's leaving.** Its motion sensor wakes it when the car moves. It listens for home Wi-Fi, and after two misses 30 seconds apart it starts repeating again. If it still hears home (someone shut the car door), it goes straight back to sleep. A car being jostled at home scans at most once every 2 minutes. As a backup, it also listens once an hour while asleep.
 
 **Talking to it while it's asleep.** A sleeping repeater can't hear the mesh, so remote admin doesn't reach it. Press its button: the radio stays on for 10 minutes, then it goes back to sleep if it's still home.
 
-Away from home it's a normal repeater and doesn't scan Wi-Fi at all until the car has been still for 3 minutes.
+How often it scans:
+
+| Situation | Scans |
+|---|---|
+| Driving, or stops under 3 minutes | none |
+| Parked away from home | 2 in the first 4 minutes, then 4 an hour |
+| Parked at home, asleep | 1 an hour, plus 1 when the car is bumped (at most 1 every 2 minutes) |
 
 ### Setting it up
 
@@ -48,9 +54,9 @@ Commands for checking the hardware: `wifi scan [ms 20-190] [b|g|*] [mode]` lists
 
 **The state machine** (`src/helpers/GeoFence.h`, no hardware code, so it's tested on the host in `test/test_geofence` and fuzzed in `test/fuzz/fuzz_geo.cpp`):
 
-- **away**: repeating. Still for `geo still` seconds → scan. Two home hits 60 s apart → **home**. A miss scans again every 15 minutes while still. Motion restarts the wait.
+- **away**: repeating. Still for `geo still` seconds → scan. Home heard → **home**. A miss is tried once more 60 s later, then every 15 minutes while still. Motion restarts the wait (and the retry).
 - **home**: radio asleep. Motion, or a miss on the `geo check` backup scan → **leaving**.
-- **leaving**: radio asleep, scanning every 30 s. Two misses in a row → **away**. A hit once the car is still → **home**.
+- **leaving**: radio asleep. Scans at once, then every 30 s. Home heard → **home**. Two misses in a row → **away**. The first scan waits until 2 minutes after the previous one, so a car moved about at home (each movement goes home → leaving → home) scans at most once every 2 minutes; a real departure is noticed within about 2½ minutes.
 - A scan that fails (radio busy, chip error) is retried after 10 s and never counts as a miss.
 
 **Matching.** An access point that sends several networks gives each one a MAC address that differs only in the first byte, so matching ignores the first byte. A scan doesn't always hear every access point, so any one saved access point counts as home.

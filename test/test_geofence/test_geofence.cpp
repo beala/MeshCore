@@ -33,9 +33,9 @@ struct Rig {
     }
     return scans;
   }
-  // Park at home from AWAY: still, two home scans
+  // Park at home from AWAY: still, one home scan
   void parkHome() {
-    run(p.still_secs * S + 2 * M, GeoFence::SAW_HOME);
+    run(p.still_secs * S, GeoFence::SAW_HOME);
   }
 };
 
@@ -64,48 +64,53 @@ TEST(GeoFence, NoScanWhileMoving) {
   EXPECT_EQ(GeoFence::AWAY, r.geo.state());
 }
 
-TEST(GeoFence, ParksHomeAfterStillAndTwoScans) {
+TEST(GeoFence, ParksHomeAfterStillAndOneScan) {
   Rig r;
   r.run(179 * S, GeoFence::SAW_HOME);
   EXPECT_EQ(0u, r.geo.stats().scans);           // not still long enough yet
-  r.run(1 * S, GeoFence::SAW_HOME);
-  EXPECT_EQ(1u, r.geo.stats().scans);           // first scan at 180 s
-  EXPECT_EQ(GeoFence::AWAY, r.geo.state());
   EXPECT_TRUE(r.geo.radioOn(r.now));
-  r.run(59 * S, GeoFence::SAW_HOME);
-  EXPECT_EQ(GeoFence::AWAY, r.geo.state());     // confirm scan 60 s later
   r.run(1 * S, GeoFence::SAW_HOME);
+  EXPECT_EQ(1u, r.geo.stats().scans);           // one scan at 180 s, and home
   EXPECT_EQ(GeoFence::HOME, r.geo.state());
   EXPECT_FALSE(r.geo.radioOn(r.now));
   EXPECT_EQ(1u, r.geo.stats().to_home);
 }
 
-TEST(GeoFence, MotionBetweenScansStartsOver) {
+TEST(GeoFence, MissIsTriedOnceMoreAfterAMinute) {
   Rig r;
-  r.run(180 * S, GeoFence::SAW_HOME);           // one home scan
+  r.run(180 * S, GeoFence::MISSED);             // first scan misses (say, mid-move or a weak spot)
+  EXPECT_EQ(GeoFence::AWAY, r.geo.state());
+  r.run(59 * S, GeoFence::SAW_HOME);
+  EXPECT_EQ(1u, r.geo.stats().scans);
+  r.run(1 * S, GeoFence::SAW_HOME);             // retry a minute later
+  EXPECT_EQ(GeoFence::HOME, r.geo.state());
+  EXPECT_EQ(2u, r.geo.stats().scans);
+}
+
+TEST(GeoFence, MotionStartsOver) {
+  Rig r;
+  r.run(180 * S, GeoFence::MISSED);
   r.geo.onMotion(r.now);
-  r.run(179 * S, GeoFence::SAW_HOME);
+  r.run(179 * S, GeoFence::MISSED);
   EXPECT_EQ(1u, r.geo.stats().scans);           // waits for stillness again
-  r.run(61 * S, GeoFence::SAW_HOME);
-  EXPECT_EQ(GeoFence::HOME, r.geo.state());     // and needs two fresh scans
+  r.run(1 * S, GeoFence::MISSED);
+  EXPECT_EQ(2u, r.geo.stats().scans);
+  r.run(60 * S, GeoFence::MISSED);              // and gets its retry again
   EXPECT_EQ(3u, r.geo.stats().scans);
 }
 
-TEST(GeoFence, ParkedElsewhereRescansEvery15Minutes) {
+TEST(GeoFence, ParkedElsewhereScansTwiceThenEvery15Minutes) {
   Rig r;
-  int scans = r.run(180 * S + 60 * M, GeoFence::MISSED);
+  int scans = r.run(180 * S + 60 * S + 60 * M, GeoFence::MISSED);
   EXPECT_EQ(GeoFence::AWAY, r.geo.state());
   EXPECT_TRUE(r.geo.radioOn(r.now));
-  EXPECT_EQ(5, scans);                          // at 3 min, then every 15 min
+  EXPECT_EQ(6, scans);                          // at 3 min, 4 min, then every 15 min
 }
 
-TEST(GeoFence, MissThenHitStillNeedsTwoHits) {
+TEST(GeoFence, ParkedElsewhereAllDay) {
   Rig r;
-  r.run(180 * S, GeoFence::MISSED);
-  r.run(15 * M, GeoFence::SAW_HOME);            // one hit
-  EXPECT_EQ(GeoFence::AWAY, r.geo.state());
-  r.run(60 * S, GeoFence::SAW_HOME);
-  EXPECT_EQ(GeoFence::HOME, r.geo.state());
+  int scans = r.run(180 * S + 8 * 60 * M, GeoFence::MISSED, 10 * S);
+  EXPECT_LE(scans, 2 + 8 * 4);                  // bounded: no more than 4 an hour after the first two
 }
 
 TEST(GeoFence, HomeBackupScanHourly) {
@@ -122,7 +127,7 @@ TEST(GeoFence, HomeBackupScanHourly) {
 TEST(GeoFence, MotionAtHomeLeavesAfterTwoMisses) {
   Rig r;
   r.parkHome();
-  r.now += S;
+  r.run(10 * M, GeoFence::SAW_HOME);
   r.geo.onMotion(r.now);
   EXPECT_EQ(GeoFence::LEAVING, r.geo.state());
   EXPECT_FALSE(r.geo.radioOn(r.now));           // still asleep while checking
@@ -137,34 +142,64 @@ TEST(GeoFence, MotionAtHomeLeavesAfterTwoMisses) {
   EXPECT_EQ(1u, r.geo.stats().to_away);
 }
 
-TEST(GeoFence, BumpAtHomeGoesBackToSleep) {
+TEST(GeoFence, BumpAtHomeOneScanBackToSleep) {
   Rig r;
   r.parkHome();
+  r.run(10 * M, GeoFence::SAW_HOME);
+  const uint32_t before = r.geo.stats().scans;
   r.geo.onMotion(r.now);
-  r.run(179 * S, GeoFence::SAW_HOME);
-  EXPECT_EQ(GeoFence::LEAVING, r.geo.state());  // seen home, but not still long enough
-  r.run(31 * S, GeoFence::SAW_HOME);
-  EXPECT_EQ(GeoFence::HOME, r.geo.state());
+  r.run(1 * S, GeoFence::SAW_HOME);
+  EXPECT_EQ(GeoFence::HOME, r.geo.state());     // home heard: asleep again, no wait for stillness
+  EXPECT_EQ(before + 1, r.geo.stats().scans);
   EXPECT_FALSE(r.geo.radioOn(r.now));
 }
 
-TEST(GeoFence, OneMissAmongHitsDoesNotWake) {
+TEST(GeoFence, JostledAtHomeScansAtMostEvery2Minutes) {
   Rig r;
   r.parkHome();
+  r.run(10 * M, GeoFence::SAW_HOME);
+  const uint32_t before = r.geo.stats().scans;
+  for (int i = 0; i < 600; i++) {               // motion every second for 10 minutes, home heard
+    r.now += S;
+    r.geo.onMotion(r.now);
+    if (r.geo.scanDue(r.now)) r.geo.onScan(r.now, GeoFence::SAW_HOME);
+  }
+  EXPECT_LE(r.geo.stats().scans - before, 6u);  // at once, then one per 2 minutes
+  EXPECT_FALSE(r.geo.radioOn(r.now));
+}
+
+TEST(GeoFence, DriveOffJustAfterAHitStillWakes) {
+  Rig r;
+  r.parkHome();
+  r.run(10 * M, GeoFence::SAW_HOME);
+  r.geo.onMotion(r.now);
+  r.run(1 * S, GeoFence::SAW_HOME);             // bump: home, back to sleep
+  ASSERT_EQ(GeoFence::HOME, r.geo.state());
+  r.now += 5 * S;
+  r.geo.onMotion(r.now);                        // driving off 5 s later
+  r.run(119 * S, GeoFence::MISSED);
+  EXPECT_EQ(GeoFence::LEAVING, r.geo.state());  // next scan waits for the 2-minute gap
+  r.run(30 * S, GeoFence::MISSED);
+  EXPECT_EQ(GeoFence::AWAY, r.geo.state());     // repeating within 2.5 minutes
+  EXPECT_TRUE(r.geo.radioOn(r.now));
+}
+
+TEST(GeoFence, OneMissThenHitGoesBackToSleep) {
+  Rig r;
+  r.parkHome();
+  r.run(10 * M, GeoFence::SAW_HOME);
   r.geo.onMotion(r.now);
   r.geo.scanDue(r.now);
   r.geo.onScan(r.now, GeoFence::MISSED);        // one bad scan
-  r.run(30 * S, GeoFence::SAW_HOME);
-  r.run(30 * S, GeoFence::MISSED);              // not in a row
   EXPECT_EQ(GeoFence::LEAVING, r.geo.state());
-  r.run(5 * M, GeoFence::SAW_HOME);
+  r.run(30 * S, GeoFence::SAW_HOME);
   EXPECT_EQ(GeoFence::HOME, r.geo.state());
 }
 
 TEST(GeoFence, HourlyMissGoesToLeaving) {
   Rig r;
   r.parkHome();
-  r.run(58 * M, GeoFence::MISSED);              // parkHome() ended a minute after arriving
+  r.run(59 * M, GeoFence::MISSED);
   EXPECT_EQ(GeoFence::HOME, r.geo.state());     // backup scan is due 60 min after arriving
   r.run(1 * M, GeoFence::MISSED);
   EXPECT_EQ(GeoFence::LEAVING, r.geo.state());
@@ -176,6 +211,7 @@ TEST(GeoFence, HourlyMissGoesToLeaving) {
 TEST(GeoFence, FailedScansRetryAndNeverCount) {
   Rig r;
   r.parkHome();
+  r.run(10 * M, GeoFence::SAW_HOME);
   r.geo.onMotion(r.now);
   for (int i = 0; i < 20; i++) {
     r.run(10 * S, GeoFence::FAILED);
@@ -214,8 +250,8 @@ TEST(GeoFence, WorksAcrossMillisWrap) {
   Rig r(true, 0xFFFFFFFFu - 100 * S);
   r.parkHome();
   EXPECT_EQ(GeoFence::HOME, r.geo.state());
-  r.geo.onMotion(r.now);
-  r.run(2 * M, GeoFence::MISSED);
+  r.geo.onMotion(r.now);                        // right after parking: first scan after the 2-min gap
+  r.run(2 * M + 30 * S, GeoFence::MISSED);
   EXPECT_EQ(GeoFence::AWAY, r.geo.state());
 }
 
@@ -223,11 +259,11 @@ TEST(GeoFence, AsleepTimeCounted) {
   Rig r;
   r.parkHome();
   const uint32_t parked = r.now;
-  const uint32_t before = r.geo.homeMillis(r.now);   // parkHome() ran a minute past arriving
+  const uint32_t before = r.geo.homeMillis(r.now);
   r.run(120 * M, GeoFence::SAW_HOME);
   EXPECT_EQ(before + (r.now - parked), r.geo.homeMillis(r.now));
   r.geo.onMotion(r.now);
-  r.run(2 * M, GeoFence::MISSED);                     // left: the count stops
+  r.run(3 * M, GeoFence::MISSED);                     // left: the count stops
   const uint32_t total = r.geo.homeMillis(r.now);
   r.run(30 * M, GeoFence::MISSED);
   EXPECT_EQ(total, r.geo.homeMillis(r.now));

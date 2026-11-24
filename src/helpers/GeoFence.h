@@ -4,13 +4,14 @@
 // radio sleeps; when the car leaves home it repeats again. "Home" is a set of Wi-Fi access
 // points (BSSIDs) heard by a passive scan; motion (an accelerometer) tells when to scan.
 //
-//   AWAY     repeating. Once the car has been still for `still` seconds, scan; two scans that
-//            see home, CONFIRM_SECS apart -> HOME. A scan that misses waits AWAY_RESCAN_MINS
-//            (while still); motion starts the wait for stillness again.
+//   AWAY     repeating. Once the car has been still for `still` seconds, scan: home -> HOME.
+//            A miss is tried once more AWAY_RETRY_SECS later, then every AWAY_RESCAN_MINS (while
+//            still); motion starts the wait for stillness again. Driving: no scans at all.
 //   HOME     radio asleep, not repeating. A backup scan every `check` minutes; a miss -> LEAVING.
 //            Motion -> LEAVING.
-//   LEAVING  radio still asleep. Scan every LEAVE_SCAN_SECS: LEAVE_MISSES misses in a row ->
-//            AWAY; still for `still` seconds and the last scan saw home -> HOME.
+//   LEAVING  radio still asleep. Scan at once (but at most one scan per HOME_GAP_SECS, so a car
+//            jostled at home doesn't scan on every bump), then every LEAVE_SCAN_SECS: home ->
+//            HOME; LEAVE_MISSES misses in a row -> AWAY.
 //
 // Home Wi-Fi never goes out (the user's rule), so "home not heard" always means "not at home".
 // A scan that could not run (radio busy, error) is retried and never counts as a miss.
@@ -63,8 +64,9 @@ public:
   enum State : uint8_t { OFF, AWAY, HOME, LEAVING };
   enum ScanResult : uint8_t { SAW_HOME, MISSED, FAILED };
 
-  static const uint32_t CONFIRM_SECS = 60;       // AWAY: gap between the two home scans
-  static const uint32_t AWAY_RESCAN_MINS = 15;   // AWAY, still, home not seen: scan again after
+  static const uint32_t AWAY_RETRY_SECS = 60;    // AWAY, still: one more try after the first miss
+  static const uint32_t AWAY_RESCAN_MINS = 15;   // AWAY, still, home missed twice: scan again after
+  static const uint32_t HOME_GAP_SECS = 120;     // HOME, moved: at most one scan per this
   static const uint32_t LEAVE_SCAN_SECS = 30;
   static const uint8_t LEAVE_MISSES = 2;
   static const uint32_t RETRY_SECS = 10;         // a scan that could not run
@@ -83,8 +85,9 @@ private:
   uint32_t _last_motion = 0;
   bool _scan_set = false;
   uint32_t _scan_at = 0;
-  uint8_t _hits = 0;             // AWAY: home scans in a row
-  uint8_t _misses = 0;           // LEAVING: misses in a row
+  uint8_t _misses = 0;           // AWAY, LEAVING: misses in a row
+  bool _scanned = false;         // a scan has finished (_last_scan is set)
+  uint32_t _last_scan = 0;
   bool _awake = false;
   uint32_t _awake_until = 0;
   uint32_t _state_since = 0;
@@ -104,11 +107,13 @@ private:
     if (s == AWAY && _state != AWAY && _state != OFF) _stats.to_away++;
     _state = s;
     _state_since = now;
-    _hits = 0;
     _misses = 0;
     _scan_set = false;
     if (s == HOME) scanAt(now + (uint32_t)_p->check_mins * 60000);
-    if (s == LEAVING) scanAt(now);   // first scan at once
+    if (s == LEAVING) {   // first scan at once, unless one ran within HOME_GAP_SECS (moving about at home)
+      const uint32_t gap = HOME_GAP_SECS * 1000;
+      scanAt(_scanned && now - _last_scan < gap ? _last_scan + gap : now);
+    }
   }
 
 public:
@@ -146,7 +151,7 @@ public:
     _last_motion = now;
     if (_pinned) return;
     if (_state == AWAY) {          // moving: wait for stillness again
-      _hits = 0;
+      _misses = 0;
       _scan_set = false;
     } else if (_state == HOME) {
       enter(LEAVING, now);
@@ -182,18 +187,15 @@ public:
       return;
     }
     _stats.scans++;
+    _scanned = true;
+    _last_scan = now;
     const bool saw = r == SAW_HOME;
     if (saw) _stats.saw_home++; else _stats.missed++;
     switch (_state) {
-      case AWAY:
-        if (!saw) {
-          _hits = 0;
-          scanAt(now + AWAY_RESCAN_MINS * 60000);
-        } else if (++_hits >= 2) {
-          enter(HOME, now);
-        } else {
-          scanAt(now + CONFIRM_SECS * 1000);
-        }
+      case AWAY:   // still for still_secs: one hit is home; a miss is tried once more, then every 15 min
+        if (saw) enter(HOME, now);
+        else if (++_misses == 1) scanAt(now + AWAY_RETRY_SECS * 1000);
+        else scanAt(now + AWAY_RESCAN_MINS * 60000);
         break;
       case HOME:
         if (saw) {
@@ -206,8 +208,8 @@ public:
         break;
       case LEAVING:
         if (saw) {
-          _misses = 0;
-          if (still(now)) { enter(HOME, now); break; }
+          enter(HOME, now);   // moving again re-checks, at most once per HOME_GAP_SECS
+          break;
         } else if (++_misses >= LEAVE_MISSES) {
           enter(AWAY, now);
           break;
