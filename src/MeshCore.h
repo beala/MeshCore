@@ -92,6 +92,8 @@ public:
   virtual const char* getShutdownReasonString(uint8_t reason) { return "Not available"; }
   /** \brief  why the previous run crashed (e.g. "stack overwrite"), or NULL if it didn't or the board can't tell */
   virtual const char* getLastCrash() const { return NULL; }
+  /** \brief  the least free stack the main loop has had since boot, in bytes, or -1 if the board can't tell */
+  virtual int getLoopStackFreeMin() const { return -1; }
 
   virtual bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) { return false; }
 

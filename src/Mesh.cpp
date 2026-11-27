@@ -1,10 +1,15 @@
 #include "Mesh.h"
+#include "AesSiv.h"
 //#include <Arduino.h>
 
 namespace mesh {
 
 void Mesh::begin() {
   Dispatcher::begin();
+  // Run the AES hardware self-test now, while the stack is shallow. Left to the first v2 seal or open,
+  // it nests a whole second AES-SIV seal at the deepest point of a send or receive, which ran the nRF52
+  // loop stack (4 KB) into the heap and crashed the radio driver on the first v2 channel send.
+  AesSiv::usingHardwareAes();
 }
 
 bool Mesh::cancelQueued(const uint8_t* hash) {

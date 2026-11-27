@@ -84,6 +84,7 @@ __attribute__((noreturn)) void __stack_chk_fail(void) {
 #define CRASH_MAGIC      0x43525348u   // "CRSH"
 #define CRASH_HARD_FAULT 1
 #define CRASH_HUNG       2
+#define CRASH_LOOP_STACK 3
 struct CrashRecord {
   uint32_t magic, kind, pc, lr, cfsr;
   char task[8];
@@ -174,16 +175,41 @@ static void startHangDetector() {
   NRF_RTC2->TASKS_START = 1;
 }
 
+static TaskHandle_t loop_task_handle = NULL;
+static uint32_t stack_checked_at = 0;
+
 void NRF52Board::loop() {
   hang_secs = 0;
   if (!hang_armed) {   // armed by the first main loop, so long setup work never counts as a hang
     hang_armed = true;
+    loop_task_handle = xTaskGetCurrentTaskHandle();
     startHangDetector();
   }
+  // The loop task's stack (4 KB, fixed by the core) sits on the heap, and FreeRTOS only checks it at a
+  // task switch, so a deep call can run past its end into whatever was allocated below (the radio's
+  // RadioLib Module, for one) and crash much later somewhere unrelated. Once a second, see whether the
+  // bottom of the stack was ever written; if so, the heap is no longer trustworthy: say so and reboot.
+  uint32_t now = millis();
+  if (now - stack_checked_at >= 1000) {
+    stack_checked_at = now;
+    if (uxTaskGetStackHighWaterMark(loop_task_handle) == 0) {
+      const uint32_t no_frame[8] = { 0 };   // not a fault: there is no PC worth recording
+      recordCrash(CRASH_LOOP_STACK, no_frame);
+    }
+  }
+}
+
+// FreeRTOS fills each task's stack with a pattern when it starts; this counts what was never written
+int NRF52Board::getLoopStackFreeMin() const {
+  if (loop_task_handle == NULL) return -1;
+  return (int)uxTaskGetStackHighWaterMark(loop_task_handle) * (int)sizeof(StackType_t);
 }
 
 const char* NRF52Board::getLastCrash() const {
   static char text[96];
+  if (last_crash.magic == CRASH_MAGIC && last_crash.kind == CRASH_LOOP_STACK) {
+    return "loop stack overflow";
+  }
   if (last_crash.magic == CRASH_MAGIC) {
     snprintf(text, sizeof(text), "%s at 0x%08lx (lr 0x%08lx, cfsr 0x%08lx, task %s)",
              last_crash.kind == CRASH_HUNG ? "hung" : "hard fault", (unsigned long)last_crash.pc,

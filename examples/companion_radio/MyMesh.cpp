@@ -2836,6 +2836,15 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   if (strcmp(command, "crashtest hang") == 0) {
     while (true) { }
   }
+  if (memcmp(command, "crashtest stack ", 16) == 0) {   // use N more bytes of stack: past the end once N is big enough
+    int n = atoi(&command[16]);
+    if (n >= 64 && n <= 4096) {
+      volatile uint8_t big[n];
+      for (int i = 0; i < 64; i++) big[i] = 0x55;   // the deepest end, as an overflowing call would write it
+      sprintf(reply, "used %d more bytes", n + (big[0] - 0x55));
+      return true;
+    }
+  }
 #endif
   if (strcmp(command, "reboot") == 0) {
     board.reboot(); // doesn't return
@@ -3119,16 +3128,19 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
 #endif
 
   if (strcmp(command, "uptime") == 0 || strcmp(command, "get uptime") == 0) {
+    const int cap = 160;   // the smallest reply buffer handleCommand() is given is 166 bytes
     unsigned long secs = _ms->getMillis() / 1000;
     int n = sprintf(reply, "> up ");
     if (secs >= 86400) n += sprintf(&reply[n], "%lud ", secs / 86400);
     if (secs >= 3600) n += sprintf(&reply[n], "%luh ", (secs / 3600) % 24);
     n += sprintf(&reply[n], "%lum %lus", (secs / 60) % 60, secs % 60);
     if (board.isPwrMgtInitialised()) {   // why it last started, where the board can tell
-      n += sprintf(&reply[n], ", started by: %s", board.getResetReasonString(board.getResetReason()));
+      n += snprintf(&reply[n], cap - n, ", started by: %s", board.getResetReasonString(board.getResetReason()));
     }
     const char* crash = board.getLastCrash();
-    if (crash) sprintf(&reply[n], ". The run before crashed: %s", crash);
+    if (crash && n < cap) n += snprintf(&reply[n], cap - n, ". The run before crashed: %s", crash);
+    int stack_free = board.getLoopStackFreeMin();   // least free main-loop stack since boot
+    if (stack_free >= 0 && n < cap) snprintf(&reply[n], cap - n, ". Stack: %d B free", stack_free);
     return true;
   }
 
